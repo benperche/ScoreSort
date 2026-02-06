@@ -2,6 +2,11 @@
 
 A modern GUI application that automatically renames and reorganizes sheet music PDF files by instrument order for band, orchestra, and jazz ensemble arrangements.
 
+## Warning
+This project has been entirely vibe-coded with Claude. Literally 0 code has been written or comprehensively reviewed by a human, all changes have been made by prompting only. Use at your own risk - though the risk is hopefully fairly minimal for this application.
+
+I have only tested this on a Mac. If you find a problem, feel free to let me know by submitting a GitHub issue, but I do not make promises about updates - you are welcome to dump the file in your own copy of an AI bot and ask for fixes like I have been doing. 
+
 ## Features
 
 - **Automatic Instrument Detection**: Intelligently recognizes instrument types from filenames
@@ -33,6 +38,30 @@ A modern GUI application that automatically renames and reorganizes sheet music 
    ```bash
    python sheet_music_renamer_gui.py
    ```
+
+### Optional: Create an Automator Action (macOS)
+
+Always having to use the Terminal to open this is annoying. I have set up a small Mac Automator shortcut to do this for me.
+
+To create a macOS Automator workflow that launches the application:
+
+1. Open **Automator** (Applications → Automator)
+2. Create a new **Quick Action** (or **Application** for standalone)
+3. Search for and add a **Run Shell Script** action
+4. Set the shell to `/bin/bash`
+5. Enter the following script:
+   ```bash
+   /usr/bin/python3 /path/to/sheet_music_renamer_gui.py
+   ```
+   Replace `/path/to/` with the actual path to where you installed the script
+6. Save as "Sheet Music Renamer"
+7. The workflow will now appear in Services or launch as an app
+
+**Tip**: To find the full path to your script, navigate to the folder in Terminal and run:
+```bash
+pwd
+```
+Then append `/sheet_music_renamer_gui.py` to that path.
 
 ## How to Use
 
@@ -186,7 +215,7 @@ Your instrument orders and ensemble mode preference are automatically saved to:
 
 ## License
 
-Open source - feel free to modify and distribute as needed.
+MIT Licence - feel free to modify and distribute as needed.
 
 ## Support
 
