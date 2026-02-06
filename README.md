@@ -221,6 +221,10 @@ MIT Licence - feel free to modify and distribute as needed.
 
 For issues or feature requests, please check the project repository or contact the maintainer.
 
+## Recommendations
+If you find this useful, you would probably also be interested in PDF-BatchStitch by Notation Central, for combining together PDFs in varying quantities to make them easier to print. I am not affiliated with Notation Central at all, but I have saved hours with this tool:
+https://www.notationcentral.com/product/pdf-batchstitch/
+
 ---
 
 **Happy organizing!** 🎵
