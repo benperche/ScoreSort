@@ -322,10 +322,22 @@ def get_instrument_info(filename, instrument_order):
         if 1 <= potential_part <= 20:
             part_number = potential_part
 
-    # Try exact phrase matching (longer phrases first)
+    # Try exact phrase matching and prefer more specific instruments.
+    # This avoids generic terms (e.g. "clarinet") taking priority over
+    # specific ones (e.g. "bass clarinet") when both are present.
+    exact_matches = []
     for idx, instrument in enumerate(instrument_order):
-        if instrument in filename_lower:
-            return (idx, instrument, part_number)
+        words = instrument.split()
+        phrase_pattern = r'\b' + r'\s+'.join(re.escape(word) for word in words) + r'\b'
+        if re.search(phrase_pattern, filename_normalized):
+            exact_matches.append((idx, instrument))
+
+    if exact_matches:
+        # Prefer instruments with more words, then longer total phrase.
+        # Keep instrument order as the final tie-breaker.
+        exact_matches.sort(key=lambda item: (-len(item[1].split()), -len(item[1]), item[0]))
+        best_idx, best_instrument = exact_matches[0]
+        return (best_idx, best_instrument, part_number)
 
     # Try flexible word matching for multi-word instruments
     # Special handling for reversible instruments (where word order doesn't matter)
