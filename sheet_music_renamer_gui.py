@@ -46,6 +46,7 @@ DEFAULT_BAND_ORDER = [
     'sax tenor',
     'bari sax',
     'baritone sax',
+    'baritone saxophone',
     'bari saxophone',
     'sax bari',
     'saxophone bari',
@@ -117,6 +118,7 @@ DEFAULT_JAZZ_ORDER = [
     # Bari Sax
     'bari sax',
     'baritone sax',
+    'baritone saxophone',
     'bari saxophone',
     'sax bari',
     'saxophone bari',
@@ -409,8 +411,25 @@ class SheetMusicRenamerGUI:
             self.jazz_order = DEFAULT_JAZZ_ORDER
             self.is_jazz_mode = False
 
+        self._normalize_instrument_aliases()
+
         # Set current order based on mode
         self.update_instrument_order()
+
+    def _insert_alias_after(self, order_list, alias, anchor):
+        """Ensure alias exists in order_list, preferably after anchor."""
+        if alias in order_list:
+            return
+        try:
+            anchor_idx = order_list.index(anchor)
+            order_list.insert(anchor_idx + 1, alias)
+        except ValueError:
+            order_list.append(alias)
+
+    def _normalize_instrument_aliases(self):
+        """Backfill known aliases in existing saved preferences."""
+        self._insert_alias_after(self.band_order, 'baritone saxophone', 'baritone sax')
+        self._insert_alias_after(self.jazz_order, 'baritone saxophone', 'baritone sax')
 
     def save_config(self):
         """Save current configuration."""
