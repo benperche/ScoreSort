@@ -868,7 +868,10 @@ class SheetMusicRenamerGUI:
         self.rename_operations = []
 
         try:
-            pdf_files = list(self.folder_path.glob('*.pdf'))
+            pdf_files = [
+                entry for entry in self.folder_path.iterdir()
+                if entry.is_file() and entry.suffix.lower() == '.pdf'
+            ]
         except Exception as e:
             messagebox.showerror("Error", f"Could not read folder: {e}")
             return
