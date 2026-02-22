@@ -16,6 +16,8 @@ import Combine
 // MARK: - Main App
 @main
 struct MusicPDFManagerApp: App {
+    @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
+    
     var body: some Scene {
         WindowGroup {
             ContentView()
@@ -23,6 +25,13 @@ struct MusicPDFManagerApp: App {
         .commands {
             CommandGroup(replacing: .newItem) { }
         }
+    }
+}
+
+// MARK: - App Delegate
+class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        return true
     }
 }
 
@@ -1512,10 +1521,16 @@ struct SplitView: View {
                                     rotation: 0
                                 )
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                .contentShape(Rectangle())
+                                .onTapGesture {
+                                    isViewFocused = true
+                                }
                             }
                             .padding()
                         }
                         .frame(width: geometry.size.width * 0.5)
+                        .focusable()
+                        .focused($isViewFocused)
                         
                         Divider()
                         
@@ -1593,35 +1608,31 @@ struct SplitView: View {
                         }
                         .padding()
                         .frame(width: geometry.size.width * 0.5)
-                        .onKeyPress(.space) {
-                            if baseNameLocked && currentPage > 0 {
-                                if splitMarkers.contains(currentPage) {
-                                    splitMarkers.remove(currentPage)
-                                } else {
-                                    splitMarkers.insert(currentPage)
-                                }
-                                return .handled
+                    }
+                    .onKeyPress(.space) {
+                        if currentPage > 0 {
+                            if splitMarkers.contains(currentPage) {
+                                splitMarkers.remove(currentPage)
+                            } else {
+                                splitMarkers.insert(currentPage)
                             }
-                            return .ignored
+                            return .handled
                         }
-                        .onKeyPress(.leftArrow) {
-                            if baseNameLocked {
-                                if currentPage > 0 {
-                                    currentPage -= 1
-                                }
-                                return .handled
-                            }
-                            return .ignored
+                        return .ignored
+                    }
+                    .onKeyPress(.leftArrow) {
+                        if currentPage > 0 {
+                            currentPage -= 1
+                            return .handled
                         }
-                        .onKeyPress(.rightArrow) {
-                            if baseNameLocked {
-                                if currentPage < totalPages - 1 {
-                                    currentPage += 1
-                                }
-                                return .handled
-                            }
-                            return .ignored
+                        return .ignored
+                    }
+                    .onKeyPress(.rightArrow) {
+                        if currentPage < totalPages - 1 {
+                            currentPage += 1
+                            return .handled
                         }
+                        return .ignored
                     }
                 }
             } else {
@@ -1643,6 +1654,7 @@ struct SplitView: View {
                 if !baseNameLocked {
                     baseFileName = pdfManager.currentFileName ?? ""
                 }
+                isViewFocused = true
             } else {
                 splitMarkers.removeAll()
                 currentPage = 0
@@ -1766,20 +1778,6 @@ struct SplitControlsSection: View {
             }
         }
         .padding()
-        .onKeyPress(.space) {
-            if currentPage > 0 {
-                toggleMarker()
-            }
-            return .handled
-        }
-        .onKeyPress(.leftArrow) {
-            previousPage()
-            return .handled
-        }
-        .onKeyPress(.rightArrow) {
-            nextPage()
-            return .handled
-        }
     }
     
     private func toggleMarker() {
