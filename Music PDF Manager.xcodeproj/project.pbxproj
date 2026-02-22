@@ -7,7 +7,7 @@
 	objects = {
 
 /* Begin PBXFileReference section */
-		EC0AB4572F3DBD22004FDB87 /* Music PDF Wrangler.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Music PDF Wrangler.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		EC0AB4572F3DBD22004FDB87 /* Music PDF Manager.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Music PDF Manager.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
@@ -40,7 +40,7 @@
 		EC0AB4582F3DBD22004FDB87 /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				EC0AB4572F3DBD22004FDB87 /* Music PDF Wrangler.app */,
+				EC0AB4572F3DBD22004FDB87 /* Music PDF Manager.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -48,9 +48,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		EC0AB4562F3DBD22004FDB87 /* Music PDF Wrangler */ = {
+		EC0AB4562F3DBD22004FDB87 /* Music PDF Manager */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = EC0AB4622F3DBD23004FDB87 /* Build configuration list for PBXNativeTarget "Music PDF Wrangler" */;
+			buildConfigurationList = EC0AB4622F3DBD23004FDB87 /* Build configuration list for PBXNativeTarget "Music PDF Manager" */;
 			buildPhases = (
 				EC0AB4532F3DBD22004FDB87 /* Sources */,
 				EC0AB4542F3DBD22004FDB87 /* Frameworks */,
@@ -63,11 +63,11 @@
 			fileSystemSynchronizedGroups = (
 				EC0AB4592F3DBD22004FDB87 /* Music PDF Wrangler */,
 			);
-			name = "Music PDF Wrangler";
+			name = "Music PDF Manager";
 			packageProductDependencies = (
 			);
 			productName = "Music PDF Wrangler";
-			productReference = EC0AB4572F3DBD22004FDB87 /* Music PDF Wrangler.app */;
+			productReference = EC0AB4572F3DBD22004FDB87 /* Music PDF Manager.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -85,7 +85,7 @@
 					};
 				};
 			};
-			buildConfigurationList = EC0AB4522F3DBD22004FDB87 /* Build configuration list for PBXProject "Music PDF Wrangler" */;
+			buildConfigurationList = EC0AB4522F3DBD22004FDB87 /* Build configuration list for PBXProject "Music PDF Manager" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -99,7 +99,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				EC0AB4562F3DBD22004FDB87 /* Music PDF Wrangler */,
+				EC0AB4562F3DBD22004FDB87 /* Music PDF Manager */,
 			);
 		};
 /* End PBXProject section */
@@ -326,7 +326,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		EC0AB4522F3DBD22004FDB87 /* Build configuration list for PBXProject "Music PDF Wrangler" */ = {
+		EC0AB4522F3DBD22004FDB87 /* Build configuration list for PBXProject "Music PDF Manager" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				EC0AB4602F3DBD23004FDB87 /* Debug */,
@@ -335,7 +335,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;
 		};
-		EC0AB4622F3DBD23004FDB87 /* Build configuration list for PBXNativeTarget "Music PDF Wrangler" */ = {
+		EC0AB4622F3DBD23004FDB87 /* Build configuration list for PBXNativeTarget "Music PDF Manager" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				EC0AB4632F3DBD23004FDB87 /* Debug */,
