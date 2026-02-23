@@ -138,9 +138,11 @@ struct RenamerView: View {
             if let operation = selectedFileForAssignment {
                 ManualAssignmentView(
                     operation: operation,
+                    existingNumbers: renamerManager.getExistingNumbers(),
                     onAssign: { number in
                         renamerManager.setManualOverride(for: operation.originalName, number: number)
                         showingManualAssignment = false
+                        selectedFileForAssignment = nil
                     }
                 )
             }
@@ -377,9 +379,8 @@ struct FileRowView: View {
         .padding(.vertical, 8)
         .contentShape(Rectangle())
         .onTapGesture(count: 2) {
-            if operation.type == .undetected {
-                onDoubleClick()
-            }
+            // Allow manual override on any file
+            onDoubleClick()
         }
     }
 }
@@ -387,50 +388,96 @@ struct FileRowView: View {
 // MARK: - Manual Assignment View
 struct ManualAssignmentView: View {
     let operation: RenameOperation
+    let existingNumbers: [Int]
     let onAssign: (Int) -> Void
     
     @State private var selectedNumber: Int = 1
     @Environment(\.dismiss) private var dismiss
     
+    var willShiftOthers: Bool {
+        existingNumbers.contains(selectedNumber)
+    }
+    
+    var shiftDescription: String {
+        if willShiftOthers {
+            let affectedNumbers = existingNumbers.filter { $0 >= selectedNumber }.sorted()
+            if affectedNumbers.isEmpty {
+                return ""
+            }
+            let first = affectedNumbers.first!
+            let last = affectedNumbers.last!
+            if first == last {
+                return "File currently numbered \(String(format: "%02d", first)) will become \(String(format: "%02d", first + 1))"
+            } else {
+                return "Files numbered \(String(format: "%02d", first))-\(String(format: "%02d", last)) will shift to \(String(format: "%02d", first + 1))-\(String(format: "%02d", last + 1))"
+            }
+        }
+        return ""
+    }
+    
     var body: some View {
-        VStack(spacing: 20) {
-            Text("Assign Number Manually")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text("File: \(operation.originalName)")
-                .font(.callout)
-                .foregroundColor(.secondary)
+        VStack(spacing: 16) {
+            // Header
+            VStack(spacing: 8) {
+                Text("Assign Number Manually")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                
+                Text("File: \(operation.originalName)")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.center)
+                
+                Text("This will override any automatic detection")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .italic()
+            }
             
             Divider()
             
+            // Number input section
             VStack(alignment: .leading, spacing: 12) {
                 Text("Assign sequential number:")
                     .font(.headline)
                 
-                HStack {
+                HStack(spacing: 12) {
                     TextField("Number", value: $selectedNumber, format: .number)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 100)
                     
                     Stepper("", value: $selectedNumber, in: 0...99)
-                    
-                    Spacer()
                 }
             }
-            .padding()
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(Color(NSColor.controlBackgroundColor))
             )
             
-            Text("The file will be prefixed with \(String(format: "%02d", selectedNumber))")
-                .font(.caption)
-                .foregroundColor(.secondary)
+            // Info section
+            VStack(alignment: .leading, spacing: 8) {
+                Text("The file will be prefixed with \(String(format: "%02d", selectedNumber))")
+                    .font(.caption)
+                    .foregroundColor(.primary)
+                
+                if willShiftOthers {
+                    Text("⚠️ " + shiftDescription)
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                        .fontWeight(.semibold)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             
             Spacer()
+                .frame(minHeight: 20)
             
-            HStack {
+            // Buttons
+            HStack(spacing: 12) {
                 Button("Cancel") {
                     dismiss()
                 }
@@ -440,13 +487,15 @@ struct ManualAssignmentView: View {
                 
                 Button("Assign") {
                     onAssign(selectedNumber)
+                    dismiss()
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
             }
         }
-        .padding()
-        .frame(width: 450, height: 300)
+        .padding(24)
+        .frame(width: 500, height: 400)
+        .background(Color(NSColor.windowBackgroundColor))
     }
 }
 
@@ -681,8 +730,48 @@ class RenamerManager: ObservableObject {
     }
     
     func setManualOverride(for filename: String, number: Int) {
+        // Check if this number conflicts with existing assignments
+        let existingAtThisNumber = manualOverrides.filter { $0.value == number && $0.key != filename }
+        
+        if !existingAtThisNumber.isEmpty {
+            // Shift all manual overrides >= number up by 1
+            var updatedOverrides: [String: Int] = [:]
+            for (key, value) in manualOverrides {
+                if key == filename {
+                    // Skip, we'll add this at the end
+                    continue
+                }
+                if value >= number {
+                    updatedOverrides[key] = value + 1
+                } else {
+                    updatedOverrides[key] = value
+                }
+            }
+            manualOverrides = updatedOverrides
+        }
+        
         manualOverrides[filename] = number
         scanFolder()
+    }
+    
+    func getExistingNumbers() -> [Int] {
+        var numbers: [Int] = []
+        
+        // Add manual override numbers
+        numbers.append(contentsOf: manualOverrides.values)
+        
+        // Add auto-detected numbers by scanning current operations
+        for operation in operations {
+            if operation.type == .rename || operation.type == .correct {
+                // Extract the number prefix from the new name
+                if let match = operation.newName.range(of: "^(\\d{2})", options: .regularExpression),
+                   let number = Int(operation.newName[match]) {
+                    numbers.append(number)
+                }
+            }
+        }
+        
+        return Array(Set(numbers)).sorted()
     }
     
     private func scanFolder() {
@@ -922,10 +1011,19 @@ class RenamerManager: ObservableObject {
         let sortedInstruments = customInstrumentOrder.enumerated().map { ($0.offset, $0.element) }
             .sorted { $0.1.count > $1.1.count }
         
+        // Find all matches with their position in the filename
+        var matches: [(index: Int, instrument: String, position: Int)] = []
         for (originalIndex, instrument) in sortedInstruments {
-            if lowerFilename.contains(instrument.lowercased()) {
-                return (originalIndex, instrument)
+            if let range = lowerFilename.range(of: instrument.lowercased()) {
+                let position = lowerFilename.distance(from: lowerFilename.startIndex, to: range.lowerBound)
+                matches.append((originalIndex, instrument, position))
             }
+        }
+        
+        // Return the match that appears FIRST in the filename (leftmost position)
+        // This handles cases like "Baritone BC Bassoon" -> should use "baritone" not "bassoon"
+        if let firstMatch = matches.min(by: { $0.position < $1.position }) {
+            return (firstMatch.index, firstMatch.instrument)
         }
         
         return nil
