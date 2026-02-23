@@ -342,6 +342,7 @@ struct RenamerView: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
         panel.title = "Select Folder with PDF Files"
         panel.message = "Choose a folder containing sheet music PDF files to rename"
         
@@ -1066,9 +1067,11 @@ struct InstrumentOrders {
         "alto saxophone",
         "alto sax",
         "sax alto",
+        "alto",
         "tenor sax",
         "sax tenor",
         "tenor saxophone",
+        "tenor",
         "bari sax",
         "baritone sax",
         "bari saxophone",
@@ -1076,6 +1079,8 @@ struct InstrumentOrders {
         "saxophone bari",
         "sax baritone",
         "baritone saxophone",
+        "baritone",
+        "bari",
         "trumpet",
         "cornet",
         "flugelhorn",
@@ -1106,7 +1111,6 @@ struct InstrumentOrders {
         "clarinet",
         "horn",
         "baritone horn",
-        "baritone",
         "eupho",
         "euphonium",
         "tuba",
@@ -1416,8 +1420,9 @@ struct SplitView: View {
     @State private var autoSplitPages: Int = 2
     @State private var isShowingFolderPicker = false
     @State private var showingAutoSplitSheet = false
+    @State private var showingBaseNameSheet = false
     @State private var baseFileName: String = ""
-    @State private var baseNameLocked: Bool = false
+    @State private var editingBaseFileName: String = ""
     @State private var customFileNames: [Int: String] = [:]
     @State private var showingFileNamesSheet = false
     @FocusState private var isViewFocused: Bool
@@ -1567,7 +1572,7 @@ struct SplitView: View {
                             
                             Divider()
                             
-                            // Base filename input
+                            // Base filename display
                             VStack(alignment: .leading, spacing: 8) {
                                 HStack {
                                     Text("Base Filename:")
@@ -1575,14 +1580,29 @@ struct SplitView: View {
                                     
                                     Spacer()
                                     
-                                    Toggle("Lock", isOn: $baseNameLocked)
-                                        .toggleStyle(.switch)
-                                        .controlSize(.mini)
+                                    Button(action: {
+                                        editingBaseFileName = baseFileName
+                                        showingBaseNameSheet = true
+                                    }) {
+                                        Label("Edit", systemImage: "pencil")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .controlSize(.small)
                                 }
                                 
-                                TextField("Enter base filename", text: $baseFileName)
-                                    .textFieldStyle(.roundedBorder)
-                                    .disabled(baseNameLocked)
+                                Text(baseFileName.isEmpty ? "(no name set)" : baseFileName)
+                                    .font(.system(.body, design: .monospaced))
+                                    .foregroundColor(baseFileName.isEmpty ? .secondary : .primary)
+                                    .padding(8)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .fill(Color(NSColor.textBackgroundColor))
+                                    )
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
+                                    )
                                 
                                 Text("Files will be named: \(baseFileName)_1.pdf, \(baseFileName)_2.pdf, etc.\nAdd suffixes in 'Customise Names' for: \(baseFileName)Flute.pdf (no automatic numbering)")
                                     .font(.caption)
@@ -1638,11 +1658,6 @@ struct SplitView: View {
             } else {
                 // No PDF loaded - show drop zone
                 DropZoneView(pdfManager: pdfManager)
-                    .onAppear {
-                        if !baseNameLocked {
-                            baseFileName = pdfManager.currentFileName ?? ""
-                        }
-                    }
             }
         }
         .focused($isViewFocused)
@@ -1651,9 +1666,7 @@ struct SplitView: View {
         }
         .onChange(of: pdfManager.pdfDocument) { newValue in
             if newValue != nil {
-                if !baseNameLocked {
-                    baseFileName = pdfManager.currentFileName ?? ""
-                }
+                baseFileName = pdfManager.currentFileName ?? ""
                 isViewFocused = true
             } else {
                 splitMarkers.removeAll()
@@ -1665,6 +1678,15 @@ struct SplitView: View {
             if newValue {
                 saveSplitPDF()
             }
+        }
+        .sheet(isPresented: $showingBaseNameSheet) {
+            BaseNameEditSheet(
+                baseFileName: $editingBaseFileName,
+                onSave: {
+                    baseFileName = editingBaseFileName
+                    showingBaseNameSheet = false
+                }
+            )
         }
         .sheet(isPresented: $showingAutoSplitSheet) {
             AutoSplitSheet(
@@ -1710,6 +1732,7 @@ struct SplitView: View {
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
         panel.title = "Select Output Folder"
         panel.message = "Choose where to save the split PDF files"
         
@@ -1866,6 +1889,64 @@ struct FilePreviewCard: View {
             RoundedRectangle(cornerRadius: 8)
                 .fill(Color(NSColor.controlBackgroundColor))
         )
+    }
+}
+
+// MARK: - Base Name Edit Sheet
+struct BaseNameEditSheet: View {
+    @Binding var baseFileName: String
+    let onSave: () -> Void
+    @Environment(\.dismiss) private var dismiss
+    
+    var body: some View {
+        VStack(spacing: 20) {
+            Text("Edit Base Filename")
+                .font(.title2)
+                .fontWeight(.semibold)
+            
+            Text("This name will be used for all split files")
+                .font(.callout)
+                .foregroundColor(.secondary)
+            
+            Divider()
+            
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Base Filename:")
+                    .font(.headline)
+                
+                TextField("Enter base filename", text: $baseFileName)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+                
+                Text("Example: \(baseFileName.isEmpty ? "filename" : baseFileName)_1.pdf, \(baseFileName.isEmpty ? "filename" : baseFileName)_2.pdf, etc.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding()
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color(NSColor.controlBackgroundColor))
+            )
+            
+            Spacer()
+            
+            HStack {
+                Button("Cancel") {
+                    dismiss()
+                }
+                .keyboardShortcut(.cancelAction)
+                
+                Spacer()
+                
+                Button("Save") {
+                    onSave()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding()
+        .frame(width: 450, height: 280)
     }
 }
 
