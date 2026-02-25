@@ -67,7 +67,6 @@ struct ContentView: View {
 struct RenamerView: View {
     @StateObject private var renamerManager = RenamerManager()
     @State private var showingPreferences = false
-    @State private var showingManualAssignment = false
     @State private var selectedFileForAssignment: RenameOperation?
     @State private var isFolderTargeted = false
     @State private var sortColumn: SortColumn = .newName
@@ -134,17 +133,22 @@ struct RenamerView: View {
                 instrumentOrder: $renamerManager.customInstrumentOrder
             )
         }
-        .sheet(isPresented: $showingManualAssignment) {
-            if let operation = selectedFileForAssignment {
-                ManualAssignmentView(
-                    operation: operation,
-                    existingNumbers: renamerManager.getExistingNumbers(),
-                    onAssign: { number in
-                        renamerManager.setManualOverride(for: operation.originalName, number: number)
-                        showingManualAssignment = false
-                        selectedFileForAssignment = nil
-                    }
-                )
+        .sheet(item: $selectedFileForAssignment) { operation in
+            ManualAssignmentView(
+                operation: operation,
+                existingNumbers: renamerManager.getExistingNumbers(),
+                onAssign: { number in
+                    renamerManager.setManualOverride(for: operation.originalName, number: number)
+                    selectedFileForAssignment = nil
+                }
+            )
+        }
+        .onAppear {
+            // Workaround for SwiftUI sheet initialization bug
+            // This "warms up" the sheet system so the first popup renders correctly
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                // Just accessing the sheet system is enough
+                _ = showingPreferences
             }
         }
     }
@@ -274,7 +278,6 @@ struct RenamerView: View {
                     ForEach(sortedOperations) { operation in
                         FileRowView(operation: operation) {
                             selectedFileForAssignment = operation
-                            showingManualAssignment = true
                         }
                         Divider()
                     }
@@ -642,8 +645,9 @@ struct PreferencesView: View {
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
             }
+            .padding(.top, 8)
         }
-        .padding()
+        .padding(20)
         .frame(width: 650, height: 600)
     }
     
