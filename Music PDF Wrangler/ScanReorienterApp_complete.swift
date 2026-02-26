@@ -41,25 +41,565 @@ struct ContentView: View {
     
     var body: some View {
         TabView(selection: $selectedTab) {
+            CombineView()
+                .tabItem {
+                    Label("Combine PDFs", systemImage: "doc.on.doc")
+                }
+                .tag(0)
+            
             RenamerView()
                 .tabItem {
                     Label("Rename Files", systemImage: "folder.badge.gearshape")
                 }
-                .tag(0)
+                .tag(1)
             
             SplitView()
                 .tabItem {
                     Label("Split PDF", systemImage: "scissors")
                 }
-                .tag(1)
+                .tag(2)
             
             RotateView()
                 .tabItem {
                     Label("Rotate Pages", systemImage: "rotate.right")
                 }
-                .tag(2)
+                .tag(3)
         }
         .frame(minWidth: 900, minHeight: 700)
+    }
+}
+
+// MARK: - Combine View
+struct CombineView: View {
+    @StateObject private var combineManager = CombineManager()
+    @State private var addBlankPages = false
+    @State private var isTargeted = false
+    @State private var selectedFiles: Set<UUID> = []
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Top toolbar
+            HStack {
+                Text("Combine PDFs")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                
+                Spacer()
+                
+                if !combineManager.files.isEmpty {
+                    Button(action: { combineManager.clearAll() }) {
+                        Label("Clear All", systemImage: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                }
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
+            
+            Divider()
+            
+            // Main content area
+            if combineManager.files.isEmpty {
+                // Empty state - drop zone
+                emptyStateView
+            } else {
+                // File list
+                VStack(spacing: 0) {
+                    // Control buttons
+                    HStack {
+                        Button(action: selectFiles) {
+                            Label("Add Files", systemImage: "plus")
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        Button(action: removeSelected) {
+                            Label("Remove", systemImage: "minus")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(selectedFiles.isEmpty)
+                        
+                        Divider()
+                            .frame(height: 20)
+                        
+                        Button(action: moveUp) {
+                            Label("Move Up", systemImage: "arrow.up")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!canMoveUp)
+                        
+                        Button(action: moveDown) {
+                            Label("Move Down", systemImage: "arrow.down")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!canMoveDown)
+                        
+                        Divider()
+                            .frame(height: 20)
+                        
+                        Button(action: selectAll) {
+                            Text("Select All")
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        Button(action: selectNone) {
+                            Text("Select None")
+                        }
+                        .buttonStyle(.bordered)
+                        
+                        Spacer()
+                    }
+                    .padding()
+                    .background(Color(NSColor.controlBackgroundColor))
+                    
+                    Divider()
+                    
+                    // Column headers
+                    HStack {
+                        Text("Name")
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .font(.headline)
+                        
+                        Text("Pages")
+                            .frame(width: 80, alignment: .center)
+                            .font(.headline)
+                        
+                        Text("# Copies")
+                            .frame(width: 100, alignment: .center)
+                            .font(.headline)
+                    }
+                    .padding(.horizontal)
+                    .padding(.vertical, 8)
+                    .background(Color(NSColor.controlBackgroundColor))
+                    
+                    Divider()
+                    
+                    // File list
+                    ScrollView {
+                        LazyVStack(spacing: 0) {
+                            ForEach(combineManager.files) { file in
+                                CombineFileRow(
+                                    file: file,
+                                    isSelected: selectedFiles.contains(file.id),
+                                    onToggleSelect: { toggleSelection(file.id) },
+                                    onCopiesChanged: { newValue in
+                                        combineManager.updateCopies(for: file.id, copies: newValue)
+                                    }
+                                )
+                                Divider()
+                            }
+                        }
+                    }
+                    
+                    Divider()
+                    
+                    // Bottom controls
+                    VStack(spacing: 12) {
+                        Toggle("Add blank sheet to the end of files with an odd number of pages", isOn: $addBlankPages)
+                            .toggleStyle(.checkbox)
+                        
+                        HStack {
+                            Text("\(combineManager.totalFiles) file(s) • \(combineManager.totalPages) total page(s)")
+                                .font(.callout)
+                                .foregroundColor(.secondary)
+                            
+                            Spacer()
+                            
+                            Button(action: printCombined) {
+                                Label("Print", systemImage: "printer")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                            
+                            Button(action: createPDF) {
+                                Label("Create PDF", systemImage: "doc.badge.plus")
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.large)
+                        }
+                    }
+                    .padding()
+                    .background(Color(NSColor.controlBackgroundColor))
+                }
+            }
+        }
+        .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
+            handleDrop(providers: providers)
+            return true
+        }
+    }
+    
+    private var emptyStateView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "doc.on.doc")
+                .font(.system(size: 64))
+                .foregroundColor(isTargeted ? .accentColor : .secondary)
+            
+            Text("Drop PDF files here to combine")
+                .font(.title2)
+                .fontWeight(.medium)
+            
+            Text("or")
+                .foregroundColor(.secondary)
+            
+            Button(action: selectFiles) {
+                Label("Choose Files", systemImage: "folder")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(
+                    isTargeted ? Color.accentColor : Color.gray.opacity(0.3),
+                    style: StrokeStyle(lineWidth: 2, dash: [10])
+                )
+                .padding()
+        )
+    }
+    
+    private var canMoveUp: Bool {
+        guard selectedFiles.count == 1,
+              let selectedId = selectedFiles.first,
+              let index = combineManager.files.firstIndex(where: { $0.id == selectedId }) else {
+            return false
+        }
+        return index > 0
+    }
+    
+    private var canMoveDown: Bool {
+        guard selectedFiles.count == 1,
+              let selectedId = selectedFiles.first,
+              let index = combineManager.files.firstIndex(where: { $0.id == selectedId }) else {
+            return false
+        }
+        return index < combineManager.files.count - 1
+    }
+    
+    private func selectFiles() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.allowsMultipleSelection = true
+        panel.canCreateDirectories = false
+        panel.title = "Select PDF Files"
+        
+        panel.begin { response in
+            if response == .OK {
+                combineManager.addFiles(urls: panel.urls)
+            }
+        }
+    }
+    
+    private func handleDrop(providers: [NSItemProvider]) {
+        for provider in providers {
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                if let url = url, url.pathExtension.lowercased() == "pdf" {
+                    DispatchQueue.main.async {
+                        combineManager.addFiles(urls: [url])
+                    }
+                }
+            }
+        }
+    }
+    
+    private func toggleSelection(_ id: UUID) {
+        if selectedFiles.contains(id) {
+            selectedFiles.remove(id)
+        } else {
+            selectedFiles.insert(id)
+        }
+    }
+    
+    private func selectAll() {
+        selectedFiles = Set(combineManager.files.map { $0.id })
+    }
+    
+    private func selectNone() {
+        selectedFiles.removeAll()
+    }
+    
+    private func removeSelected() {
+        combineManager.removeFiles(ids: selectedFiles)
+        selectedFiles.removeAll()
+    }
+    
+    private func moveUp() {
+        guard let selectedId = selectedFiles.first else { return }
+        combineManager.moveUp(id: selectedId)
+    }
+    
+    private func moveDown() {
+        guard let selectedId = selectedFiles.first else { return }
+        combineManager.moveDown(id: selectedId)
+    }
+    
+    private func createPDF() {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.nameFieldStringValue = "Combined.pdf"
+        panel.title = "Save Combined PDF"
+        
+        panel.begin { response in
+            if response == .OK, let url = panel.url {
+                combineManager.createCombinedPDF(to: url, addBlankPages: addBlankPages)
+            }
+        }
+    }
+    
+    private func printCombined() {
+        combineManager.printCombinedPDF(addBlankPages: addBlankPages)
+    }
+}
+
+// MARK: - Combine File Row
+struct CombineFileRow: View {
+    let file: CombineFile
+    let isSelected: Bool
+    let onToggleSelect: () -> Void
+    let onCopiesChanged: (Int) -> Void
+    
+    var body: some View {
+        HStack {
+            Button(action: onToggleSelect) {
+                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                    .foregroundColor(isSelected ? .accentColor : .secondary)
+            }
+            .buttonStyle(.plain)
+            
+            Text(file.name)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
+                .truncationMode(.middle)
+            
+            Text("\(file.pageCount)")
+                .frame(width: 80, alignment: .center)
+                .foregroundColor(.secondary)
+            
+            HStack(spacing: 4) {
+                Button(action: {
+                    if file.copies > 1 {
+                        onCopiesChanged(file.copies - 1)
+                    }
+                }) {
+                    Image(systemName: "minus.circle")
+                }
+                .buttonStyle(.plain)
+                .disabled(file.copies <= 1)
+                
+                Text("\(file.copies)")
+                    .frame(width: 40, alignment: .center)
+                    .font(.system(.body, design: .monospaced))
+                
+                Button(action: {
+                    onCopiesChanged(file.copies + 1)
+                }) {
+                    Image(systemName: "plus.circle")
+                }
+                .buttonStyle(.plain)
+            }
+            .frame(width: 100, alignment: .center)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 8)
+        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+    }
+}
+
+// MARK: - Combine File Model
+struct CombineFile: Identifiable {
+    let id = UUID()
+    let url: URL
+    let name: String
+    let pageCount: Int
+    var copies: Int
+}
+
+// MARK: - Combine Manager
+class CombineManager: ObservableObject {
+    @Published var files: [CombineFile] = []
+    
+    var totalFiles: Int {
+        files.reduce(0) { $0 + $1.copies }
+    }
+    
+    var totalPages: Int {
+        files.reduce(0) { $0 + ($1.pageCount * $1.copies) }
+    }
+    
+    func addFiles(urls: [URL]) {
+        for url in urls {
+            guard let document = PDFDocument(url: url) else { continue }
+            
+            let file = CombineFile(
+                url: url,
+                name: url.lastPathComponent,
+                pageCount: document.pageCount,
+                copies: 1
+            )
+            files.append(file)
+        }
+    }
+    
+    func removeFiles(ids: Set<UUID>) {
+        files.removeAll { ids.contains($0.id) }
+    }
+    
+    func clearAll() {
+        files.removeAll()
+    }
+    
+    func updateCopies(for id: UUID, copies: Int) {
+        if let index = files.firstIndex(where: { $0.id == id }) {
+            files[index].copies = max(1, copies)
+        }
+    }
+    
+    func moveUp(id: UUID) {
+        guard let index = files.firstIndex(where: { $0.id == id }), index > 0 else { return }
+        files.swapAt(index, index - 1)
+    }
+    
+    func moveDown(id: UUID) {
+        guard let index = files.firstIndex(where: { $0.id == id }), index < files.count - 1 else { return }
+        files.swapAt(index, index + 1)
+    }
+    
+    func createCombinedPDF(to url: URL, addBlankPages: Bool) {
+        let combinedDocument = PDFDocument()
+        var currentPageIndex = 0
+        
+        for file in files {
+            guard let sourceDocument = PDFDocument(url: file.url) else { continue }
+            
+            for _ in 0..<file.copies {
+                // Add all pages from this document
+                for pageIndex in 0..<sourceDocument.pageCount {
+                    if let page = sourceDocument.page(at: pageIndex) {
+                        combinedDocument.insert(page, at: currentPageIndex)
+                        currentPageIndex += 1
+                    }
+                }
+                
+                // Add blank page if needed (odd page count and blank pages enabled)
+                if addBlankPages && sourceDocument.pageCount % 2 == 1 {
+                    if let blankPage = createBlankPage() {
+                        combinedDocument.insert(blankPage, at: currentPageIndex)
+                        currentPageIndex += 1
+                    }
+                }
+            }
+        }
+        
+        if combinedDocument.write(to: url) {
+            let alert = NSAlert()
+            alert.messageText = "PDF Created Successfully"
+            alert.informativeText = "Combined PDF with \(currentPageIndex) pages saved to:\n\(url.path)"
+            alert.alertStyle = .informational
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        } else {
+            let alert = NSAlert()
+            alert.messageText = "Error"
+            alert.informativeText = "Failed to create PDF"
+            alert.alertStyle = .critical
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+        }
+    }
+    
+    func printCombinedPDF(addBlankPages: Bool) {
+        let combinedDocument = PDFDocument()
+        var currentPageIndex = 0
+        
+        for file in files {
+            guard let sourceDocument = PDFDocument(url: file.url) else { continue }
+            
+            for _ in 0..<file.copies {
+                // Add all pages from this document
+                for pageIndex in 0..<sourceDocument.pageCount {
+                    if let page = sourceDocument.page(at: pageIndex) {
+                        combinedDocument.insert(page, at: currentPageIndex)
+                        currentPageIndex += 1
+                    }
+                }
+                
+                // Add blank page if needed
+                if addBlankPages && sourceDocument.pageCount % 2 == 1 {
+                    if let blankPage = createBlankPage() {
+                        combinedDocument.insert(blankPage, at: currentPageIndex)
+                        currentPageIndex += 1
+                    }
+                }
+            }
+        }
+        
+        // Create a temporary PDF for printing
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("TempCombined.pdf")
+        if combinedDocument.write(to: tempURL) {
+            // Open system print dialog
+            let printInfo = NSPrintInfo.shared
+            printInfo.horizontalPagination = .fit
+            printInfo.verticalPagination = .fit
+            printInfo.isHorizontallyCentered = true
+            printInfo.isVerticallyCentered = true
+            
+            let printOperation = NSPrintOperation(view: PDFDocumentView(document: combinedDocument), printInfo: printInfo)
+            printOperation.showsPrintPanel = true
+            printOperation.showsProgressPanel = true
+            
+            DispatchQueue.main.async {
+                printOperation.run()
+            }
+        }
+    }
+    
+    private func createBlankPage() -> PDFPage? {
+        // Create a blank Letter-size page
+        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792) // 8.5" x 11" at 72 DPI
+        let blankPage = PDFPage()
+        blankPage.setBounds(pageRect, for: .mediaBox)
+        return blankPage
+    }
+}
+
+// MARK: - PDF Document View for Printing
+class PDFDocumentView: NSView {
+    let document: PDFDocument
+    
+    init(document: PDFDocument) {
+        self.document = document
+        super.init(frame: .zero)
+    }
+    
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+    
+    override func knowsPageRange(_ range: NSRangePointer) -> Bool {
+        range.pointee = NSRange(location: 1, length: document.pageCount)
+        return true
+    }
+    
+    override func rectForPage(_ page: Int) -> NSRect {
+        guard let pdfPage = document.page(at: page - 1) else {
+            return .zero
+        }
+        return pdfPage.bounds(for: .mediaBox)
+    }
+    
+    override func draw(_ dirtyRect: NSRect) {
+        guard let context = NSGraphicsContext.current?.cgContext else { return }
+        
+        // Determine which page to draw based on current print operation
+        let printOperation = NSPrintOperation.current
+        let currentPage = printOperation?.currentPage ?? 1
+        
+        guard let page = document.page(at: currentPage - 1) else { return }
+        
+        context.saveGState()
+        page.draw(with: .mediaBox, to: context)
+        context.restoreGState()
     }
 }
 
