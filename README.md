@@ -4,6 +4,18 @@ A powerful macOS application for managing music PDFs with three essential tools 
 
 ## Features
 
+### 📎 PDF Combiner
+Combine multiple PDF files into a single document with flexible copying and page management.
+
+- **Drag-and-drop or browse** to add multiple PDF files
+- **Specify copies** for each file (great for printing multiple parts)
+- **Reorder files** with Move Up/Down buttons or by dragging
+- **Smart blank pages** - automatically add blank sheets after odd-page files for double-sided printing
+- **Open in Preview** - opens combined PDF in Preview for quick printing (⌘P)
+- **Or save to file** - create a permanent combined PDF document
+- **Selection tools** - Select All, Select None, Remove selected files
+- **Live preview** - see total file and page counts as you build
+
 ### 📁 Sheet Music Renamer
 Automatically organize your sheet music files by adding sequential prefixes based on detected instrument names.
 
@@ -85,6 +97,27 @@ Option 2: Create an archive for distribution
 
 ## Usage
 
+### PDF Combiner
+
+1. **Add PDF files**
+   - Drag and drop PDFs onto the window
+   - Or click "Add Files" to browse
+   
+2. **Set copy counts** for each file
+   - Use + / - buttons to adjust how many copies of each file
+   
+3. **Reorder files** (optional)
+   - Select a file and use "Move Up" / "Move Down" buttons
+   - Files will be combined in the order shown
+   
+4. **Configure double-sided printing** (optional)
+   - Check "Add blank sheet to the end of files with an odd number of pages"
+   - Ensures each new file starts on the front of a sheet when printing double-sided
+   
+5. **Output your combined PDF**
+   - Click "Open in Preview" to create a temporary PDF and open it in Preview (press ⌘P to print)
+   - Or click "Create PDF" to save as a permanent file
+
 ### Sheet Music Renamer
 
 1. **Select a folder** containing your PDF sheet music files
@@ -100,7 +133,8 @@ Option 2: Create an archive for distribution
    - Gray items will be skipped or are already correct
    
 4. **Handle undetected files** (optional)
-   - Double-click files marked "No instrument found" to manually assign a number
+   - Double-click any file to manually assign a number
+   - This overrides automatic detection and shifts other files if needed
    
 5. **Customise preferences** (optional)
    - Press ⌘, or click the Preferences button
@@ -141,15 +175,15 @@ After:
    - Click "Add Split Marker" or press Space
    - Or use "Auto-Split Every N Pages" for regular intervals
 4. **Review the output files** in the right panel
-5. **Customise filenames** (optional)
-   - Set a base filename (auto-numbered by default: basename_1.pdf, basename_2.pdf)
-   - Or click "Customise Names" to specify exact names (e.g., "As Winds Dance - " + "Flute" = "As Winds Dance - Flute.pdf")
-6. **Click "Split and Save"** and choose an output folder
+5. **Set base filename** (click "Edit" button)
+6. **Customise filenames** (optional)
+   - Click "Customise Names" to specify exact names (e.g., "As Winds Dance - " + "Flute" = "As Winds Dance - Flute.pdf")
+7. **Click "Split and Save"** and choose an output folder
 
 #### Keyboard Shortcuts (Splitter)
 - `Space` - Toggle split marker on current page
 - `←` / `→` - Navigate between pages
-- **Tip**: Click on the preview area to activate keyboard shortcuts
+- **Tip**: Click on the preview area to ensure keyboard shortcuts are active
 
 ### Page Rotator
 
