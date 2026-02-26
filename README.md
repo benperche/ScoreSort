@@ -51,14 +51,17 @@ Rotate PDF pages with flexible options for odd/even page handling.
 
 ## Screenshots
 
-![Renamer Tab](screenshots/renamer.png)
-*Automatic sheet music file renaming with instrument detection*
+![Rotate Pages](screenshots/rotator.png)
+*Rotate pages with before/after preview*
 
-![Splitter Tab](screenshots/splitter.png)
+![Split PDFs](screenshots/splitter.png)
 *Split PDFs with visual preview and custom naming*
 
-![Rotator Tab](screenshots/rotator.png)
-*Rotate pages with before/after preview*
+![Rename Files](screenshots/renamer.png)
+*Automatic sheet music file renaming with instrument detection*
+
+![Combine PDFs](screenshots/combiner.png)
+*Quickly create arbitrary copies of a number of files ready for printing*
 
 ## Installation
 
