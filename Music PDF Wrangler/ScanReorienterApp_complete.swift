@@ -205,14 +205,14 @@ struct CombineView: View {
                             
                             Spacer()
                             
-                            Button(action: printCombined) {
-                                Label("Print", systemImage: "printer")
+                            Button(action: openInPreview) {
+                                Label("Open in Preview", systemImage: "doc.text.magnifyingglass")
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.large)
                             
                             Button(action: createPDF) {
-                                Label("Create PDF", systemImage: "doc.badge.plus")
+                                Label("Create PDF", systemImage: "arrow.down.doc")
                             }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.large)
@@ -347,8 +347,8 @@ struct CombineView: View {
         }
     }
     
-    private func printCombined() {
-        combineManager.printCombinedPDF(addBlankPages: addBlankPages)
+    private func openInPreview() {
+        combineManager.openInPreview(addBlankPages: addBlankPages)
     }
 }
 
@@ -508,7 +508,7 @@ class CombineManager: ObservableObject {
         }
     }
     
-    func printCombinedPDF(addBlankPages: Bool) {
+    func openInPreview(addBlankPages: Bool) {
         let combinedDocument = PDFDocument()
         var currentPageIndex = 0
         
@@ -534,24 +534,21 @@ class CombineManager: ObservableObject {
             }
         }
         
-        // Create a temporary PDF for printing
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("TempCombined.pdf")
-        if combinedDocument.write(to: tempURL) {
-            // Open system print dialog
-            let printInfo = NSPrintInfo.shared
-            printInfo.horizontalPagination = .fit
-            printInfo.verticalPagination = .fit
-            printInfo.isHorizontallyCentered = true
-            printInfo.isVerticallyCentered = true
-            
-            let printOperation = NSPrintOperation(view: PDFDocumentView(document: combinedDocument), printInfo: printInfo)
-            printOperation.showsPrintPanel = true
-            printOperation.showsProgressPanel = true
-            
-            DispatchQueue.main.async {
-                printOperation.run()
-            }
+        // Save to temporary file
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedForPrint.pdf")
+        
+        guard combinedDocument.write(to: tempURL) else {
+            let alert = NSAlert()
+            alert.messageText = "Error"
+            alert.informativeText = "Failed to create temporary PDF"
+            alert.alertStyle = .critical
+            alert.addButton(withTitle: "OK")
+            alert.runModal()
+            return
         }
+        
+        // Open in Preview
+        NSWorkspace.shared.open(tempURL)
     }
     
     private func createBlankPage() -> PDFPage? {
@@ -560,46 +557,6 @@ class CombineManager: ObservableObject {
         let blankPage = PDFPage()
         blankPage.setBounds(pageRect, for: .mediaBox)
         return blankPage
-    }
-}
-
-// MARK: - PDF Document View for Printing
-class PDFDocumentView: NSView {
-    let document: PDFDocument
-    
-    init(document: PDFDocument) {
-        self.document = document
-        super.init(frame: .zero)
-    }
-    
-    required init?(coder: NSCoder) {
-        fatalError("init(coder:) has not been implemented")
-    }
-    
-    override func knowsPageRange(_ range: NSRangePointer) -> Bool {
-        range.pointee = NSRange(location: 1, length: document.pageCount)
-        return true
-    }
-    
-    override func rectForPage(_ page: Int) -> NSRect {
-        guard let pdfPage = document.page(at: page - 1) else {
-            return .zero
-        }
-        return pdfPage.bounds(for: .mediaBox)
-    }
-    
-    override func draw(_ dirtyRect: NSRect) {
-        guard let context = NSGraphicsContext.current?.cgContext else { return }
-        
-        // Determine which page to draw based on current print operation
-        let printOperation = NSPrintOperation.current
-        let currentPage = printOperation?.currentPage ?? 1
-        
-        guard let page = document.page(at: currentPage - 1) else { return }
-        
-        context.saveGState()
-        page.draw(with: .mediaBox, to: context)
-        context.restoreGState()
     }
 }
 
