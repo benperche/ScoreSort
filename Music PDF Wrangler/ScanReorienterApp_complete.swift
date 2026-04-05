@@ -2585,24 +2585,6 @@ struct SplitView: View {
                 Spacer()
                 
                 if pdfManager.pdfDocument != nil {
-                    HStack(spacing: 8) {
-                        Text("Stride:")
-                            .font(.callout)
-                            .foregroundColor(.secondary)
-                        Stepper(value: $stride, in: 1...20, label: {
-                            Text("\(stride) \(stride == 1 ? "page" : "pages")")
-                                .frame(minWidth: 55, alignment: .leading)
-                        })
-                        Button("Apply") {
-                            applyStride()
-                        }
-                        .buttonStyle(.bordered)
-                        .help("Re-apply stride from scratch, overriding any manual changes")
-                    }
-
-                    Divider()
-                        .frame(height: 20)
-
                     Button(action: clearAllMarkers) {
                         Label("Clear All Splits", systemImage: "trash")
                     }
@@ -2635,24 +2617,6 @@ struct SplitView: View {
                                 onToggleMarker: { toggleSplitAt(page: currentPage) }
                             )
 
-                            // Stride explanation
-                            HStack(alignment: .top, spacing: 6) {
-                                Image(systemName: "info.circle")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                    .padding(.top, 1)
-                                VStack(alignment: .leading, spacing: 3) {
-                                    Text("**Stride** (toolbar) sets the default pages-per-file and auto-places splits when you press **Apply** or load a PDF.")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                    Text("**Space** toggles a split at the current page. Landing in the *middle* of a file adds a split there; landing at the *start* of a file (shown in orange) removes that split and merges it upward. Use ← → or the buttons to navigate.")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
-                            .padding(.horizontal)
-                            .padding(.bottom, 4)
-
                             Divider()
 
                             // Preview
@@ -2673,8 +2637,44 @@ struct SplitView: View {
                         
                         Divider()
                         
-                        // Right: File preview
+                        // Right: Stride controls + file preview
                         VStack(alignment: .leading, spacing: 12) {
+                            // ── Stride / pattern controls ─────────────────────
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Split Pattern")
+                                    .font(.headline)
+
+                                HStack(spacing: 8) {
+                                    Text("Stride:")
+                                        .foregroundColor(.secondary)
+                                    Stepper(value: $stride, in: 1...20, label: {
+                                        Text("\(stride) \(stride == 1 ? "page" : "pages")")
+                                            .frame(minWidth: 55, alignment: .leading)
+                                    })
+                                    Button("Apply") {
+                                        applyStride()
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .help("Re-apply stride from scratch, clearing any manual adjustments")
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("**Stride** is the default number of pages per output file. When you load a PDF or press **Apply**, split markers are placed every N pages automatically.")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("Then navigate with ← → and press **Space** to fine-tune. Pressing Space in the *middle* of a file adds a split there. Pressing Space at the *start* of a file (highlighted in orange) removes that split and merges the file with the one above.")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(NSColor.controlBackgroundColor))
+                            )
+
+                            // ── Output files list ─────────────────────────────
                             HStack {
                                 Text("Output Files (\(numberOfFiles))")
                                     .font(.headline)
@@ -3142,75 +3142,74 @@ struct SplitFileNamingRow: View {
     }
 
     var body: some View {
-        HStack(alignment: .top, spacing: 20) {
-            // ── Large page thumbnail ───────────────────────────────────
+        VStack(alignment: .leading, spacing: 10) {
+            // ── File header ───────────────────────────────────────────
+            HStack(spacing: 8) {
+                Image(systemName: "doc.fill")
+                    .foregroundColor(.accentColor)
+                Text("File \(fileIndex + 1)")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                Text("·")
+                    .foregroundColor(.secondary)
+                Text(pageRangeText)
+                    .foregroundColor(.secondary)
+                Text("·")
+                    .foregroundColor(.secondary)
+                Text("\(fileSize) \(fileSize == 1 ? "page" : "pages")")
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+
+            // ── Instrument name crop (full-width, zoomed in) ─────────
+            // Shows the top-left corner of the page where instrument names live.
             if let page = pdfDocument.page(at: firstPageIndex) {
-                PDFPageView(page: page, rotation: 0)
-                    .frame(width: 160, height: 210)
+                PageInstrumentPreview(page: page)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 110)
                     .background(Color.white)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .shadow(color: .black.opacity(0.15), radius: 4, x: 0, y: 2)
+                    .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
             } else {
                 RoundedRectangle(cornerRadius: 4)
-                    .fill(Color.gray.opacity(0.15))
-                    .frame(width: 160, height: 210)
+                    .fill(Color.gray.opacity(0.12))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 110)
             }
 
-            // ── File info + name field ────────────────────────────────
-            VStack(alignment: .leading, spacing: 12) {
-                // Header
-                HStack(spacing: 8) {
-                    Image(systemName: "doc.fill")
-                        .foregroundColor(.accentColor)
-                    Text("File \(fileIndex + 1)")
-                        .font(.title3)
-                        .fontWeight(.semibold)
-                    Text("·")
+            // ── Name field ────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Custom suffix (optional — leave blank for automatic numbering)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                HStack(spacing: 4) {
+                    Text(baseFileName.isEmpty ? "basename" : baseFileName)
                         .foregroundColor(.secondary)
-                    Text(pageRangeText)
+                        .font(.system(.body, design: .monospaced))
+                    TextField("Flute", text: $suffix)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 220)
+                        .focused($fieldFocused)
+                        .onSubmit(onSubmit)
+                    Text(".pdf")
                         .foregroundColor(.secondary)
-                    Text("·")
-                        .foregroundColor(.secondary)
-                    Text("\(fileSize) \(fileSize == 1 ? "page" : "pages")")
-                        .foregroundColor(.secondary)
+                        .font(.system(.body, design: .monospaced))
                 }
 
-                // Name field
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("Custom suffix (optional — leave blank to use automatic numbering)")
+                // Live filename preview
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                    Text(finalFileName)
                         .font(.caption)
-                        .foregroundColor(.secondary)
-
-                    HStack(spacing: 4) {
-                        Text(baseFileName.isEmpty ? "basename" : baseFileName)
-                            .foregroundColor(.secondary)
-                            .font(.system(.body, design: .monospaced))
-                        TextField("Flute", text: $suffix)
-                            .textFieldStyle(.roundedBorder)
-                            .frame(maxWidth: 220)
-                            .focused($fieldFocused)
-                            .onSubmit(onSubmit)
-                        Text(".pdf")
-                            .foregroundColor(.secondary)
-                            .font(.system(.body, design: .monospaced))
-                    }
-
-                    // Live filename preview
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.right")
-                            .font(.caption2)
-                        Text(finalFileName)
-                            .font(.caption)
-                            .fontWeight(.medium)
-                    }
-                    .foregroundColor(suffix.isEmpty ? .secondary : .accentColor)
+                        .fontWeight(.medium)
                 }
+                .foregroundColor(suffix.isEmpty ? .secondary : .accentColor)
             }
-
-            Spacer()
         }
         .padding(.horizontal, 20)
-        .padding(.vertical, 16)
+        .padding(.vertical, 14)
         .background(isFocused ? Color.accentColor.opacity(0.04) : Color.clear)
         .onChange(of: isFocused) { focused in
             if focused { fieldFocused = true }
@@ -3224,15 +3223,19 @@ struct PageInstrumentPreview: View {
     
     var body: some View {
         if let image = renderInstrumentNameArea(from: page) {
+            // Use .fill so the crop fills its parent frame completely.
+            // The instrument name sits at the left of the crop, so any overflow
+            // clipped on the right is just whitespace.
             Image(nsImage: image)
                 .resizable()
-                .aspectRatio(contentMode: .fit)
+                .aspectRatio(contentMode: .fill)
+                .clipped()
         } else {
             Rectangle()
                 .fill(Color.gray.opacity(0.2))
         }
     }
-    
+
     // Render just the top-left portion where instrument names typically appear
     private func renderInstrumentNameArea(from page: PDFPage) -> NSImage? {
         let pageBounds = page.bounds(for: .mediaBox)
