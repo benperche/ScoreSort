@@ -1608,26 +1608,24 @@ class RenamerManager: ObservableObject {
     }
     
     func setManualOverride(for filename: String, number: Int) {
-        // Check if this number conflicts with existing assignments
-        let existingAtThisNumber = manualOverrides.filter { $0.value == number && $0.key != filename }
-        
-        if !existingAtThisNumber.isEmpty {
-            // Shift all manual overrides >= number up by 1
+        // Build the set of numbers currently in use by everything except this file's
+        // existing override (so re-assigning the same file doesn't falsely conflict).
+        var takenNumbers = Set(getExistingNumbers())
+        if let currentNumber = manualOverrides[filename] {
+            takenNumbers.remove(currentNumber)
+        }
+
+        if takenNumbers.contains(number) {
+            // Shift all manual overrides at >= number up by 1 to make room.
+            // Auto-detected numbers will be re-derived by scanFolder() afterward.
             var updatedOverrides: [String: Int] = [:]
             for (key, value) in manualOverrides {
-                if key == filename {
-                    // Skip, we'll add this at the end
-                    continue
-                }
-                if value >= number {
-                    updatedOverrides[key] = value + 1
-                } else {
-                    updatedOverrides[key] = value
-                }
+                if key == filename { continue }
+                updatedOverrides[key] = value >= number ? value + 1 : value
             }
             manualOverrides = updatedOverrides
         }
-        
+
         manualOverrides[filename] = number
         scanFolder()
     }
