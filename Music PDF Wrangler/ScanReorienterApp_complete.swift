@@ -92,6 +92,8 @@ struct CombineView: View {
     @State private var addBlankPages = false
     @State private var isTargeted = false
     @State private var selectedFiles: Set<UUID> = []
+    @State private var removalNoticeVisible = false
+    @Environment(\.undoManager) var undoManager
     
     var body: some View {
         VStack(spacing: 0) {
@@ -104,7 +106,7 @@ struct CombineView: View {
                 Spacer()
                 
                 if !combineManager.files.isEmpty {
-                    Button(action: { combineManager.clearAll() }) {
+                    Button(action: { combineManager.clearAll(undoManager: undoManager) }) {
                         Label("Clear All", systemImage: "xmark.circle.fill")
                     }
                     .buttonStyle(.plain)
@@ -200,7 +202,12 @@ struct CombineView: View {
                                     isSelected: selectedFiles.contains(file.id),
                                     onToggleSelect: { toggleSelection(file.id) },
                                     onCopiesChanged: { newValue in
-                                        combineManager.updateCopies(for: file.id, copies: newValue)
+                                        combineManager.updateCopies(for: file.id, copies: newValue, undoManager: undoManager)
+                                    },
+                                    onRemove: {
+                                        selectedFiles.remove(file.id)
+                                        combineManager.removeFiles(ids: [file.id], undoManager: undoManager)
+                                        showRemovalNotice(undoManager: undoManager)
                                     }
                                 )
                                 Divider()
@@ -212,7 +219,35 @@ struct CombineView: View {
                     
                     // Bottom controls
                     VStack(spacing: 12) {
-                        Toggle("Add blank sheet to the end of files with an odd number of pages", isOn: $addBlankPages)
+                        // Removal notice (shown briefly when minus removes a file)
+                        if removalNoticeVisible {
+                            HStack(spacing: 8) {
+                                Image(systemName: "trash")
+                                    .foregroundColor(.secondary)
+                                Text("File removed")
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                                Button("Undo") {
+                                    undoManager?.undo()
+                                    removalNoticeVisible = false
+                                }
+                                .buttonStyle(.bordered)
+                                .controlSize(.small)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 7)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(Color(NSColor.controlBackgroundColor))
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .strokeBorder(Color.secondary.opacity(0.2))
+                                    )
+                            )
+                            .transition(.opacity.combined(with: .move(edge: .bottom)))
+                        }
+
+                        Toggle("For double-sided printing: add blank page after files with an odd number of pages", isOn: $addBlankPages)
                             .toggleStyle(.checkbox)
                         
                         HStack {
@@ -277,21 +312,24 @@ struct CombineView: View {
     }
     
     private var canMoveUp: Bool {
-        guard selectedFiles.count == 1,
-              let selectedId = selectedFiles.first,
-              let index = combineManager.files.firstIndex(where: { $0.id == selectedId }) else {
-            return false
+        guard !selectedFiles.isEmpty else { return false }
+        // Enabled if at least one selected item can actually shift up —
+        // i.e. it's not at index 0, and the item above it is not also selected
+        // (which would make them a pinned block).
+        return combineManager.files.indices.contains { index in
+            guard selectedFiles.contains(combineManager.files[index].id) else { return false }
+            guard index > 0 else { return false }
+            return !selectedFiles.contains(combineManager.files[index - 1].id)
         }
-        return index > 0
     }
-    
+
     private var canMoveDown: Bool {
-        guard selectedFiles.count == 1,
-              let selectedId = selectedFiles.first,
-              let index = combineManager.files.firstIndex(where: { $0.id == selectedId }) else {
-            return false
+        guard !selectedFiles.isEmpty else { return false }
+        return combineManager.files.indices.contains { index in
+            guard selectedFiles.contains(combineManager.files[index].id) else { return false }
+            guard index < combineManager.files.count - 1 else { return false }
+            return !selectedFiles.contains(combineManager.files[index + 1].id)
         }
-        return index < combineManager.files.count - 1
     }
     
     private func selectFiles() {
@@ -303,7 +341,7 @@ struct CombineView: View {
         
         panel.begin { response in
             if response == .OK {
-                combineManager.addFiles(urls: panel.urls)
+                combineManager.addFiles(urls: panel.urls, undoManager: undoManager)
             }
         }
     }
@@ -313,7 +351,7 @@ struct CombineView: View {
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 if let url = url, url.pathExtension.lowercased() == "pdf" {
                     DispatchQueue.main.async {
-                        combineManager.addFiles(urls: [url])
+                        combineManager.addFiles(urls: [url], undoManager: undoManager)
                     }
                 }
             }
@@ -337,18 +375,24 @@ struct CombineView: View {
     }
     
     private func removeSelected() {
-        combineManager.removeFiles(ids: selectedFiles)
+        combineManager.removeFiles(ids: selectedFiles, undoManager: undoManager)
         selectedFiles.removeAll()
     }
-    
+
     private func moveUp() {
-        guard let selectedId = selectedFiles.first else { return }
-        combineManager.moveUp(id: selectedId)
+        combineManager.moveUp(ids: selectedFiles, undoManager: undoManager)
     }
-    
+
     private func moveDown() {
-        guard let selectedId = selectedFiles.first else { return }
-        combineManager.moveDown(id: selectedId)
+        combineManager.moveDown(ids: selectedFiles, undoManager: undoManager)
+    }
+
+    private func showRemovalNotice(undoManager: UndoManager?) {
+        withAnimation(.easeInOut(duration: 0.2)) { removalNoticeVisible = true }
+        // Auto-dismiss after 5 s; pressing Undo dismisses it immediately
+        DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
+            withAnimation(.easeInOut(duration: 0.2)) { removalNoticeVisible = false }
+        }
     }
     
     private func createPDF() {
@@ -375,14 +419,12 @@ struct CombineFileRow: View {
     let isSelected: Bool
     let onToggleSelect: () -> Void
     let onCopiesChanged: (Int) -> Void
-    
+    let onRemove: () -> Void
+
     var body: some View {
         HStack {
-            Button(action: onToggleSelect) {
-                Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                    .foregroundColor(isSelected ? .accentColor : .secondary)
-            }
-            .buttonStyle(.plain)
+            Image(systemName: isSelected ? "checkmark.square.fill" : "square")
+                .foregroundColor(isSelected ? .accentColor : .secondary)
             
             Text(file.name)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -397,12 +439,13 @@ struct CombineFileRow: View {
                 Button(action: {
                     if file.copies > 1 {
                         onCopiesChanged(file.copies - 1)
+                    } else {
+                        onRemove()
                     }
                 }) {
                     Image(systemName: "minus.circle")
                 }
                 .buttonStyle(.plain)
-                .disabled(file.copies <= 1)
                 
                 Text("\(file.copies)")
                     .frame(width: 40, alignment: .center)
@@ -420,6 +463,10 @@ struct CombineFileRow: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture {
+            onToggleSelect()
+        }
     }
 }
 
@@ -435,51 +482,84 @@ struct CombineFile: Identifiable {
 // MARK: - Combine Manager
 class CombineManager: ObservableObject {
     @Published var files: [CombineFile] = []
-    
-    var totalFiles: Int {
-        files.reduce(0) { $0 + $1.copies }
-    }
-    
-    var totalPages: Int {
-        files.reduce(0) { $0 + ($1.pageCount * $1.copies) }
-    }
-    
-    func addFiles(urls: [URL]) {
-        for url in urls {
-            guard let document = PDFDocument(url: url) else { continue }
-            
-            let file = CombineFile(
-                url: url,
-                name: url.lastPathComponent,
-                pageCount: document.pageCount,
-                copies: 1
-            )
-            files.append(file)
+
+    var totalFiles: Int { files.reduce(0) { $0 + $1.copies } }
+    var totalPages: Int { files.reduce(0) { $0 + ($1.pageCount * $1.copies) } }
+
+    // Snapshot-based undo: captures the post-action state so the undo handler
+    // can register a redo by snapshotting back the other way.
+    private func registerUndo(undoManager: UndoManager?, actionName: String, restoring snapshot: [CombineFile]) {
+        let postActionState = files
+        undoManager?.setActionName(actionName)
+        undoManager?.registerUndo(withTarget: self) { manager in
+            manager.files = snapshot
+            manager.registerUndo(undoManager: undoManager, actionName: actionName, restoring: postActionState)
         }
     }
-    
-    func removeFiles(ids: Set<UUID>) {
+
+    func addFiles(urls: [URL], undoManager: UndoManager?) {
+        let before = files
+        for url in urls {
+            guard let document = PDFDocument(url: url) else { continue }
+            files.append(CombineFile(url: url, name: url.lastPathComponent, pageCount: document.pageCount, copies: 1))
+        }
+        if files.count != before.count {
+            registerUndo(undoManager: undoManager, actionName: "Add Files", restoring: before)
+        }
+    }
+
+    func removeFiles(ids: Set<UUID>, undoManager: UndoManager?) {
+        let before = files
         files.removeAll { ids.contains($0.id) }
+        registerUndo(undoManager: undoManager, actionName: "Remove File", restoring: before)
     }
-    
-    func clearAll() {
+
+    func clearAll(undoManager: UndoManager?) {
+        let before = files
         files.removeAll()
+        registerUndo(undoManager: undoManager, actionName: "Clear All", restoring: before)
     }
-    
-    func updateCopies(for id: UUID, copies: Int) {
+
+    func updateCopies(for id: UUID, copies: Int, undoManager: UndoManager?) {
+        let before = files
         if let index = files.firstIndex(where: { $0.id == id }) {
             files[index].copies = max(1, copies)
         }
+        registerUndo(undoManager: undoManager, actionName: "Change Copies", restoring: before)
     }
-    
-    func moveUp(id: UUID) {
-        guard let index = files.firstIndex(where: { $0.id == id }), index > 0 else { return }
-        files.swapAt(index, index - 1)
+
+    func moveUp(ids: Set<UUID>, undoManager: UndoManager?) {
+        let before = files
+        // Process ascending (lowest index first) so adjacent selected items
+        // move as a block rather than passing through each other.
+        let selectedIndices = files.indices
+            .filter { ids.contains(files[$0].id) }
+            .sorted()
+        for index in selectedIndices {
+            guard index > 0 else { continue }
+            guard !ids.contains(files[index - 1].id) else { continue }
+            files.swapAt(index, index - 1)
+        }
+        if files.map(\.id) != before.map(\.id) {
+            registerUndo(undoManager: undoManager, actionName: "Move Up", restoring: before)
+        }
     }
-    
-    func moveDown(id: UUID) {
-        guard let index = files.firstIndex(where: { $0.id == id }), index < files.count - 1 else { return }
-        files.swapAt(index, index + 1)
+
+    func moveDown(ids: Set<UUID>, undoManager: UndoManager?) {
+        let before = files
+        // Process descending (highest index first) for the same block-preservation reason.
+        let selectedIndices = files.indices
+            .filter { ids.contains(files[$0].id) }
+            .sorted()
+            .reversed()
+        for index in selectedIndices {
+            guard index < files.count - 1 else { continue }
+            guard !ids.contains(files[index + 1].id) else { continue }
+            files.swapAt(index, index + 1)
+        }
+        if files.map(\.id) != before.map(\.id) {
+            registerUndo(undoManager: undoManager, actionName: "Move Down", restoring: before)
+        }
     }
     
     func createCombinedPDF(to url: URL, addBlankPages: Bool) {
