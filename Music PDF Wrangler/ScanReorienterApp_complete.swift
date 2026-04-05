@@ -17,34 +17,26 @@ import Combine
 class AppState: ObservableObject {
     @Published var selectedTab = 0
     @Published var showingKeyboardHelp = false
+    let combineMenuState = CombineMenuState()
 }
 
+// MARK: - Combine Menu State
+// Shared object observed by CombinerCommands. Updated from CombineView via
+// .onChange/.onAppear (after body completes) to avoid mid-update publishing.
+class CombineMenuState: ObservableObject {
+    @Published var canRemove  = false
+    @Published var canMoveUp  = false
+    @Published var canMoveDown = false
+    @Published var hasFiles   = false
 
-// MARK: - Combine Focused Commands (passed from CombineView up to menu bar)
-struct CombineCommands {
-    var removeSelected: () -> Void = {}
-    var moveUp: () -> Void = {}
-    var moveDown: () -> Void = {}
-    var selectAll: () -> Void = {}
-    var selectPrevious: () -> Void = {}
-    var selectNext: () -> Void = {}
+    var removeSelected:          () -> Void = {}
+    var moveUp:                  () -> Void = {}
+    var moveDown:                () -> Void = {}
+    var selectAll:               () -> Void = {}
+    var selectPrevious:          () -> Void = {}
+    var selectNext:              () -> Void = {}
     var selectPreviousExtending: () -> Void = {}
-    var selectNextExtending: () -> Void = {}
-    var canRemove: Bool = false
-    var canMoveUp: Bool = false
-    var canMoveDown: Bool = false
-    var hasFiles: Bool = false
-}
-
-private struct CombineCommandsKey: FocusedValueKey {
-    typealias Value = CombineCommands
-}
-
-extension FocusedValues {
-    var combineCommands: CombineCommands? {
-        get { self[CombineCommandsKey.self] }
-        set { self[CombineCommandsKey.self] = newValue }
-    }
+    var selectNextExtending:     () -> Void = {}
 }
 
 // MARK: - Navigate Commands (tab switching — separate struct avoids double View menu)
@@ -67,48 +59,47 @@ struct NavigateCommands: Commands {
 
 // MARK: - Combiner Commands (file list shortcuts — active whenever the window is frontmost)
 struct CombinerCommands: Commands {
-    // focusedSceneValue propagates for the whole window, not just focused element.
-    @FocusedValue(\.combineCommands) var combineCommands: CombineCommands?
+    @ObservedObject var state: CombineMenuState
 
     var body: some Commands {
         CommandMenu("Combiner") {
-            Button("Select Previous") { combineCommands?.selectPrevious() }
+            Button("Select Previous") { state.selectPrevious() }
                 .keyboardShortcut(.upArrow, modifiers: [])
-                .disabled(!(combineCommands?.hasFiles ?? false))
+                .disabled(!state.hasFiles)
 
-            Button("Extend Selection Up") { combineCommands?.selectPreviousExtending() }
+            Button("Extend Selection Up") { state.selectPreviousExtending() }
                 .keyboardShortcut(.upArrow, modifiers: .shift)
-                .disabled(!(combineCommands?.hasFiles ?? false))
+                .disabled(!state.hasFiles)
 
-            Button("Select Next") { combineCommands?.selectNext() }
+            Button("Select Next") { state.selectNext() }
                 .keyboardShortcut(.downArrow, modifiers: [])
-                .disabled(!(combineCommands?.hasFiles ?? false))
+                .disabled(!state.hasFiles)
 
-            Button("Extend Selection Down") { combineCommands?.selectNextExtending() }
+            Button("Extend Selection Down") { state.selectNextExtending() }
                 .keyboardShortcut(.downArrow, modifiers: .shift)
-                .disabled(!(combineCommands?.hasFiles ?? false))
+                .disabled(!state.hasFiles)
 
             Divider()
 
-            Button("Move Up") { combineCommands?.moveUp() }
+            Button("Move Up") { state.moveUp() }
                 .keyboardShortcut(.upArrow, modifiers: .command)
-                .disabled(!(combineCommands?.canMoveUp ?? false))
+                .disabled(!state.canMoveUp)
 
-            Button("Move Down") { combineCommands?.moveDown() }
+            Button("Move Down") { state.moveDown() }
                 .keyboardShortcut(.downArrow, modifiers: .command)
-                .disabled(!(combineCommands?.canMoveDown ?? false))
+                .disabled(!state.canMoveDown)
 
             Divider()
 
-            Button("Remove Selected Files") { combineCommands?.removeSelected() }
+            Button("Remove Selected Files") { state.removeSelected() }
                 .keyboardShortcut(.delete, modifiers: [])
-                .disabled(!(combineCommands?.canRemove ?? false))
+                .disabled(!state.canRemove)
 
             Divider()
 
-            Button("Select All Files") { combineCommands?.selectAll() }
+            Button("Select All Files") { state.selectAll() }
                 .keyboardShortcut("a", modifiers: .command)
-                .disabled(!(combineCommands?.hasFiles ?? false))
+                .disabled(!state.hasFiles)
         }
     }
 }
@@ -141,7 +132,7 @@ struct MusicPDFManagerApp: App {
         .commands {
             CommandGroup(replacing: .newItem) { }
             NavigateCommands(appState: appState)
-            CombinerCommands()
+            CombinerCommands(state: appState.combineMenuState)
             HelpCommands(appState: appState)
         }
     }
@@ -163,7 +154,8 @@ struct ContentView: View {
     
     var body: some View {
         TabView(selection: $appState.selectedTab) {
-            CombineView(showingKeyboardHelp: $appState.showingKeyboardHelp)
+            CombineView(showingKeyboardHelp: $appState.showingKeyboardHelp,
+                        menuState: appState.combineMenuState)
                 .tabItem {
                     Label("Combine PDFs", systemImage: "doc.on.doc")
                 }
@@ -197,6 +189,7 @@ struct ContentView: View {
 // MARK: - Combine View
 struct CombineView: View {
     @Binding var showingKeyboardHelp: Bool
+    let menuState: CombineMenuState
     @StateObject private var combineManager = CombineManager()
     @State private var addBlankPages = false
     @State private var isTargeted = false
@@ -415,23 +408,12 @@ struct CombineView: View {
             handleDrop(providers: providers)
             return true
         }
-        // Expose actions + state to the menu bar via @FocusedValue.
-        // No tab guard needed — @FocusedValue returns nil automatically when
-        // CombineView doesn't have focus (i.e. another tab is active).
-        .focusedValue(\.combineCommands, CombineCommands(
-            removeSelected: removeSelected,
-            moveUp: moveUp,
-            moveDown: moveDown,
-            selectAll: selectAll,
-            selectPrevious:          { navigateSelection(direction: -1, extending: false) },
-            selectNext:              { navigateSelection(direction:  1, extending: false) },
-            selectPreviousExtending: { navigateSelection(direction: -1, extending: true)  },
-            selectNextExtending:     { navigateSelection(direction:  1, extending: true)  },
-            canRemove:  !selectedFiles.isEmpty,
-            canMoveUp:  canMoveUp,
-            canMoveDown: canMoveDown,
-            hasFiles:   !combineManager.files.isEmpty
-        ))
+        // Wire closures once on appear; update flags after every relevant state change.
+        // Using onAppear/onChange (post-body) avoids the "publishing during view update" warning
+        // that .focusedValue triggered.
+        .onAppear { syncMenuClosures() }
+        .onChange(of: selectedFiles)          { _ in syncMenuFlags() }
+        .onChange(of: combineManager.files)   { _ in syncMenuFlags() }
     }
     
     private var emptyStateView: some View {
@@ -609,6 +591,26 @@ struct CombineView: View {
     
     private func openInPreview() {
         combineManager.openInPreview(addBlankPages: addBlankPages)
+    }
+
+    // MARK: - Menu state sync
+    private func syncMenuClosures() {
+        menuState.removeSelected          = removeSelected
+        menuState.moveUp                  = moveUp
+        menuState.moveDown                = moveDown
+        menuState.selectAll               = selectAll
+        menuState.selectPrevious          = { navigateSelection(direction: -1, extending: false) }
+        menuState.selectNext              = { navigateSelection(direction:  1, extending: false) }
+        menuState.selectPreviousExtending = { navigateSelection(direction: -1, extending: true)  }
+        menuState.selectNextExtending     = { navigateSelection(direction:  1, extending: true)  }
+        syncMenuFlags()
+    }
+
+    private func syncMenuFlags() {
+        menuState.canRemove  = !selectedFiles.isEmpty
+        menuState.canMoveUp  = canMoveUp
+        menuState.canMoveDown = canMoveDown
+        menuState.hasFiles   = !combineManager.files.isEmpty
     }
 }
 
