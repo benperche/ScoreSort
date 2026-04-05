@@ -16,6 +16,115 @@ import Combine
 // MARK: - App State
 class AppState: ObservableObject {
     @Published var selectedTab = 0
+    @Published var showingKeyboardHelp = false
+}
+
+
+// MARK: - Combine Focused Commands (passed from CombineView up to menu bar)
+struct CombineCommands {
+    var removeSelected: () -> Void = {}
+    var moveUp: () -> Void = {}
+    var moveDown: () -> Void = {}
+    var selectAll: () -> Void = {}
+    var selectPrevious: () -> Void = {}
+    var selectNext: () -> Void = {}
+    var selectPreviousExtending: () -> Void = {}
+    var selectNextExtending: () -> Void = {}
+    var canRemove: Bool = false
+    var canMoveUp: Bool = false
+    var canMoveDown: Bool = false
+    var hasFiles: Bool = false
+}
+
+private struct CombineCommandsKey: FocusedValueKey {
+    typealias Value = CombineCommands
+}
+
+extension FocusedValues {
+    var combineCommands: CombineCommands? {
+        get { self[CombineCommandsKey.self] }
+        set { self[CombineCommandsKey.self] = newValue }
+    }
+}
+
+// MARK: - Navigate Commands (tab switching — separate struct avoids double View menu)
+struct NavigateCommands: Commands {
+    @ObservedObject var appState: AppState
+
+    var body: some Commands {
+        CommandMenu("Navigate") {
+            Button("Combine PDFs") { appState.selectedTab = 0 }
+                .keyboardShortcut("1", modifiers: .command)
+            Button("Rename Files") { appState.selectedTab = 1 }
+                .keyboardShortcut("2", modifiers: .command)
+            Button("Split PDF") { appState.selectedTab = 2 }
+                .keyboardShortcut("3", modifiers: .command)
+            Button("Rotate Pages") { appState.selectedTab = 3 }
+                .keyboardShortcut("4", modifiers: .command)
+        }
+    }
+}
+
+// MARK: - Combiner Commands (file list shortcuts — active whenever the window is frontmost)
+struct CombinerCommands: Commands {
+    // focusedSceneValue propagates for the whole window, not just focused element.
+    @FocusedValue(\.combineCommands) var combineCommands: CombineCommands?
+
+    var body: some Commands {
+        CommandMenu("Combiner") {
+            Button("Select Previous") { combineCommands?.selectPrevious() }
+                .keyboardShortcut(.upArrow, modifiers: [])
+                .disabled(!(combineCommands?.hasFiles ?? false))
+
+            Button("Extend Selection Up") { combineCommands?.selectPreviousExtending() }
+                .keyboardShortcut(.upArrow, modifiers: .shift)
+                .disabled(!(combineCommands?.hasFiles ?? false))
+
+            Button("Select Next") { combineCommands?.selectNext() }
+                .keyboardShortcut(.downArrow, modifiers: [])
+                .disabled(!(combineCommands?.hasFiles ?? false))
+
+            Button("Extend Selection Down") { combineCommands?.selectNextExtending() }
+                .keyboardShortcut(.downArrow, modifiers: .shift)
+                .disabled(!(combineCommands?.hasFiles ?? false))
+
+            Divider()
+
+            Button("Move Up") { combineCommands?.moveUp() }
+                .keyboardShortcut(.upArrow, modifiers: .command)
+                .disabled(!(combineCommands?.canMoveUp ?? false))
+
+            Button("Move Down") { combineCommands?.moveDown() }
+                .keyboardShortcut(.downArrow, modifiers: .command)
+                .disabled(!(combineCommands?.canMoveDown ?? false))
+
+            Divider()
+
+            Button("Remove Selected Files") { combineCommands?.removeSelected() }
+                .keyboardShortcut(.delete, modifiers: [])
+                .disabled(!(combineCommands?.canRemove ?? false))
+
+            Divider()
+
+            Button("Select All Files") { combineCommands?.selectAll() }
+                .keyboardShortcut("a", modifiers: .command)
+                .disabled(!(combineCommands?.hasFiles ?? false))
+        }
+    }
+}
+
+// MARK: - Help Commands
+struct HelpCommands: Commands {
+    @ObservedObject var appState: AppState
+
+    var body: some Commands {
+        CommandGroup(after: .help) {
+            Button("Keyboard Shortcuts\u{2026}") {
+                appState.showingKeyboardHelp = true
+            }
+            .keyboardShortcut("`", modifiers: .command)
+        }
+    }
 }
 
 // MARK: - Main App
@@ -31,22 +140,18 @@ struct MusicPDFManagerApp: App {
         }
         .commands {
             CommandGroup(replacing: .newItem) { }
-            CommandMenu("View") {
-                Button("Combine PDFs") { appState.selectedTab = 0 }
-                    .keyboardShortcut("1", modifiers: .command)
-                Button("Rename Files") { appState.selectedTab = 1 }
-                    .keyboardShortcut("2", modifiers: .command)
-                Button("Split PDF") { appState.selectedTab = 2 }
-                    .keyboardShortcut("3", modifiers: .command)
-                Button("Rotate Pages") { appState.selectedTab = 3 }
-                    .keyboardShortcut("4", modifiers: .command)
-            }
+            NavigateCommands(appState: appState)
+            CombinerCommands()
+            HelpCommands(appState: appState)
         }
     }
 }
 
 // MARK: - App Delegate
 class AppDelegate: NSObject, NSApplicationDelegate {
+    func applicationDidFinishLaunching(_ notification: Notification) {
+        InstrumentOrders.setup()
+    }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return true
     }
@@ -83,6 +188,9 @@ struct ContentView: View {
                 .tag(3)
         }
         .frame(minWidth: 900, minHeight: 700)
+        .sheet(isPresented: $appState.showingKeyboardHelp) {
+            ShortcutsHelpView()
+        }
     }
 }
 
@@ -93,7 +201,12 @@ struct CombineView: View {
     @State private var isTargeted = false
     @State private var selectedFiles: Set<UUID> = []
     @State private var removalNoticeVisible = false
+    @State private var removalNoticeCount = 1
+    @State private var focusedFileId: UUID?     // keyboard navigation cursor
+    @State private var anchorFileId: UUID?      // anchor for shift-range selection
+    @FocusState private var listFocused: Bool
     @Environment(\.undoManager) var undoManager
+    @EnvironmentObject private var appState: AppState
     
     var body: some View {
         VStack(spacing: 0) {
@@ -105,6 +218,13 @@ struct CombineView: View {
                 
                 Spacer()
                 
+                Button(action: { appState.showingKeyboardHelp = true }) {
+                    Image(systemName: "keyboard")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .help("Keyboard Shortcuts")
+
                 if !combineManager.files.isEmpty {
                     Button(action: { combineManager.clearAll(undoManager: undoManager) }) {
                         Label("Clear All", systemImage: "xmark.circle.fill")
@@ -193,13 +313,14 @@ struct CombineView: View {
                     
                     Divider()
                     
-                    // File list
+                    // File list — focusable so arrow-key navigation works after a click
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(combineManager.files) { file in
                                 CombineFileRow(
                                     file: file,
                                     isSelected: selectedFiles.contains(file.id),
+                                    isFocused: focusedFileId == file.id,
                                     onToggleSelect: { toggleSelection(file.id) },
                                     onCopiesChanged: { newValue in
                                         combineManager.updateCopies(for: file.id, copies: newValue, undoManager: undoManager)
@@ -214,6 +335,21 @@ struct CombineView: View {
                             }
                         }
                     }
+                    .focusable()
+                    .focused($listFocused)
+                    .onKeyPress { press in
+                        let isShift = press.modifiers.contains(.shift)
+                        switch press.key {
+                        case .upArrow:
+                            navigateSelection(direction: -1, extending: isShift)
+                            return .handled
+                        case .downArrow:
+                            navigateSelection(direction: 1, extending: isShift)
+                            return .handled
+                        default:
+                            return .ignored
+                        }
+                    }
                     
                     Divider()
                     
@@ -224,7 +360,7 @@ struct CombineView: View {
                             HStack(spacing: 8) {
                                 Image(systemName: "trash")
                                     .foregroundColor(.secondary)
-                                Text("File removed")
+                                Text(removalNoticeCount == 1 ? "File removed" : "\(removalNoticeCount) files removed")
                                     .foregroundColor(.secondary)
                                 Spacer()
                                 Button("Undo") {
@@ -279,6 +415,23 @@ struct CombineView: View {
             handleDrop(providers: providers)
             return true
         }
+        // Expose actions + state to the menu bar via @FocusedValue.
+        // No tab guard needed — @FocusedValue returns nil automatically when
+        // CombineView doesn't have focus (i.e. another tab is active).
+        .focusedValue(\.combineCommands, CombineCommands(
+            removeSelected: removeSelected,
+            moveUp: moveUp,
+            moveDown: moveDown,
+            selectAll: selectAll,
+            selectPrevious:          { navigateSelection(direction: -1, extending: false) },
+            selectNext:              { navigateSelection(direction:  1, extending: false) },
+            selectPreviousExtending: { navigateSelection(direction: -1, extending: true)  },
+            selectNextExtending:     { navigateSelection(direction:  1, extending: true)  },
+            canRemove:  !selectedFiles.isEmpty,
+            canMoveUp:  canMoveUp,
+            canMoveDown: canMoveDown,
+            hasFiles:   !combineManager.files.isEmpty
+        ))
     }
     
     private var emptyStateView: some View {
@@ -361,22 +514,67 @@ struct CombineView: View {
     private func toggleSelection(_ id: UUID) {
         if selectedFiles.contains(id) {
             selectedFiles.remove(id)
+            if focusedFileId == id { focusedFileId = nil; anchorFileId = nil }
         } else {
             selectedFiles.insert(id)
+            focusedFileId = id
+            anchorFileId = id
         }
+        listFocused = true  // pull keyboard focus to the list after a click
     }
-    
+
     private func selectAll() {
         selectedFiles = Set(combineManager.files.map { $0.id })
+        anchorFileId = combineManager.files.first?.id
+        focusedFileId = combineManager.files.last?.id
     }
-    
+
     private func selectNone() {
         selectedFiles.removeAll()
+        focusedFileId = nil
+        anchorFileId = nil
     }
-    
+
     private func removeSelected() {
+        guard !selectedFiles.isEmpty else { return }
+        let count = selectedFiles.count
         combineManager.removeFiles(ids: selectedFiles, undoManager: undoManager)
         selectedFiles.removeAll()
+        focusedFileId = nil
+        anchorFileId = nil
+        showRemovalNotice(count: count, undoManager: undoManager)
+    }
+
+    /// Keyboard navigation: moves the cursor by `direction` (±1), extending the
+    /// selection from the anchor when `extending` is true (Shift held).
+    private func navigateSelection(direction: Int, extending: Bool) {
+        let files = combineManager.files
+        guard !files.isEmpty else { return }
+
+        let currentIndex: Int
+        if let id = focusedFileId, let idx = files.firstIndex(where: { $0.id == id }) {
+            currentIndex = idx
+        } else {
+            // No cursor yet — start from the logical edge
+            currentIndex = direction > 0 ? -1 : files.count
+        }
+
+        let newIndex = max(0, min(files.count - 1, currentIndex + direction))
+        let newId = files[newIndex].id
+        focusedFileId = newId
+
+        if extending {
+            // Extend selection from anchor to cursor
+            let anchorIndex = anchorFileId.flatMap { id in
+                files.firstIndex(where: { $0.id == id })
+            } ?? newIndex
+            let lo = min(anchorIndex, newIndex)
+            let hi = max(anchorIndex, newIndex)
+            selectedFiles = Set(files[lo...hi].map { $0.id })
+        } else {
+            anchorFileId = newId
+            selectedFiles = [newId]
+        }
     }
 
     private func moveUp() {
@@ -387,7 +585,8 @@ struct CombineView: View {
         combineManager.moveDown(ids: selectedFiles, undoManager: undoManager)
     }
 
-    private func showRemovalNotice(undoManager: UndoManager?) {
+    private func showRemovalNotice(count: Int = 1, undoManager: UndoManager?) {
+        removalNoticeCount = count
         withAnimation(.easeInOut(duration: 0.2)) { removalNoticeVisible = true }
         // Auto-dismiss after 5 s; pressing Undo dismisses it immediately
         DispatchQueue.main.asyncAfter(deadline: .now() + 5) {
@@ -417,6 +616,7 @@ struct CombineView: View {
 struct CombineFileRow: View {
     let file: CombineFile
     let isSelected: Bool
+    let isFocused: Bool
     let onToggleSelect: () -> Void
     let onCopiesChanged: (Int) -> Void
     let onRemove: () -> Void
@@ -462,11 +662,85 @@ struct CombineFileRow: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
-        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+        .background(
+            isSelected
+                ? Color.accentColor.opacity(isFocused ? 0.18 : 0.1)
+                : Color.clear
+        )
         .contentShape(Rectangle())
         .onTapGesture {
             onToggleSelect()
         }
+    }
+}
+
+
+// MARK: - Keyboard Shortcuts Help
+struct ShortcutsHelpView: View {
+    @Environment(\.dismiss) private var dismiss
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Keyboard Shortcuts")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            shortcutSection("File List Navigation") {
+                shortcutRow("↑ / ↓", "Select previous / next file")
+                shortcutRow("⇧↑ / ⇧↓", "Extend selection up / down")
+                shortcutRow("⌘A", "Select all files")
+            }
+
+            shortcutSection("File Management") {
+                shortcutRow("⌫", "Remove selected files")
+                shortcutRow("⌘↑", "Move selected files up")
+                shortcutRow("⌘↓", "Move selected files down")
+                shortcutRow("⌘Z", "Undo")
+                shortcutRow("⌘⇧Z", "Redo")
+            }
+
+            shortcutSection("Tabs") {
+                shortcutRow("⌘1", "Combine PDFs")
+                shortcutRow("⌘2", "Rename Files")
+                shortcutRow("⌘3", "Split PDF")
+                shortcutRow("⌘4", "Rotate Pages")
+            }
+
+            shortcutSection("Renamer") {
+                shortcutRow("⌘,", "Open Preferences")
+            }
+
+            Spacer()
+
+            HStack {
+                Spacer()
+                Button("Done") { dismiss() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(36)
+        .frame(width: 460, height: 580)
+    }
+
+    private func shortcutSection(_ title: String, @ViewBuilder content: () -> some View) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(title)
+                .font(.headline)
+                .foregroundColor(.primary)
+            content()
+        }
+    }
+
+    private func shortcutRow(_ shortcut: String, _ description: String) -> some View {
+        HStack {
+            Text(shortcut)
+                .font(.system(.body, design: .monospaced))
+                .foregroundColor(.secondary)
+                .frame(width: 80, alignment: .leading)
+            Text(description)
+        }
+        .padding(.leading, 8)
     }
 }
 
@@ -1675,7 +1949,72 @@ enum EnsembleType: String, CaseIterable {
 }
 
 struct InstrumentOrders {
-    static let band = [
+
+    // MARK: - External file location
+    // Users can edit this file to customise instrument ordering.
+    // Changes take effect the next time the app is launched.
+    static var fileURL: URL? {
+        guard let appSupport = FileManager.default.urls(
+            for: .applicationSupportDirectory, in: .userDomainMask).first
+        else { return nil }
+        let dir = appSupport.appendingPathComponent("Music PDF Manager", isDirectory: true)
+        return dir.appendingPathComponent("instrument-orders.json")
+    }
+
+    // MARK: - Loaded state (populated by setup())
+    private static var loaded: [String: [String]] = [:]
+
+    // MARK: - Public accessors
+    static var band:      [String] { loaded["band"]      ?? bandDefault      }
+    static var jazz:      [String] { loaded["jazz"]      ?? jazzDefault      }
+    static var orchestra: [String] { loaded["orchestra"] ?? orchestraDefault }
+
+    static func getOrder(for type: EnsembleType) -> [String] {
+        switch type {
+        case .band:      return band
+        case .jazz:      return jazz
+        case .orchestra: return orchestra
+        }
+    }
+
+    // MARK: - Setup (call once at launch from AppDelegate)
+    static func setup() {
+        guard let url = fileURL else { return }
+
+        // Create the Application Support directory if needed
+        let dir = url.deletingLastPathComponent()
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+
+        // Write defaults on first run so the user has an editable template
+        if !FileManager.default.fileExists(atPath: url.path) {
+            writeDefaults(to: url)
+        }
+
+        load(from: url)
+    }
+
+    // MARK: - Private helpers
+    private static func load(from url: URL) {
+        guard let data = try? Data(contentsOf: url),
+              let dict = try? JSONDecoder().decode([String: [String]].self, from: data)
+        else { return }
+        loaded = dict
+    }
+
+    private static func writeDefaults(to url: URL) {
+        let defaults: [String: [String]] = [
+            "band":      bandDefault,
+            "jazz":      jazzDefault,
+            "orchestra": orchestraDefault,
+        ]
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(defaults) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    // MARK: - Built-in defaults (used as fallback if the file is missing or unreadable)
+    private static let bandDefault = [
         "score",
         "instrumentation",
         "piccolo",
@@ -1744,8 +2083,8 @@ struct InstrumentOrders {
         "cello",
         "double bass",
     ]
-    
-    static let jazz = [
+
+    private static let jazzDefault = [
         "score",
         "instrumentation",
         "voice",
@@ -1815,8 +2154,8 @@ struct InstrumentOrders {
         "euphonium",
         "tuba",
     ]
-    
-    static let orchestra = [
+
+    private static let orchestraDefault = [
         "score",
         "instrumentation",
         "piccolo",
@@ -1877,14 +2216,6 @@ struct InstrumentOrders {
         "string bass",
         "bass",
     ]
-    
-    static func getOrder(for type: EnsembleType) -> [String] {
-        switch type {
-        case .band: return band
-        case .jazz: return jazz
-        case .orchestra: return orchestra
-        }
-    }
 }
 
 enum RenameOperationType {
