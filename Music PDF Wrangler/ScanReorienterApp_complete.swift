@@ -708,10 +708,10 @@ struct ShortcutsHelpView: View {
                 shortcutRow("⌘4", "Rotate Pages")
             }
 
-            shortcutSection("Split PDF") {
+            shortcutSection("Split PDF & Rotate Pages") {
                 shortcutRow("← / →", "Previous / next page")
                 shortcutRow("⌘← / ⌘→", "First / last page")
-                shortcutRow("Space", "Toggle split marker")
+                shortcutRow("Space", "Toggle split marker (Split tab)")
             }
 
             shortcutSection("Renamer") {
@@ -2341,6 +2341,9 @@ struct RotateView: View {
     @State private var additionalRotationAngle: RotationAngle = .rotate180
     @State private var currentPage: Int = 0
     @State private var isShowingSavePanel = false
+    @FocusState private var isViewFocused: Bool
+
+    var totalPages: Int { pdfManager.pdfDocument?.pageCount ?? 0 }
     
     var body: some View {
         VStack(spacing: 0) {
@@ -2460,13 +2463,34 @@ struct RotateView: View {
                 DropZoneView(pdfManager: pdfManager)
             }
         }
+        .focusable()
+        .focused($isViewFocused)
+        .onAppear { isViewFocused = true }
+        .onChange(of: pdfManager.pdfDocument) { newValue in
+            if newValue != nil { isViewFocused = true }
+        }
+        .onKeyPress { press in
+            guard pdfManager.pdfDocument != nil else { return .ignored }
+            switch press.key {
+            case .leftArrow:
+                if press.modifiers.contains(.command) { currentPage = 0 }
+                else if currentPage > 0 { currentPage -= 1 }
+                return .handled
+            case .rightArrow:
+                if press.modifiers.contains(.command) { currentPage = totalPages - 1 }
+                else if currentPage < totalPages - 1 { currentPage += 1 }
+                return .handled
+            default:
+                return .ignored
+            }
+        }
         .onChange(of: isShowingSavePanel) { newValue in
             if newValue, let document = pdfManager.pdfDocument {
                 saveRotatedPDF(document: document)
             }
         }
     }
-    
+
     private func saveRotatedPDF(document: PDFDocument) {
         let savePanel = NSSavePanel()
         savePanel.allowedContentTypes = [.pdf]
@@ -3430,27 +3454,37 @@ struct RotatePreviewSection: View {
         VStack(spacing: 12) {
             // Page navigation
             HStack {
+                Button(action: firstPage) {
+                    Image(systemName: "chevron.backward.to.line")
+                }
+                .disabled(currentPage == 0)
+
                 Button(action: previousPage) {
                     Image(systemName: "chevron.left")
                 }
                 .disabled(currentPage == 0)
-                
+
                 Spacer()
-                
+
                 VStack(spacing: 4) {
                     Text("Page \(currentPage + 1) of \(totalPages)")
                         .font(.headline)
-                    
+
                     Text(rotationDescription)
                         .font(.caption)
                         .foregroundColor(totalRotationForCurrentPage > 0 ? .orange : .secondary)
                         .fontWeight(totalRotationForCurrentPage > 0 ? .semibold : .regular)
                 }
-                
+
                 Spacer()
-                
+
                 Button(action: nextPage) {
                     Image(systemName: "chevron.right")
+                }
+                .disabled(currentPage >= totalPages - 1)
+
+                Button(action: lastPage) {
+                    Image(systemName: "chevron.forward.to.line")
                 }
                 .disabled(currentPage >= totalPages - 1)
             }
@@ -3494,16 +3528,15 @@ struct RotatePreviewSection: View {
         }
     }
     
+    private func firstPage() { currentPage = 0 }
+    private func lastPage()  { currentPage = totalPages - 1 }
+
     private func previousPage() {
-        if currentPage > 0 {
-            currentPage -= 1
-        }
+        if currentPage > 0 { currentPage -= 1 }
     }
-    
+
     private func nextPage() {
-        if currentPage < totalPages - 1 {
-            currentPage += 1
-        }
+        if currentPage < totalPages - 1 { currentPage += 1 }
     }
 }
 
