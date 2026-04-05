@@ -747,7 +747,7 @@ struct ShortcutsHelpView: View {
 }
 
 // MARK: - Combine File Model
-struct CombineFile: Identifiable {
+struct CombineFile: Identifiable, Equatable {
     let id = UUID()
     let url: URL
     let name: String
