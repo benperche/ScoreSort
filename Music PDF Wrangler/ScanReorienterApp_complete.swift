@@ -1652,7 +1652,7 @@ class RenamerManager: ObservableObject {
     
     private func scanFolder() {
         guard let folderURL = folderURL else { return }
-        
+
         operations = []
         
         let fileManager = FileManager.default
@@ -1901,7 +1901,6 @@ class RenamerManager: ObservableObject {
         if let firstMatch = matches.min(by: { $0.position < $1.position }) {
             return (firstMatch.index, firstMatch.instrument)
         }
-        
         return nil
     }
     
@@ -1961,6 +1960,10 @@ struct InstrumentOrders {
         return dir.appendingPathComponent("instrument-orders.json")
     }
 
+    // Bump this whenever the built-in defaults change so existing JSON files
+    // are automatically regenerated on next launch.
+    private static let defaultsVersion = 2
+
     // MARK: - Loaded state (populated by setup())
     private static var loaded: [String: [String]] = [:]
 
@@ -1985,8 +1988,21 @@ struct InstrumentOrders {
         let dir = url.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        // Write defaults on first run so the user has an editable template
-        if !FileManager.default.fileExists(atPath: url.path) {
+        // Rewrite defaults if the file is missing OR was built with an older version.
+        // _version is stored as ["2"] so the file stays as [String: [String]].
+        let needsRewrite: Bool
+        if FileManager.default.fileExists(atPath: url.path),
+           let data = try? Data(contentsOf: url),
+           let dict = try? JSONDecoder().decode([String: [String]].self, from: data),
+           let versionStr = dict["_version"]?.first,
+           let version = Int(versionStr),
+           version >= defaultsVersion {
+            needsRewrite = false
+        } else {
+            needsRewrite = true
+        }
+
+        if needsRewrite {
             writeDefaults(to: url)
         }
 
@@ -1998,11 +2014,15 @@ struct InstrumentOrders {
         guard let data = try? Data(contentsOf: url),
               let dict = try? JSONDecoder().decode([String: [String]].self, from: data)
         else { return }
-        loaded = dict
+        // Strip the version sentinel so it doesn't appear as an instrument order
+        loaded = dict.filter { $0.key != "_version" }
     }
 
     private static func writeDefaults(to url: URL) {
+        // _version is written as a string list with a single sentinel entry so the
+        // file stays as [String: [String]] and remains hand-editable.
         let defaults: [String: [String]] = [
+            "_version":  [String(defaultsVersion)],
             "band":      bandDefault,
             "jazz":      jazzDefault,
             "orchestra": orchestraDefault,
