@@ -232,16 +232,6 @@ All orders are fully customisable in Preferences.
 - **PDF rotation**: Mutates original page objects - always creates a new file
 - **Drag & drop**: Currently only supports single folder/file drops
 
-## Future Enhancements
-
-- [ ] Batch processing for multiple folders
-- [ ] Export/import custom instrument orders
-- [ ] Undo functionality for renaming
-- [ ] PDF merging tool
-- [ ] Support for other file types (images, etc.)
-- [ ] Automatic backup before renaming
-- [ ] Regular expression support for advanced instrument detection
-
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
