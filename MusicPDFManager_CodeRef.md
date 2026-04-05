@@ -18,14 +18,28 @@ MusicPDFManagerApp (@main)
 
 Window min size: 900×700.
 
+### Menu Bar Commands
+
+| Struct | Menu | Purpose |
+|--------|------|---------|
+| `NavigateCommands` | Navigate | Tab switching (⌘1–⌘4) |
+| `CombinerCommands` | Combiner | File list shortcuts (arrow keys, ⌘↑/↓, ⌫, ⌘A) |
+| `HelpCommands` | Help | Opens `ShortcutsHelpView` sheet |
+
+**`CombineCommands`** (plain struct, not `Commands`) — passed via `FocusedValues` (key: `CombineCommandsKey`) using `.focusedSceneValue(\.combineCommands, …)` on `CombineView`. `CombinerCommands` reads it with `@FocusedSceneValue`. All `can*` flags are gated on `appState.selectedTab == 0` so shortcuts are inert on other tabs.
+
+**`AppState`** gains `showingKeyboardHelp: Bool` — toggled by `HelpCommands` and the ⌨ toolbar button in `CombineView`. `ContentView` presents `ShortcutsHelpView` as `.sheet(isPresented:)` off this flag.
+
+**`ShortcutsHelpView`** — modal sheet listing all shortcuts grouped into Navigation, File Management, Tabs, and Renamer sections.
+
 ---
 
 ## Tab 0 — Combine PDFs
 
-**View:** `CombineView`  
-**ViewModel:** `CombineManager: ObservableObject`  
-**Model:** `CombineFile: Identifiable` (id, url, name, pageCount, copies: Int)  
-**Row:** `CombineFileRow`
+**View:** `CombineView`
+**ViewModel:** `CombineManager: ObservableObject`
+**Model:** `CombineFile: Identifiable` (id, url, name, pageCount, copies: Int)
+**Row:** `CombineFileRow` (gains `isFocused: Bool` for stronger highlight on keyboard cursor row)
 
 ### CombineManager key methods
 | Method | Purpose |
@@ -33,13 +47,32 @@ Window min size: 900×700.
 | `addFiles(urls:)` | Reads PDFs via PDFKit, appends CombineFile |
 | `removeFiles(ids:)` | Removes by UUID set |
 | `updateCopies(for:copies:)` | Clamps to min 1 |
-| `moveUp/Down(id:)` | `swapAt` |
+| `moveUp/Down(ids:)` | Multi-select block move via `swapAt` |
+| `clearAll()` | Removes all files |
 | `createCombinedPDF(to:addBlankPages:)` | Writes to URL |
 | `openInPreview(addBlankPages:)` | Writes temp file → NSWorkspace.open |
+
+All mutating methods take an `undoManager: UndoManager?` and use snapshot-based undo (captures pre-action state; registers undo handler that also registers redo).
 
 **Computed:** `totalFiles` = sum of copies; `totalPages` = sum of pageCount×copies.
 
 **Blank page logic:** If `addBlankPages` and file has odd pageCount, insert a blank PDFPage after its last copy's pages.
+
+### CombineView keyboard navigation state
+| Property | Type | Purpose |
+|----------|------|---------|
+| `selectedFiles` | `Set<UUID>` | Currently selected (checked) files |
+| `focusedFileId` | `UUID?` | Keyboard cursor (highlighted row) |
+| `anchorFileId` | `UUID?` | Shift-range selection anchor |
+| `listFocused` | `Bool` (@FocusState) | Whether ScrollView has key focus |
+| `removalNoticeVisible` | `Bool` | Undo banner visibility |
+| `removalNoticeCount` | `Int` | File count for banner text (singular/plural) |
+
+**`navigateSelection(direction:extending:)`** — moves `focusedFileId` by ±1; if `extending` is true, expands `selectedFiles` between `anchorFileId` and new cursor; otherwise replaces selection with just the new item and resets anchor.
+
+**Keyboard shortcuts (in-view):** The `ScrollView` carries `.focusable()` + `.focused($listFocused)` + `.onKeyPress` for ↑/↓ (plain and ⇧). Cmd+↑/↓ and ⌫ are handled exclusively via `CombinerCommands` menu shortcuts (which take priority over `onKeyPress`). `listFocused` is set to `true` on any row tap so navigation is immediately available after a click.
+
+**Removal notice:** shown by `showRemovalNotice(count:undoManager:)` — called from both the per-row minus button (count=1) and `removeSelected()` (count = selection size). Auto-dismisses after 5 s; Undo button dismisses immediately and invokes `undoManager.undo()`.
 
 ---
 
@@ -100,8 +133,11 @@ hasCustomOrder: Bool
 | `.undetected` | secondary | No instrument found |
 
 ### Instrument orders (`InstrumentOrders`)
-Three static arrays: `band`, `jazz`, `orchestra`. Loaded via `getOrder(for: EnsembleType)`.  
+Three computed vars: `band`, `jazz`, `orchestra`. Loaded via `getOrder(for: EnsembleType)`.
 `customInstrumentOrder` starts from the active preset; `hasCustomOrder` flag prevents preset changes from overwriting user edits.
+
+**External file:** `~/Library/Application Support/Music PDF Manager/instrument-orders.json`
+Written from built-in defaults on first launch (via `InstrumentOrders.setup()` called in `AppDelegate.applicationDidFinishLaunching`). App loads from the file at startup; changes take effect on next launch. If the file is missing or unreadable the private `bandDefault`/`jazzDefault`/`orchestraDefault` arrays are used as fallback. File is pretty-printed JSON: `{ "band": [...], "jazz": [...], "orchestra": [...] }`.
 
 **Band order highlights:** score → piccolo → flute → oboe → cor anglais/english horn → bassoon → contrabassoon → Eb clarinet → clarinet → alto clarinet → bass clarinet → contrabass clarinet → sopranos sax → alto sax → tenor sax → bari sax → bass sax → cornet → trumpet → horn → trombone → bass trombone → euphonium/baritone → tuba → guitar/keyboard/piano/harp → string bass/bass → timpani → mallets → bells/chimes/glockenspiel/xylophone/vibraphone/marimba → drums → percussion → violin → viola → cello → double bass
 
