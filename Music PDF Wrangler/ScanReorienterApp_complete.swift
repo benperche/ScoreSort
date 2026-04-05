@@ -1078,59 +1078,58 @@ struct PreferencesView: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                 
-                ScrollView {
-                    LazyVStack(spacing: 4) {
-                        ForEach(Array(editableOrder.enumerated()), id: \.offset) { index, instrument in
-                            HStack {
-                                Text("\(index + 1).")
-                                    .foregroundColor(.secondary)
-                                    .frame(width: 40, alignment: .trailing)
-                                
-                                Text(instrument)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .padding(8)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .fill(Color(NSColor.controlBackgroundColor))
-                                    )
-                                
+                List {
+                    ForEach(Array(editableOrder.enumerated()), id: \.element) { index, instrument in
+                        HStack(spacing: 8) {
+                            // Up/down arrows on the left, away from the scrollbar
+                            VStack(spacing: 2) {
                                 Button(action: {
-                                    editableOrder.remove(at: index)
+                                    if index > 0 {
+                                        editableOrder.swapAt(index, index - 1)
+                                    }
                                 }) {
-                                    Image(systemName: "minus.circle.fill")
-                                        .foregroundColor(.red)
+                                    Image(systemName: "chevron.up")
+                                        .font(.caption)
                                 }
                                 .buttonStyle(.plain)
-                                
-                                VStack(spacing: 2) {
-                                    Button(action: {
-                                        if index > 0 {
-                                            editableOrder.swapAt(index, index - 1)
-                                        }
-                                    }) {
-                                        Image(systemName: "chevron.up")
-                                            .font(.caption)
+                                .disabled(index == 0)
+
+                                Button(action: {
+                                    if index < editableOrder.count - 1 {
+                                        editableOrder.swapAt(index, index + 1)
                                     }
-                                    .buttonStyle(.plain)
-                                    .disabled(index == 0)
-                                    
-                                    Button(action: {
-                                        if index < editableOrder.count - 1 {
-                                            editableOrder.swapAt(index, index + 1)
-                                        }
-                                    }) {
-                                        Image(systemName: "chevron.down")
-                                            .font(.caption)
-                                    }
-                                    .buttonStyle(.plain)
-                                    .disabled(index == editableOrder.count - 1)
+                                }) {
+                                    Image(systemName: "chevron.down")
+                                        .font(.caption)
                                 }
+                                .buttonStyle(.plain)
+                                .disabled(index == editableOrder.count - 1)
                             }
+                            .padding(.leading, 4)
+
+                            Text("\(index + 1).")
+                                .foregroundColor(.secondary)
+                                .frame(width: 36, alignment: .trailing)
+
+                            Text(instrument)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                            Button(action: {
+                                editableOrder.remove(at: index)
+                            }) {
+                                Image(systemName: "minus.circle.fill")
+                                    .foregroundColor(.red)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(.trailing, 4)
                         }
                     }
+                    .onMove { source, destination in
+                        editableOrder.move(fromOffsets: source, toOffset: destination)
+                    }
                 }
+                .listStyle(.bordered)
                 .frame(height: 300)
-                .border(Color.gray.opacity(0.2))
                 
                 // Add new instrument
                 HStack {
