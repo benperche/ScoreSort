@@ -13,55 +13,34 @@ import PDFKit
 import UniformTypeIdentifiers
 import Combine
 
-enum AppTab: Int {
-    case combine
-    case rename
-    case split
-    case rotate
+// MARK: - App State
+class AppState: ObservableObject {
+    @Published var selectedTab = 0
 }
 
 // MARK: - Main App
 @main
 struct MusicPDFManagerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @StateObject private var renamerManager = RenamerManager()
-    @State private var selectedTab: AppTab = .combine
+    @StateObject private var appState = AppState()
     
     var body: some Scene {
         WindowGroup {
-            ContentView(renamerManager: renamerManager, selectedTab: $selectedTab)
+            ContentView()
+                .environmentObject(appState)
         }
         .commands {
             CommandGroup(replacing: .newItem) { }
-            CommandMenu("Go") {
-                Button("Combine PDFs") {
-                    selectedTab = .combine
-                }
-                .keyboardShortcut("1", modifiers: .command)
-
-                Button("Rename Files") {
-                    selectedTab = .rename
-                }
-                .keyboardShortcut("2", modifiers: .command)
-
-                Button("Split PDF") {
-                    selectedTab = .split
-                }
-                .keyboardShortcut("3", modifiers: .command)
-
-                Button("Rotate Pages") {
-                    selectedTab = .rotate
-                }
-                .keyboardShortcut("4", modifiers: .command)
+            CommandMenu("View") {
+                Button("Combine PDFs") { appState.selectedTab = 0 }
+                    .keyboardShortcut("1", modifiers: .command)
+                Button("Rename Files") { appState.selectedTab = 1 }
+                    .keyboardShortcut("2", modifiers: .command)
+                Button("Split PDF") { appState.selectedTab = 2 }
+                    .keyboardShortcut("3", modifiers: .command)
+                Button("Rotate Pages") { appState.selectedTab = 3 }
+                    .keyboardShortcut("4", modifiers: .command)
             }
-        }
-
-        Settings {
-            PreferencesView(
-                ensembleType: $renamerManager.ensembleType,
-                instrumentOrder: $renamerManager.customInstrumentOrder
-            )
-            .frame(minWidth: 720, minHeight: 760)
         }
     }
 }
@@ -75,34 +54,33 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
 // MARK: - Main Content View
 struct ContentView: View {
-    @ObservedObject var renamerManager: RenamerManager
-    @Binding var selectedTab: AppTab
+    @EnvironmentObject private var appState: AppState
     
     var body: some View {
-        TabView(selection: $selectedTab) {
+        TabView(selection: $appState.selectedTab) {
             CombineView()
                 .tabItem {
                     Label("Combine PDFs", systemImage: "doc.on.doc")
                 }
-                .tag(AppTab.combine)
+                .tag(0)
             
-            RenamerView(renamerManager: renamerManager)
+            RenamerView()
                 .tabItem {
                     Label("Rename Files", systemImage: "folder.badge.gearshape")
                 }
-                .tag(AppTab.rename)
+                .tag(1)
             
             SplitView()
                 .tabItem {
                     Label("Split PDF", systemImage: "scissors")
                 }
-                .tag(AppTab.split)
+                .tag(2)
             
             RotateView()
                 .tabItem {
                     Label("Rotate Pages", systemImage: "rotate.right")
                 }
-                .tag(AppTab.rotate)
+                .tag(3)
         }
         .frame(minWidth: 900, minHeight: 700)
     }
@@ -601,10 +579,9 @@ class CombineManager: ObservableObject {
 
 // MARK: - Renamer View
 struct RenamerView: View {
-    @ObservedObject var renamerManager: RenamerManager
+    @StateObject private var renamerManager = RenamerManager()
     @State private var showingPreferences = false
     @State private var selectedFileForAssignment: RenameOperation?
-    @State private var selectedUndetectedFile: RenameOperation?
     @State private var isFolderTargeted = false
     @State private var sortColumn: SortColumn = .newName
     @State private var sortAscending = true
@@ -634,7 +611,6 @@ struct RenamerView: View {
                     Button(action: { showingPreferences = true }) {
                         Label("Preferences", systemImage: "gearshape")
                     }
-                    .keyboardShortcut(",", modifiers: .command)
                     
                     Button(action: { renamerManager.clearFolder() }) {
                         Label("Clear", systemImage: "xmark.circle.fill")
@@ -675,25 +651,8 @@ struct RenamerView: View {
                 operation: operation,
                 existingNumbers: renamerManager.getExistingNumbers(),
                 onAssign: { number in
-                    renamerManager.setManualOverride(for: operation.originalURL, number: number)
+                    renamerManager.setManualOverride(for: operation.originalName, number: number)
                     selectedFileForAssignment = nil
-                }
-            )
-        }
-        .sheet(item: $selectedUndetectedFile) { operation in
-            UndetectedFileActionView(
-                operation: operation,
-                existingNumbers: renamerManager.getExistingNumbers(),
-                onRename: { newFilename in
-                    if renamerManager.renameOriginalFile(operation.originalURL, to: newFilename) {
-                        selectedUndetectedFile = nil
-                        return true
-                    }
-                    return false
-                },
-                onAssign: { number in
-                    renamerManager.setManualOverride(for: operation.originalURL, number: number)
-                    selectedUndetectedFile = nil
                 }
             )
         }
@@ -705,6 +664,12 @@ struct RenamerView: View {
                 _ = showingPreferences
             }
         }
+        // ⌘, always opens preferences regardless of whether a folder is loaded
+        .background(
+            Button("") { showingPreferences = true }
+                .keyboardShortcut(",", modifiers: .command)
+                .hidden()
+        )
     }
     
     private var folderSelectionView: some View {
@@ -831,11 +796,7 @@ struct RenamerView: View {
                 LazyVStack(spacing: 0) {
                     ForEach(sortedOperations) { operation in
                         FileRowView(operation: operation) {
-                            if operation.type == .undetected {
-                                selectedUndetectedFile = operation
-                            } else {
-                                selectedFileForAssignment = operation
-                            }
+                            selectedFileForAssignment = operation
                         }
                         Divider()
                     }
@@ -886,13 +847,6 @@ struct RenamerView: View {
             
             // Action button
             HStack {
-                Button(action: { renamerManager.undoLastRename() }) {
-                    Label("Undo Last Rename", systemImage: "arrow.uturn.backward")
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-                .disabled(!renamerManager.canUndoLastRename)
-
                 Spacer()
                 
                 Button(action: { renamerManager.executeRename() }) {
@@ -1067,181 +1021,6 @@ struct ManualAssignmentView: View {
     }
 }
 
-// MARK: - Undetected File Action View
-struct UndetectedFileActionView: View {
-    let operation: RenameOperation
-    let existingNumbers: [Int]
-    let onRename: (String) -> Bool
-    let onAssign: (Int) -> Void
-
-    @State private var editableBaseName: String
-    @State private var selectedNumber: Int = 1
-    @Environment(\.dismiss) private var dismiss
-
-    init(operation: RenameOperation, existingNumbers: [Int], onRename: @escaping (String) -> Bool, onAssign: @escaping (Int) -> Void) {
-        self.operation = operation
-        self.existingNumbers = existingNumbers
-        self.onRename = onRename
-        self.onAssign = onAssign
-
-        let originalStem = operation.originalURL.deletingPathExtension().lastPathComponent
-        _editableBaseName = State(initialValue: originalStem)
-    }
-
-    private var fileExtension: String {
-        operation.originalURL.pathExtension
-    }
-
-    private var trimmedBaseName: String {
-        editableBaseName.trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private var proposedFilename: String {
-        guard !trimmedBaseName.isEmpty else { return "" }
-        guard !fileExtension.isEmpty else { return trimmedBaseName }
-        return "\(trimmedBaseName).\(fileExtension)"
-    }
-
-    private var renameChanged: Bool {
-        proposedFilename != operation.originalName
-    }
-
-    private var canRename: Bool {
-        !proposedFilename.isEmpty && renameChanged
-    }
-
-    private var willShiftOthers: Bool {
-        existingNumbers.contains(selectedNumber)
-    }
-
-    private var shiftDescription: String {
-        if willShiftOthers {
-            let affectedNumbers = existingNumbers.filter { $0 >= selectedNumber }.sorted()
-            if affectedNumbers.isEmpty {
-                return ""
-            }
-            let first = affectedNumbers.first!
-            let last = affectedNumbers.last!
-            if first == last {
-                return "File currently numbered \(String(format: "%02d", first)) will become \(String(format: "%02d", first + 1))"
-            } else {
-                return "Files numbered \(String(format: "%02d", first))-\(String(format: "%02d", last)) will shift to \(String(format: "%02d", first + 1))-\(String(format: "%02d", last + 1))"
-            }
-        }
-        return ""
-    }
-
-    var body: some View {
-        VStack(spacing: 18) {
-            VStack(spacing: 8) {
-                Text("Fix Unrecognised File")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-
-                Text("File: \(operation.originalName)")
-                    .font(.callout)
-                    .foregroundColor(.secondary)
-                    .lineLimit(2)
-                    .truncationMode(.middle)
-                    .multilineTextAlignment(.center)
-
-                Text("Correct the filename here and the folder will be rescanned immediately.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .multilineTextAlignment(.center)
-            }
-
-            Divider()
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Rename file")
-                    .font(.headline)
-
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    TextField("Filename", text: $editableBaseName)
-                        .textFieldStyle(.roundedBorder)
-
-                    if !fileExtension.isEmpty {
-                        Text(".\(fileExtension)")
-                            .foregroundColor(.secondary)
-                    }
-                }
-
-                if !proposedFilename.isEmpty {
-                    Text("Will rename to \(proposedFilename)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-
-                HStack {
-                    Spacer()
-
-                    Button("Rename and Rescan") {
-                        if onRename(proposedFilename) {
-                            dismiss()
-                        }
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canRename)
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(NSColor.controlBackgroundColor))
-            )
-
-            VStack(alignment: .leading, spacing: 12) {
-                Text("Or assign a number manually")
-                    .font(.headline)
-
-                HStack(spacing: 12) {
-                    TextField("Number", value: $selectedNumber, format: .number)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 100)
-
-                    Stepper("", value: $selectedNumber, in: 0...99)
-                }
-
-                if willShiftOthers {
-                    Text("Warning: " + shiftDescription)
-                        .font(.caption)
-                        .foregroundColor(.orange)
-                        .fontWeight(.semibold)
-                }
-
-                HStack {
-                    Spacer()
-
-                    Button("Assign Number") {
-                        onAssign(selectedNumber)
-                        dismiss()
-                    }
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(NSColor.controlBackgroundColor))
-            )
-
-            HStack {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-
-                Spacer()
-            }
-        }
-        .padding(24)
-        .frame(width: 560, height: 420)
-        .background(Color(NSColor.windowBackgroundColor))
-    }
-}
-
 // MARK: - Preferences View
 struct PreferencesView: View {
     @Binding var ensembleType: EnsembleType
@@ -1258,123 +1037,117 @@ struct PreferencesView: View {
     }
     
     var body: some View {
-        VStack(spacing: 0) {
-            VStack(spacing: 20) {
-                Text("Instrument Order Preferences")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                    .frame(maxWidth: .infinity)
-                    .padding(.top, 16)
+        VStack(spacing: 20) {
+            Text("Instrument Order Preferences")
+                .font(.title2)
+                .fontWeight(.semibold)
+            
+            // Ensemble type selector
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Ensemble Type:")
+                    .font(.headline)
                 
-                // Ensemble type selector
-                VStack(alignment: .leading, spacing: 8) {
-                    Text("Ensemble Type:")
+                Picker("Ensemble Type", selection: $ensembleType) {
+                    Text("Wind Band").tag(EnsembleType.band)
+                    Text("Jazz Band").tag(EnsembleType.jazz)
+                    Text("Orchestra").tag(EnsembleType.orchestra)
+                }
+                .pickerStyle(.segmented)
+                .onChange(of: ensembleType) { newType in
+                    editableOrder = InstrumentOrders.getOrder(for: newType)
+                }
+            }
+            
+            Divider()
+            
+            // Instrument list
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text("Instruments (in order):")
                         .font(.headline)
                     
-                    Picker("Ensemble Type", selection: $ensembleType) {
-                        Text("Wind Band").tag(EnsembleType.band)
-                        Text("Jazz Band").tag(EnsembleType.jazz)
-                        Text("Orchestra").tag(EnsembleType.orchestra)
+                    Spacer()
+                    
+                    Button("Reset to Default") {
+                        editableOrder = InstrumentOrders.getOrder(for: ensembleType)
                     }
-                    .pickerStyle(.segmented)
-                    .onChange(of: ensembleType) { newType in
-                        editableOrder = InstrumentOrders.getOrder(for: newType)
-                    }
+                    .font(.caption)
                 }
                 
-                Divider()
+                Text("Files are numbered sequentially based on this order. Drag to reorder.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
                 
-                // Instrument list
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack {
-                        Text("Instruments (in order):")
-                            .font(.headline)
-                        
-                        Spacer()
-                        
-                        Button("Reset to Default") {
-                            editableOrder = InstrumentOrders.getOrder(for: ensembleType)
-                        }
-                        .font(.caption)
-                    }
-                    
-                    Text("Files are numbered sequentially based on this order. Drag to reorder.")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    
-                    ScrollView {
-                        LazyVStack(spacing: 4) {
-                            ForEach(Array(editableOrder.enumerated()), id: \.offset) { index, instrument in
-                                HStack {
-                                    Text("\(index + 1).")
-                                        .foregroundColor(.secondary)
-                                        .frame(width: 40, alignment: .trailing)
-                                    
-                                    Text(instrument)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .padding(8)
-                                        .background(
-                                            RoundedRectangle(cornerRadius: 4)
-                                                .fill(Color(NSColor.controlBackgroundColor))
-                                        )
-                                    
+                ScrollView {
+                    LazyVStack(spacing: 4) {
+                        ForEach(Array(editableOrder.enumerated()), id: \.offset) { index, instrument in
+                            HStack {
+                                Text("\(index + 1).")
+                                    .foregroundColor(.secondary)
+                                    .frame(width: 40, alignment: .trailing)
+                                
+                                Text(instrument)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(8)
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 4)
+                                            .fill(Color(NSColor.controlBackgroundColor))
+                                    )
+                                
+                                Button(action: {
+                                    editableOrder.remove(at: index)
+                                }) {
+                                    Image(systemName: "minus.circle.fill")
+                                        .foregroundColor(.red)
+                                }
+                                .buttonStyle(.plain)
+                                
+                                VStack(spacing: 2) {
                                     Button(action: {
-                                        editableOrder.remove(at: index)
+                                        if index > 0 {
+                                            editableOrder.swapAt(index, index - 1)
+                                        }
                                     }) {
-                                        Image(systemName: "minus.circle.fill")
-                                            .foregroundColor(.red)
+                                        Image(systemName: "chevron.up")
+                                            .font(.caption)
                                     }
                                     .buttonStyle(.plain)
+                                    .disabled(index == 0)
                                     
-                                    VStack(spacing: 2) {
-                                        Button(action: {
-                                            if index > 0 {
-                                                editableOrder.swapAt(index, index - 1)
-                                            }
-                                        }) {
-                                            Image(systemName: "chevron.up")
-                                                .font(.caption)
+                                    Button(action: {
+                                        if index < editableOrder.count - 1 {
+                                            editableOrder.swapAt(index, index + 1)
                                         }
-                                        .buttonStyle(.plain)
-                                        .disabled(index == 0)
-                                        
-                                        Button(action: {
-                                            if index < editableOrder.count - 1 {
-                                                editableOrder.swapAt(index, index + 1)
-                                            }
-                                        }) {
-                                            Image(systemName: "chevron.down")
-                                                .font(.caption)
-                                        }
-                                        .buttonStyle(.plain)
-                                        .disabled(index == editableOrder.count - 1)
+                                    }) {
+                                        Image(systemName: "chevron.down")
+                                            .font(.caption)
                                     }
+                                    .buttonStyle(.plain)
+                                    .disabled(index == editableOrder.count - 1)
                                 }
                             }
                         }
                     }
-                    .frame(height: 300)
-                    .border(Color.gray.opacity(0.2))
-                    
-                    // Add new instrument
-                    HStack {
-                        TextField("Add new instrument...", text: $newInstrument)
-                            .textFieldStyle(.roundedBorder)
-                            .onSubmit {
-                                addInstrument()
-                            }
-                        
-                        Button(action: addInstrument) {
-                            Image(systemName: "plus.circle.fill")
+                }
+                .frame(height: 300)
+                .border(Color.gray.opacity(0.2))
+                
+                // Add new instrument
+                HStack {
+                    TextField("Add new instrument...", text: $newInstrument)
+                        .textFieldStyle(.roundedBorder)
+                        .onSubmit {
+                            addInstrument()
                         }
-                        .disabled(newInstrument.trimmingCharacters(in: .whitespaces).isEmpty)
+                    
+                    Button(action: addInstrument) {
+                        Image(systemName: "plus.circle.fill")
                     }
+                    .disabled(newInstrument.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             }
-            .padding(.horizontal, 32)
-            .padding(.top, 12)
             
-            Spacer(minLength: 24)
+            Spacer()
             
             HStack {
                 Button("Cancel") {
@@ -1391,11 +1164,10 @@ struct PreferencesView: View {
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
             }
-            .padding(.horizontal, 32)
-            .padding(.top, 18)
-            .padding(.bottom, 24)
+            .padding(.top, 16)
         }
-        .frame(width: 720, height: 760, alignment: .top)
+        .padding(28)
+        .frame(width: 650, height: 660)
     }
     
     private func addInstrument() {
@@ -1409,14 +1181,8 @@ struct PreferencesView: View {
 
 // MARK: - Renamer Manager
 class RenamerManager: ObservableObject {
-    struct RenameHistoryEntry {
-        let originalURL: URL
-        let renamedURL: URL
-    }
-
     @Published var folderURL: URL?
     @Published var operations: [RenameOperation] = []
-    @Published private(set) var canUndoLastRename = false
     @Published var ensembleType: EnsembleType = .band {
         didSet {
             if !hasCustomOrder {
@@ -1439,24 +1205,6 @@ class RenamerManager: ObservableObject {
     private var hasCustomOrder = false
     private var manualOverrides: [String: Int] = [:]
     private var isRescanMode = false
-    private var lastRenameBatch: [RenameHistoryEntry] = [] {
-        didSet {
-            canUndoLastRename = !lastRenameBatch.isEmpty
-        }
-    }
-
-    private func manualOverrideKey(for fileURL: URL) -> String {
-        fileURL.standardizedFileURL.path
-    }
-
-    private func destinationURL(for originalURL: URL, renamedTo newFilename: String) -> URL {
-        originalURL.deletingLastPathComponent().appendingPathComponent(newFilename)
-    }
-
-    private func recordRenameBatch(_ entries: [RenameHistoryEntry]) {
-        guard !entries.isEmpty else { return }
-        lastRenameBatch = entries
-    }
     
     var statusText: String {
         let total = operations.count
@@ -1479,7 +1227,6 @@ class RenamerManager: ObservableObject {
         self.folderURL = url
         self.manualOverrides = [:]
         self.isRescanMode = false
-        self.lastRenameBatch = []
         scanFolder()
     }
     
@@ -1488,7 +1235,6 @@ class RenamerManager: ObservableObject {
         self.operations = []
         self.manualOverrides = [:]
         self.isRescanMode = false
-        self.lastRenameBatch = []
     }
     
     func rescanFolder() {
@@ -1502,76 +1248,33 @@ class RenamerManager: ObservableObject {
         if alert.runModal() == .alertFirstButtonReturn {
             isRescanMode = true
             manualOverrides = [:]
-            lastRenameBatch = []
             scanFolder()
         }
     }
     
-    func setManualOverride(for fileURL: URL, number: Int) {
-        let key = manualOverrideKey(for: fileURL)
-
+    func setManualOverride(for filename: String, number: Int) {
         // Check if this number conflicts with existing assignments
-        let existingAtThisNumber = manualOverrides.filter { $0.value == number && $0.key != key }
+        let existingAtThisNumber = manualOverrides.filter { $0.value == number && $0.key != filename }
         
         if !existingAtThisNumber.isEmpty {
             // Shift all manual overrides >= number up by 1
             var updatedOverrides: [String: Int] = [:]
-            for (overrideKey, value) in manualOverrides {
-                if overrideKey == key {
+            for (key, value) in manualOverrides {
+                if key == filename {
+                    // Skip, we'll add this at the end
                     continue
                 }
                 if value >= number {
-                    updatedOverrides[overrideKey] = value + 1
+                    updatedOverrides[key] = value + 1
                 } else {
-                    updatedOverrides[overrideKey] = value
+                    updatedOverrides[key] = value
                 }
             }
             manualOverrides = updatedOverrides
         }
         
-        manualOverrides[key] = number
+        manualOverrides[filename] = number
         scanFolder()
-    }
-
-    func renameOriginalFile(_ originalURL: URL, to newFilename: String) -> Bool {
-        let trimmedFilename = newFilename.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmedFilename.isEmpty else { return false }
-
-        let destinationURL = destinationURL(for: originalURL, renamedTo: trimmedFilename)
-
-        if destinationURL == originalURL {
-            return true
-        }
-
-        if FileManager.default.fileExists(atPath: destinationURL.path) {
-            let alert = NSAlert()
-            alert.messageText = "Filename Already Exists"
-            alert.informativeText = "\"\(trimmedFilename)\" already exists in this folder."
-            alert.alertStyle = .warning
-            alert.runModal()
-            return false
-        }
-
-        do {
-            try FileManager.default.moveItem(at: originalURL, to: destinationURL)
-
-            let originalKey = manualOverrideKey(for: originalURL)
-            let destinationKey = manualOverrideKey(for: destinationURL)
-            if let manualNumber = manualOverrides.removeValue(forKey: originalKey) {
-                manualOverrides[destinationKey] = manualNumber
-            }
-
-            recordRenameBatch([RenameHistoryEntry(originalURL: originalURL, renamedURL: destinationURL)])
-            scanFolder()
-            return true
-        } catch {
-            let alert = NSAlert()
-            alert.messageText = "Rename Failed"
-            alert.informativeText = error.localizedDescription
-            alert.alertStyle = .warning
-            alert.runModal()
-            return false
-        }
     }
     
     func getExistingNumbers() -> [Int] {
@@ -1592,62 +1295,6 @@ class RenamerManager: ObservableObject {
         }
         
         return Array(Set(numbers)).sorted()
-    }
-
-    func undoLastRename() {
-        guard !lastRenameBatch.isEmpty else { return }
-
-        var remainingEntries: [RenameHistoryEntry] = []
-        var successCount = 0
-        var errors: [String] = []
-
-        for entry in lastRenameBatch.reversed() {
-            if !FileManager.default.fileExists(atPath: entry.renamedURL.path) {
-                remainingEntries.append(entry)
-                errors.append("\(entry.renamedURL.lastPathComponent): Renamed file no longer exists")
-                continue
-            }
-
-            if FileManager.default.fileExists(atPath: entry.originalURL.path) {
-                remainingEntries.append(entry)
-                errors.append("\(entry.originalURL.lastPathComponent): Original filename already exists")
-                continue
-            }
-
-            do {
-                try FileManager.default.moveItem(at: entry.renamedURL, to: entry.originalURL)
-
-                let renamedKey = manualOverrideKey(for: entry.renamedURL)
-                let originalKey = manualOverrideKey(for: entry.originalURL)
-                if let manualNumber = manualOverrides.removeValue(forKey: renamedKey) {
-                    manualOverrides[originalKey] = manualNumber
-                }
-
-                successCount += 1
-            } catch {
-                remainingEntries.append(entry)
-                errors.append("\(entry.renamedURL.lastPathComponent): \(error.localizedDescription)")
-            }
-        }
-
-        lastRenameBatch = remainingEntries.reversed()
-
-        if !errors.isEmpty {
-            let errorAlert = NSAlert()
-            errorAlert.messageText = successCount > 0 ? "Partial Undo" : "Undo Failed"
-            let errorList = errors.prefix(5).joined(separator: "\n")
-            var message = successCount > 0
-                ? "Restored \(successCount) file(s), but \(errors.count) failed:\n\n\(errorList)"
-                : "Could not restore the last rename:\n\n\(errorList)"
-            if errors.count > 5 {
-                message += "\n... and \(errors.count - 5) more"
-            }
-            errorAlert.informativeText = message
-            errorAlert.alertStyle = .warning
-            errorAlert.runModal()
-        }
-
-        scanFolder()
     }
     
     private func scanFolder() {
@@ -1700,7 +1347,7 @@ class RenamerManager: ObservableObject {
             }
             
             // Check manual override
-            if let manualNumber = manualOverrides[manualOverrideKey(for: fileURL)] {
+            if let manualNumber = manualOverrides[originalFilename] {
                 manuallyAssigned.append((manualNumber, fileURL, originalFilename))
                 continue
             }
@@ -1736,7 +1383,7 @@ class RenamerManager: ObservableObject {
             }
             
             let newFilename = "\(prefix) - \(cleanName)"
-            let newURL = destinationURL(for: url, renamedTo: newFilename)
+            let newURL = folderURL.appendingPathComponent(newFilename)
             
             if oldPrefix == prefix {
                 let op = RenameOperation(
@@ -1785,7 +1432,7 @@ class RenamerManager: ObservableObject {
             }
             
             let newFilename = "\(prefix) - \(cleanName)"
-            let newURL = destinationURL(for: url, renamedTo: newFilename)
+            let newURL = folderURL.appendingPathComponent(newFilename)
             
             if oldPrefix == prefix {
                 let op = RenameOperation(
@@ -1831,7 +1478,7 @@ class RenamerManager: ObservableObject {
             }
             
             let newFilename = "\(prefix) - \(cleanName)"
-            let newURL = destinationURL(for: url, renamedTo: newFilename)
+            let newURL = folderURL.appendingPathComponent(newFilename)
             
             if fileManager.fileExists(atPath: newURL.path) && newURL != url {
                 let op = RenameOperation(
@@ -1911,7 +1558,6 @@ class RenamerManager: ObservableObject {
         guard !toRename.isEmpty else { return }
         
         var successCount = 0
-        var successfulRenames: [RenameHistoryEntry] = []
         var errors: [String] = []
         
         for operation in toRename {
@@ -1920,13 +1566,10 @@ class RenamerManager: ObservableObject {
             do {
                 try FileManager.default.moveItem(at: operation.originalURL, to: newURL)
                 successCount += 1
-                successfulRenames.append(RenameHistoryEntry(originalURL: operation.originalURL, renamedURL: newURL))
             } catch {
                 errors.append("\(operation.originalName): \(error.localizedDescription)")
             }
         }
-
-        recordRenameBatch(successfulRenames)
         
         if !errors.isEmpty {
             let errorAlert = NSAlert()
@@ -2208,7 +1851,7 @@ struct RenameOperation: Identifiable {
         case .alreadyPrefixed:
             return "Already prefixed"
         case .undetected:
-            return "No instrument found (double-click to fix)"
+            return "No instrument found (double-click to assign)"
         case .correct:
             if let old = oldPrefix {
                 let new = String(newName.prefix(2))
