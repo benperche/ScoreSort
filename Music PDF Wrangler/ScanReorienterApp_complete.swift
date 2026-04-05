@@ -2514,41 +2514,51 @@ struct RotateView: View {
 // MARK: - Split View
 struct SplitView: View {
     @StateObject private var pdfManager = PDFManager()
-    @State private var splitMarkers: Set<Int> = []
+    // fileSizes stores the page count for each output file in order.
+    // e.g. [2, 2, 1, 3] means 4 files with 2, 2, 1, and 3 pages respectively.
+    // This makes split point manipulation natural: adding a split just partitions
+    // an existing entry, removing one merges two adjacent entries.
+    @State private var fileSizes: [Int] = []
+    @State private var stride: Int = 2
     @State private var currentPage: Int = 0
-    @State private var autoSplitPages: Int = 2
     @State private var isShowingFolderPicker = false
-    @State private var showingAutoSplitSheet = false
     @State private var showingBaseNameSheet = false
     @State private var baseFileName: String = ""
     @State private var editingBaseFileName: String = ""
     @State private var customFileNames: [Int: String] = [:]
     @State private var showingFileNamesSheet = false
     @FocusState private var isViewFocused: Bool
-    
+
     var totalPages: Int {
         pdfManager.pdfDocument?.pageCount ?? 0
     }
-    
-    var pageToFileMapping: [Int: Int] {
-        guard totalPages > 0 else { return [:] }
-        
-        let sortedMarkers = splitMarkers.sorted()
-        var mapping: [Int: Int] = [:]
-        var currentFileIndex = 0
-        
-        for pageIndex in 0..<totalPages {
-            if sortedMarkers.contains(pageIndex) && pageIndex > 0 {
-                currentFileIndex += 1
-            }
-            mapping[pageIndex] = currentFileIndex
+
+    // Split markers derived from fileSizes: the page that starts each file (except the first).
+    var splitMarkers: Set<Int> {
+        var markers: Set<Int> = []
+        var pos = 0
+        for size in fileSizes.dropLast() {
+            pos += size
+            markers.insert(pos)
         }
-        
+        return markers
+    }
+
+    var pageToFileMapping: [Int: Int] {
+        guard !fileSizes.isEmpty else { return [:] }
+        var mapping: [Int: Int] = [:]
+        var pos = 0
+        for (fileIndex, size) in fileSizes.enumerated() {
+            for pageIndex in pos..<(pos + size) {
+                mapping[pageIndex] = fileIndex
+            }
+            pos += size
+        }
         return mapping
     }
-    
+
     var numberOfFiles: Int {
-        return (pageToFileMapping.values.max() ?? 0) + 1
+        fileSizes.count
     }
     
     var body: some View {
@@ -2562,15 +2572,29 @@ struct SplitView: View {
                 Spacer()
                 
                 if pdfManager.pdfDocument != nil {
-                    Button(action: { showingAutoSplitSheet = true }) {
-                        Label("Auto-Split Every N Pages", systemImage: "rectangle.split.3x1")
+                    HStack(spacing: 8) {
+                        Text("Stride:")
+                            .font(.callout)
+                            .foregroundColor(.secondary)
+                        Stepper(value: $stride, in: 1...20, label: {
+                            Text("\(stride) \(stride == 1 ? "page" : "pages")")
+                                .frame(minWidth: 55, alignment: .leading)
+                        })
+                        Button("Apply") {
+                            applyStride()
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Re-apply stride from scratch, overriding any manual changes")
                     }
-                    
+
+                    Divider()
+                        .frame(height: 20)
+
                     Button(action: clearAllMarkers) {
-                        Label("Clear All Markers", systemImage: "trash")
+                        Label("Clear All Splits", systemImage: "trash")
                     }
                     .disabled(splitMarkers.isEmpty)
-                    
+
                     Button(action: { pdfManager.clearPDF() }) {
                         Label("Clear", systemImage: "xmark.circle.fill")
                     }
@@ -2591,46 +2615,26 @@ struct SplitView: View {
                         VStack(spacing: 16) {
                             // Page navigation and controls
                             SplitControlsSection(
-                                document: document,
                                 currentPage: $currentPage,
-                                splitMarkers: $splitMarkers,
-                                totalPages: totalPages
+                                splitMarkers: splitMarkers,
+                                fileSizes: fileSizes,
+                                totalPages: totalPages,
+                                onToggleMarker: { toggleSplitAt(page: currentPage) }
                             )
                             
                             Divider()
                             
                             // Preview
-                            VStack {
-                                Text("Page \(currentPage + 1) of \(totalPages)")
-                                    .font(.headline)
-                                
-                                if splitMarkers.contains(currentPage) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "scissors")
-                                            .foregroundColor(.orange)
-                                        Text("Split marker on this page")
-                                            .font(.caption)
-                                            .foregroundColor(.orange)
-                                    }
-                                } else {
-                                    if let fileIndex = pageToFileMapping[currentPage] {
-                                        Text("Will be in file \(fileIndex + 1)")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                
-                                PDFPageView(
-                                    page: document.page(at: currentPage),
-                                    rotation: 0
-                                )
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    isViewFocused = true
-                                }
+                            PDFPageView(
+                                page: document.page(at: currentPage),
+                                rotation: 0
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.horizontal)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                isViewFocused = true
                             }
-                            .padding()
                         }
                         .frame(width: geometry.size.width * 0.5)
                         .focusable()
@@ -2746,11 +2750,7 @@ struct SplitView: View {
                             return .handled
                         case .space:
                             if currentPage > 0 {
-                                if splitMarkers.contains(currentPage) {
-                                    splitMarkers.remove(currentPage)
-                                } else {
-                                    splitMarkers.insert(currentPage)
-                                }
+                                toggleSplitAt(page: currentPage)
                             }
                             return .handled
                         default:
@@ -2771,8 +2771,9 @@ struct SplitView: View {
             if newValue != nil {
                 baseFileName = pdfManager.currentFileName ?? ""
                 isViewFocused = true
+                applyStride()
             } else {
-                splitMarkers.removeAll()
+                fileSizes = []
                 currentPage = 0
                 customFileNames.removeAll()
             }
@@ -2791,15 +2792,6 @@ struct SplitView: View {
                 }
             )
         }
-        .sheet(isPresented: $showingAutoSplitSheet) {
-            AutoSplitSheet(
-                autoSplitPages: $autoSplitPages,
-                onApply: {
-                    applyAutoSplit()
-                    showingAutoSplitSheet = false
-                }
-            )
-        }
         .sheet(isPresented: $showingFileNamesSheet) {
             CustomFileNamesSheet(
                 numberOfFiles: numberOfFiles,
@@ -2812,19 +2804,51 @@ struct SplitView: View {
     }
     
     private func clearAllMarkers() {
-        splitMarkers.removeAll()
+        fileSizes = totalPages > 0 ? [totalPages] : []
+        customFileNames.removeAll()
     }
-    
-    private func applyAutoSplit() {
-        splitMarkers.removeAll()
-        
-        var pageIndex = autoSplitPages
-        while pageIndex < totalPages {
-            splitMarkers.insert(pageIndex)
-            pageIndex += autoSplitPages
+
+    private func applyStride() {
+        guard totalPages > 0 else { return }
+        var sizes: [Int] = []
+        var remaining = totalPages
+        while remaining > 0 {
+            let chunk = min(stride, remaining)
+            sizes.append(chunk)
+            remaining -= chunk
+        }
+        fileSizes = sizes
+        customFileNames.removeAll()
+    }
+
+    /// Toggle a split point at `page`. If `page` is the start of a file (an existing
+    /// split marker), the file is merged with the one before it. Otherwise, the file
+    /// containing `page` is split at that position.
+    private func toggleSplitAt(page: Int) {
+        guard page > 0, !fileSizes.isEmpty else { return }
+        var pos = 0
+        for (i, size) in fileSizes.enumerated() {
+            if page >= pos && page < pos + size {
+                let localPos = page - pos
+                if localPos == 0 {
+                    // page is the start of file i (an existing split marker): merge with previous
+                    if i > 0 {
+                        fileSizes[i - 1] += fileSizes[i]
+                        fileSizes.remove(at: i)
+                    }
+                } else {
+                    // page is in the middle: split file i here
+                    let firstPart = localPos
+                    let secondPart = size - localPos
+                    fileSizes[i] = firstPart
+                    fileSizes.insert(secondPart, at: i + 1)
+                }
+                return
+            }
+            pos += size
         }
     }
-    
+
     private func saveSplitPDF() {
         guard let document = pdfManager.pdfDocument, numberOfFiles >= 2 else {
             isShowingFolderPicker = false
@@ -2856,11 +2880,24 @@ struct SplitView: View {
 
 // MARK: - Split Controls Section
 struct SplitControlsSection: View {
-    let document: PDFDocument
     @Binding var currentPage: Int
-    @Binding var splitMarkers: Set<Int>
+    let splitMarkers: Set<Int>
+    let fileSizes: [Int]
     let totalPages: Int
-    
+    let onToggleMarker: () -> Void
+
+    /// Returns which file index the current page belongs to, and the size of that file.
+    private var currentFileInfo: (fileIndex: Int, fileStart: Int, fileSize: Int)? {
+        var pos = 0
+        for (i, size) in fileSizes.enumerated() {
+            if currentPage >= pos && currentPage < pos + size {
+                return (i, pos, size)
+            }
+            pos += size
+        }
+        return nil
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             // Navigation controls
@@ -2877,9 +2914,20 @@ struct SplitControlsSection: View {
 
                 Spacer()
 
-                VStack(spacing: 4) {
+                VStack(spacing: 2) {
                     Text("Page \(currentPage + 1) of \(totalPages)")
                         .font(.headline)
+                    // Show which output file this page belongs to
+                    if let info = currentFileInfo {
+                        let isAtStart = currentPage == info.fileStart
+                        let endPage = info.fileStart + info.fileSize - 1
+                        let rangeText = info.fileStart == endPage
+                            ? "p.\(info.fileStart + 1)"
+                            : "pp.\(info.fileStart + 1)–\(endPage + 1)"
+                        Text("File \(info.fileIndex + 1) (\(rangeText), \(info.fileSize) \(info.fileSize == 1 ? "page" : "pages"))\(isAtStart && currentPage > 0 ? " — split marker" : "")")
+                            .font(.caption)
+                            .foregroundColor(isAtStart && currentPage > 0 ? .orange : .secondary)
+                    }
                 }
 
                 Spacer()
@@ -2895,33 +2943,25 @@ struct SplitControlsSection: View {
                 .disabled(currentPage >= totalPages - 1)
             }
             .padding(.horizontal)
-            
+
             // Split marker controls
             HStack(spacing: 12) {
-                Button(action: toggleMarker) {
+                Button(action: onToggleMarker) {
                     if splitMarkers.contains(currentPage) {
-                        Label("Remove Split Marker", systemImage: "xmark.circle")
+                        Label("Remove Split (merge with previous)", systemImage: "xmark.circle")
                     } else {
-                        Label("Add Split Marker", systemImage: "plus.circle")
+                        Label("Add Split Here", systemImage: "scissors")
                     }
                 }
                 .buttonStyle(.bordered)
                 .disabled(currentPage == 0)
-                
-                Text("Press Space to toggle")
+
+                Text("Space to toggle")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
         }
         .padding()
-    }
-    
-    private func toggleMarker() {
-        if splitMarkers.contains(currentPage) {
-            splitMarkers.remove(currentPage)
-        } else {
-            splitMarkers.insert(currentPage)
-        }
     }
 
     private func firstPage() { currentPage = 0 }
@@ -3059,65 +3099,6 @@ struct BaseNameEditSheet: View {
         }
         .padding()
         .frame(width: 450, height: 280)
-    }
-}
-
-// MARK: - Auto Split Sheet
-struct AutoSplitSheet: View {
-    @Binding var autoSplitPages: Int
-    let onApply: () -> Void
-    @Environment(\.dismiss) private var dismiss
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            Text("Auto-Split Every N Pages")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text("This will automatically add split markers every N pages")
-                .font(.callout)
-                .foregroundColor(.secondary)
-            
-            Divider()
-            
-            HStack {
-                Text("Split every:")
-                
-                TextField("Pages", value: $autoSplitPages, format: .number)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 80)
-                
-                Stepper("", value: $autoSplitPages, in: 1...100)
-                
-                Text("pages")
-                
-                Spacer()
-            }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(NSColor.controlBackgroundColor))
-            )
-            
-            Spacer()
-            
-            HStack {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-                
-                Spacer()
-                
-                Button("Apply") {
-                    onApply()
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding()
-        .frame(width: 400, height: 250)
     }
 }
 
