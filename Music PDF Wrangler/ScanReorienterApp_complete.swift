@@ -1769,9 +1769,13 @@ class RenamerManager: ObservableObject {
             }
         }
         
-        // Process detected files (start from 01)
-        for (index, (_, url, originalName, _)) in detectedFiles.enumerated() {
-            let prefix = String(format: "%02d", index + 1)
+        // Process detected files (start from 01), skipping any numbers reserved by manual overrides
+        let reservedNumbers = Set(manualOverrides.values)
+        var nextNumber = 1
+        for (_, url, originalName, _) in detectedFiles {
+            while reservedNumbers.contains(nextNumber) { nextNumber += 1 }
+            let prefix = String(format: "%02d", nextNumber)
+            nextNumber += 1
             let cleanName: String
             let oldPrefix: String?
             
