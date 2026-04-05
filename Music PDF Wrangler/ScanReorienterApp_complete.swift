@@ -163,7 +163,7 @@ struct ContentView: View {
     
     var body: some View {
         TabView(selection: $appState.selectedTab) {
-            CombineView()
+            CombineView(showingKeyboardHelp: $appState.showingKeyboardHelp)
                 .tabItem {
                     Label("Combine PDFs", systemImage: "doc.on.doc")
                 }
@@ -196,6 +196,7 @@ struct ContentView: View {
 
 // MARK: - Combine View
 struct CombineView: View {
+    @Binding var showingKeyboardHelp: Bool
     @StateObject private var combineManager = CombineManager()
     @State private var addBlankPages = false
     @State private var isTargeted = false
@@ -206,7 +207,6 @@ struct CombineView: View {
     @State private var anchorFileId: UUID?      // anchor for shift-range selection
     @FocusState private var listFocused: Bool
     @Environment(\.undoManager) var undoManager
-    @EnvironmentObject private var appState: AppState
     
     var body: some View {
         VStack(spacing: 0) {
@@ -218,7 +218,7 @@ struct CombineView: View {
                 
                 Spacer()
                 
-                Button(action: { appState.showingKeyboardHelp = true }) {
+                Button(action: { showingKeyboardHelp = true }) {
                     Image(systemName: "keyboard")
                 }
                 .buttonStyle(.plain)
