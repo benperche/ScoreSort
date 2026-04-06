@@ -3074,12 +3074,7 @@ struct SplitNamingStageView: View {
                                     get: { customFileNames[fileIndex] ?? "" },
                                     set: { customFileNames[fileIndex] = $0.isEmpty ? nil : $0 }
                                 ),
-                                isFocused: focusedField == fileIndex,
-                                onSubmit: {
-                                    if fileIndex < numberOfFiles - 1 {
-                                        focusedField = fileIndex + 1
-                                    }
-                                }
+                                fieldFocus: $focusedField
                             )
                             .id(fileIndex)
                             if fileIndex < numberOfFiles - 1 { Divider() }
@@ -3128,8 +3123,9 @@ struct SplitFileNamingRow: View {
     let pdfDocument: PDFDocument
     let baseFileName: String
     @Binding var suffix: String
-    let isFocused: Bool
-    let onSubmit: () -> Void
+    /// The parent's FocusState binding — passed directly so that Tab/click
+    /// both update the parent (triggering auto-scroll) without a local copy.
+    var fieldFocus: FocusState<Int?>.Binding
 
     private var fileSize: Int {
         fileIndex < fileSizes.count ? fileSizes[fileIndex] : 0
@@ -3168,8 +3164,10 @@ struct SplitFileNamingRow: View {
             }
 
             // ── Instrument name crop (full-width, zoomed in) ─────────
-            // Shows the top-left corner of the page where instrument names live,
-            // skipping the page margin and capturing ~2 inches of content.
+            // Shows the top-left corner of the page where instrument names live.
+            // .allowsHitTesting(false) is essential: with .fill content mode the
+            // image's hit-test area can grow beyond its visible frame and silently
+            // absorb clicks meant for the text field below.
             if let page = pdfDocument.page(at: firstPageIndex) {
                 PageInstrumentPreview(page: page)
                     .frame(maxWidth: .infinity)
@@ -3177,11 +3175,13 @@ struct SplitFileNamingRow: View {
                     .background(Color.white)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                     .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
+                    .allowsHitTesting(false)
             } else {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.gray.opacity(0.12))
                     .frame(maxWidth: .infinity)
                     .frame(height: 150)
+                    .allowsHitTesting(false)
             }
 
             // ── Name field ────────────────────────────────────────────
@@ -3197,7 +3197,7 @@ struct SplitFileNamingRow: View {
                     TextField("Flute", text: $suffix)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 220)
-                        .onSubmit(onSubmit)
+                        .focused(fieldFocus, equals: fileIndex)
                     Text(".pdf")
                         .foregroundColor(.secondary)
                         .font(.system(.body, design: .monospaced))
@@ -3216,7 +3216,7 @@ struct SplitFileNamingRow: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
-        .background(isFocused ? Color.accentColor.opacity(0.04) : Color.clear)
+        .background(fieldFocus.wrappedValue == fileIndex ? Color.accentColor.opacity(0.05) : Color.clear)
     }
 }
 
