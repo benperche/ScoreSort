@@ -3022,6 +3022,41 @@ struct SplitNamingStageView: View {
         fileSizes.prefix(fileIndex).reduce(0, +)
     }
 
+    /// Ordered, deduplicated instrument name list built from InstrumentOrders
+    /// (orchestra → band → jazz), capitalised first letter only.
+    private var instrumentNames: [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for name in InstrumentOrders.orchestra + InstrumentOrders.band + InstrumentOrders.jazz {
+            let key = name.lowercased()
+            if seen.insert(key).inserted {
+                result.append(name.prefix(1).uppercased() + name.dropFirst())
+            }
+        }
+        return result
+    }
+
+    private var baseNameError: String? {
+        filenameError(for: baseFileName)
+    }
+
+    private var anySuffixError: Bool {
+        customFileNames.values.contains { filenameError(for: $0) != nil }
+    }
+
+    private var canSave: Bool {
+        numberOfFiles >= 2 && baseNameError == nil && !anySuffixError
+    }
+
+    private func filenameError(for text: String) -> String? {
+        guard !text.isEmpty else { return nil }
+        let illegal = CharacterSet(charactersIn: "/:\\\0")
+        if text.unicodeScalars.contains(where: { illegal.contains($0) }) {
+            return "Cannot contain / : or \\"
+        }
+        return nil
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             // ── Top bar (title only) ─────────────────────────────────────
@@ -3038,20 +3073,28 @@ struct SplitNamingStageView: View {
             Divider()
 
             // ── Base filename ─────────────────────────────────────────────
-            HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text("Base Filename:")
-                    .font(.headline)
-                    .fixedSize()
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Base Filename:")
+                        .font(.headline)
+                        .fixedSize()
 
-                TextField("e.g. Symphony No. 5", text: $baseFileName)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 380)
+                    TextField("e.g. Symphony No. 5", text: $baseFileName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 380)
 
-                Text("Suffixes are appended directly: \(baseFileName.isEmpty ? "basename" : baseFileName)Flute.pdf  ·  Leave blank for auto-numbering: \(baseFileName.isEmpty ? "basename" : baseFileName)_1.pdf")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    Text("Suffixes appended directly: \(baseFileName.isEmpty ? "basename" : baseFileName)Flute.pdf  ·  Leave blank for auto-numbering: \(baseFileName.isEmpty ? "basename" : baseFileName)_1.pdf")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
 
-                Spacer()
+                    Spacer()
+                }
+
+                if let err = baseNameError {
+                    Label(err, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
             }
             .padding(.horizontal)
             .padding(.vertical, 10)
@@ -3074,7 +3117,9 @@ struct SplitNamingStageView: View {
                                     get: { customFileNames[fileIndex] ?? "" },
                                     set: { customFileNames[fileIndex] = $0.isEmpty ? nil : $0 }
                                 ),
-                                fieldFocus: $focusedField
+                                fieldFocus: $focusedField,
+                                instrumentNames: instrumentNames,
+                                allSuffixes: customFileNames
                             )
                             .id(fileIndex)
                             if fileIndex < numberOfFiles - 1 { Divider() }
@@ -3105,7 +3150,7 @@ struct SplitNamingStageView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
-                .disabled(numberOfFiles < 2)
+                .disabled(!canSave)
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
@@ -3126,6 +3171,10 @@ struct SplitFileNamingRow: View {
     /// The parent's FocusState binding — passed directly so that Tab/click
     /// both update the parent (triggering auto-scroll) without a local copy.
     var fieldFocus: FocusState<Int?>.Binding
+    let instrumentNames: [String]   // ordered, deduplicated, capitalised
+    let allSuffixes: [Int: String]  // snapshot of all rows' current suffixes
+
+    private var isFieldFocused: Bool { fieldFocus.wrappedValue == fileIndex }
 
     private var fileSize: Int {
         fileIndex < fileSizes.count ? fileSizes[fileIndex] : 0
@@ -3141,6 +3190,48 @@ struct SplitFileNamingRow: View {
         suffix.isEmpty
             ? "\(baseFileName)_\(fileIndex + 1).pdf"
             : "\(baseFileName)\(suffix).pdf"
+    }
+
+    // ── Validation ──────────────────────────────────────────────────────────
+    private var suffixError: String? {
+        guard !suffix.isEmpty else { return nil }
+        let illegal = CharacterSet(charactersIn: "/:\\\0")
+        if suffix.unicodeScalars.contains(where: { illegal.contains($0) }) {
+            return "Cannot contain / : or \\"
+        }
+        return nil
+    }
+
+    // ── Autocomplete ─────────────────────────────────────────────────────────
+    /// Index in `instrumentNames` to start suggestions from — the entry just
+    /// after the most recently used instrument in the rows above this one.
+    private var nextExpectedIndex: Int {
+        for i in stride(from: fileIndex - 1, through: 0, by: -1) {
+            let prev = (allSuffixes[i] ?? "").lowercased()
+            if !prev.isEmpty,
+               let idx = instrumentNames.firstIndex(where: { $0.lowercased() == prev }) {
+                return min(idx + 1, instrumentNames.count - 1)
+            }
+        }
+        return 0
+    }
+
+    private var suggestions: [String] {
+        // Rotate the list so "next expected" is first
+        let start = nextExpectedIndex
+        let rotated = Array(instrumentNames.suffix(from: start))
+                    + Array(instrumentNames.prefix(start))
+
+        if suffix.isEmpty {
+            // Show the next ~8 instruments when field is empty
+            return Array(rotated.prefix(8))
+        } else {
+            let q = suffix.lowercased()
+            // Prefix matches first, then contains matches
+            let prefix = rotated.filter { $0.lowercased().hasPrefix(q) }
+            let contains = rotated.filter { $0.lowercased().contains(q) && !$0.lowercased().hasPrefix(q) }
+            return Array((prefix + contains).prefix(8))
+        }
     }
 
     var body: some View {
@@ -3203,20 +3294,69 @@ struct SplitFileNamingRow: View {
                         .font(.system(.body, design: .monospaced))
                 }
 
-                // Live filename preview
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.right")
-                        .font(.caption2)
-                    Text(finalFileName)
+                // Validation error
+                if let err = suffixError {
+                    Label(err, systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
-                        .fontWeight(.medium)
+                        .foregroundColor(.red)
                 }
-                .foregroundColor(suffix.isEmpty ? .secondary : .accentColor)
+
+                // Live filename preview
+                if suffixError == nil {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.right")
+                            .font(.caption2)
+                        Text(finalFileName)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(suffix.isEmpty ? .secondary : .accentColor)
+                }
+
+                // ── Autocomplete dropdown ────────────────────────────
+                if isFieldFocused && !suggestions.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(suggestions, id: \.self) { name in
+                            SuggestionButton(label: name) {
+                                suffix = name
+                            }
+                            if name != suggestions.last { Divider().padding(.leading, 10) }
+                        }
+                    }
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+                    .frame(maxWidth: 340, alignment: .leading)
+                }
             }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
-        .background(fieldFocus.wrappedValue == fileIndex ? Color.accentColor.opacity(0.05) : Color.clear)
+        .background(isFieldFocused ? Color.accentColor.opacity(0.05) : Color.clear)
+    }
+}
+
+// ── Suggestion button (hover highlight, used in autocomplete dropdown) ──────
+private struct SuggestionButton: View {
+    let label: String
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(isHovered ? Color.accentColor.opacity(0.12) : Color.clear)
+        .onHover { isHovered = $0 }
     }
 }
 
