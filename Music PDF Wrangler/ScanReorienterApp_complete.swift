@@ -2496,6 +2496,50 @@ struct RotateView: View {
     }
 }
 
+// MARK: - Split Logic (pure functions, extracted for testability)
+
+/// Returns a new sizes array with a split toggled at `page` (0-based).
+/// If `page` is the start of an existing file, that file merges with the one before it.
+/// If `page` is mid-file, the file containing it is split at that position.
+func toggleSplit(in sizes: [Int], at page: Int) -> [Int] {
+    guard page > 0, !sizes.isEmpty else { return sizes }
+    var result = sizes
+    var pos = 0
+    for (i, size) in result.enumerated() {
+        if page >= pos && page < pos + size {
+            let localPos = page - pos
+            if localPos == 0 {
+                if i > 0 {
+                    result[i - 1] += result[i]
+                    result.remove(at: i)
+                }
+            } else {
+                let firstPart = localPos
+                let secondPart = size - localPos
+                result[i] = firstPart
+                result.insert(secondPart, at: i + 1)
+            }
+            return result
+        }
+        pos += size
+    }
+    return result
+}
+
+/// Returns a sizes array that evenly divides `totalPages` into chunks of `stride`,
+/// with the last chunk taking any remainder.
+func splitSizes(totalPages: Int, stride: Int) -> [Int] {
+    guard totalPages > 0, stride > 0 else { return [] }
+    var sizes: [Int] = []
+    var remaining = totalPages
+    while remaining > 0 {
+        let chunk = min(stride, remaining)
+        sizes.append(chunk)
+        remaining -= chunk
+    }
+    return sizes
+}
+
 // MARK: - Split View
 struct SplitView: View {
     @StateObject private var pdfManager = PDFManager()
@@ -2756,44 +2800,12 @@ struct SplitView: View {
     }
 
     private func applyStride() {
-        guard totalPages > 0 else { return }
-        var sizes: [Int] = []
-        var remaining = totalPages
-        while remaining > 0 {
-            let chunk = min(stride, remaining)
-            sizes.append(chunk)
-            remaining -= chunk
-        }
-        fileSizes = sizes
+        fileSizes = splitSizes(totalPages: totalPages, stride: stride)
         customFileNames.removeAll()
     }
 
-    /// Toggle a split point at `page`. If `page` is the start of a file (an existing
-    /// split marker), the file is merged with the one before it. Otherwise, the file
-    /// containing `page` is split at that position.
     private func toggleSplitAt(page: Int) {
-        guard page > 0, !fileSizes.isEmpty else { return }
-        var pos = 0
-        for (i, size) in fileSizes.enumerated() {
-            if page >= pos && page < pos + size {
-                let localPos = page - pos
-                if localPos == 0 {
-                    // page is the start of file i (an existing split marker): merge with previous
-                    if i > 0 {
-                        fileSizes[i - 1] += fileSizes[i]
-                        fileSizes.remove(at: i)
-                    }
-                } else {
-                    // page is in the middle: split file i here
-                    let firstPart = localPos
-                    let secondPart = size - localPos
-                    fileSizes[i] = firstPart
-                    fileSizes.insert(secondPart, at: i + 1)
-                }
-                return
-            }
-            pos += size
-        }
+        fileSizes = toggleSplit(in: fileSizes, at: page)
     }
 
     func saveSplitPDF() {
