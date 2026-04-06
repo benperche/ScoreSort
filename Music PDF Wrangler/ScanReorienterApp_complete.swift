@@ -1285,11 +1285,9 @@ struct ManualAssignmentView: View {
     var shiftDescription: String {
         if willShiftOthers {
             let affectedNumbers = existingNumbers.filter { $0 >= selectedNumber }.sorted()
-            if affectedNumbers.isEmpty {
+            guard let first = affectedNumbers.first, let last = affectedNumbers.last else {
                 return ""
             }
-            let first = affectedNumbers.first!
-            let last = affectedNumbers.last!
             if first == last {
                 return "File currently numbered \(String(format: "%02d", first)) will become \(String(format: "%02d", first + 1))"
             } else {
@@ -1564,7 +1562,7 @@ class RenamerManager: ObservableObject {
     }
     
     private var hasCustomOrder = false
-    private var manualOverrides: [String: Int] = [:]
+    var manualOverrides: [String: Int] = [:]
     private var isRescanMode = false
     
     var statusText: String {
@@ -1656,6 +1654,19 @@ class RenamerManager: ObservableObject {
         return Array(Set(numbers)).sorted()
     }
     
+    /// In rescan mode, strips an existing `NN - ` / `NN_` / `NN ` prefix and
+    /// returns the clean name plus the old two-digit prefix string.
+    /// In normal mode returns the filename unchanged with a nil prefix.
+    private func stripRescanPrefix(from filename: String) -> (clean: String, oldPrefix: String?) {
+        if isRescanMode, let match = filename.range(of: "^(\\d{2})", options: .regularExpression) {
+            let oldPrefix = String(filename[match])
+            let clean = String(filename[match.upperBound...])
+                .replacingOccurrences(of: "^[-_\\s]+", with: "", options: .regularExpression)
+            return (clean, oldPrefix)
+        }
+        return (filename, nil)
+    }
+
     private func scanFolder() {
         guard let folderURL = folderURL else { return }
 
@@ -1729,17 +1740,7 @@ class RenamerManager: ObservableObject {
         // Process score files (all get 00)
         for (url, originalName, _) in scoreFiles {
             let prefix = "00"
-            let cleanName: String
-            let oldPrefix: String?
-            
-            if isRescanMode, let match = originalName.range(of: "^(\\d{2})", options: .regularExpression) {
-                oldPrefix = String(originalName[match])
-                cleanName = String(originalName[originalName.index(match.upperBound, offsetBy: 0)...])
-                    .replacingOccurrences(of: "^[-_\\s]+", with: "", options: .regularExpression)
-            } else {
-                oldPrefix = nil
-                cleanName = originalName
-            }
+            let (cleanName, oldPrefix) = stripRescanPrefix(from: originalName)
             
             let newFilename = "\(prefix) - \(cleanName)"
             let newURL = folderURL.appendingPathComponent(newFilename)
@@ -1779,20 +1780,10 @@ class RenamerManager: ObservableObject {
         let reservedNumbers = Set(manualOverrides.values)
         var nextNumber = 1
         for (_, url, originalName, _) in detectedFiles {
-            while reservedNumbers.contains(nextNumber) { nextNumber += 1 }
+            while reservedNumbers.contains(nextNumber) && nextNumber < 100 { nextNumber += 1 }
             let prefix = String(format: "%02d", nextNumber)
             nextNumber += 1
-            let cleanName: String
-            let oldPrefix: String?
-            
-            if isRescanMode, let match = originalName.range(of: "^(\\d{2})", options: .regularExpression) {
-                oldPrefix = String(originalName[match])
-                cleanName = String(originalName[originalName.index(match.upperBound, offsetBy: 0)...])
-                    .replacingOccurrences(of: "^[-_\\s]+", with: "", options: .regularExpression)
-            } else {
-                oldPrefix = nil
-                cleanName = originalName
-            }
+            let (cleanName, oldPrefix) = stripRescanPrefix(from: originalName)
             
             let newFilename = "\(prefix) - \(cleanName)"
             let newURL = folderURL.appendingPathComponent(newFilename)
@@ -1832,13 +1823,7 @@ class RenamerManager: ObservableObject {
         manuallyAssigned.sort { $0.number < $1.number }
         for (number, url, originalName) in manuallyAssigned {
             let prefix = String(format: "%02d", number)
-            let cleanName: String
-            
-            if isRescanMode, let match = originalName.range(of: "^\\d{2}[-_\\s]", options: .regularExpression) {
-                cleanName = String(originalName[match.upperBound...])
-            } else {
-                cleanName = originalName
-            }
+            let (cleanName, _) = stripRescanPrefix(from: originalName)
             
             let newFilename = "\(prefix) - \(cleanName)"
             let newURL = folderURL.appendingPathComponent(newFilename)
@@ -1889,7 +1874,7 @@ class RenamerManager: ObservableObject {
         }
     }
     
-    private func detectInstrument(in filename: String) -> (Int, String)? {
+    func detectInstrument(in filename: String) -> (Int, String)? {
         let lowerFilename = filename.lowercased()
         
         // Create array of (originalIndex, instrument) and sort by length (longest first)
@@ -3002,6 +2987,16 @@ struct FilePreviewCard: View {
     }
 }
 
+/// Shared validation used by SplitNamingStageView and SplitFileNamingRow.
+func pdfFilenameError(for text: String) -> String? {
+    guard !text.isEmpty else { return nil }
+    let illegal = CharacterSet(charactersIn: "/:\\\0")
+    if text.unicodeScalars.contains(where: { illegal.contains($0) }) {
+        return "Cannot contain / : or \\"
+    }
+    return nil
+}
+
 // MARK: - Split Naming Stage (Step 2)
 /// Full-window Step 2: lets users set the base filename and per-file name suffixes,
 /// with a large first-page thumbnail for each output file.
@@ -3048,14 +3043,7 @@ struct SplitNamingStageView: View {
         numberOfFiles >= 2 && baseNameError == nil && !anySuffixError
     }
 
-    private func filenameError(for text: String) -> String? {
-        guard !text.isEmpty else { return nil }
-        let illegal = CharacterSet(charactersIn: "/:\\\0")
-        if text.unicodeScalars.contains(where: { illegal.contains($0) }) {
-            return "Cannot contain / : or \\"
-        }
-        return nil
-    }
+    private func filenameError(for text: String) -> String? { pdfFilenameError(for: text) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -3196,14 +3184,7 @@ struct SplitFileNamingRow: View {
     }
 
     // ── Validation ──────────────────────────────────────────────────────────
-    private var suffixError: String? {
-        guard !suffix.isEmpty else { return nil }
-        let illegal = CharacterSet(charactersIn: "/:\\\0")
-        if suffix.unicodeScalars.contains(where: { illegal.contains($0) }) {
-            return "Cannot contain / : or \\"
-        }
-        return nil
-    }
+    private var suffixError: String? { pdfFilenameError(for: suffix) }
 
     // ── Autocomplete ─────────────────────────────────────────────────────────
     /// Index in `instrumentNames` to start suggestions from — the entry just
@@ -3613,10 +3594,10 @@ struct RotatePreviewSection: View {
             shouldApplyAdditional = pageNumber % 2 == 1
         case .even:
             shouldApplyAdditional = pageNumber % 2 == 0
-        case .none, .all:
+        case .none:
             shouldApplyAdditional = false
         }
-        
+
         if shouldApplyAdditional {
             rotation += additionalRotationAngle.degrees
         }
@@ -3807,10 +3788,11 @@ class PDFManager: ObservableObject {
         let newDocument = PDFDocument()
         
         for pageIndex in 0..<document.pageCount {
-            guard let page = document.page(at: pageIndex) else { continue }
-            
+            guard let originalPage = document.page(at: pageIndex),
+                  let page = originalPage.copy() as? PDFPage else { continue }
+
             let pageNumber = pageIndex + 1
-            
+
             if baseRotation.degrees != 0 {
                 page.rotation += baseRotation.degrees
             }
@@ -3821,7 +3803,7 @@ class PDFManager: ObservableObject {
                 shouldApplyAdditional = pageNumber % 2 == 1
             case .even:
                 shouldApplyAdditional = pageNumber % 2 == 0
-            case .none, .all:
+            case .none:
                 shouldApplyAdditional = false
             }
             
@@ -3910,7 +3892,6 @@ class PDFManager: ObservableObject {
 enum RotationMode {
     case odd
     case even
-    case all
     case none
 }
 
