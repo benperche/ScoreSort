@@ -2514,63 +2514,82 @@ struct RotateView: View {
 // MARK: - Split View
 struct SplitView: View {
     @StateObject private var pdfManager = PDFManager()
-    @State private var splitMarkers: Set<Int> = []
+    // fileSizes stores the page count for each output file in order.
+    // e.g. [2, 2, 1, 3] means 4 files with 2, 2, 1, and 3 pages respectively.
+    // This makes split point manipulation natural: adding a split just partitions
+    // an existing entry, removing one merges two adjacent entries.
+    @State private var fileSizes: [Int] = []
+    @State private var stride: Int = 2
     @State private var currentPage: Int = 0
-    @State private var autoSplitPages: Int = 2
-    @State private var isShowingFolderPicker = false
-    @State private var showingAutoSplitSheet = false
-    @State private var showingBaseNameSheet = false
+    @State private var showingNamingStage: Bool = false
     @State private var baseFileName: String = ""
-    @State private var editingBaseFileName: String = ""
     @State private var customFileNames: [Int: String] = [:]
-    @State private var showingFileNamesSheet = false
     @FocusState private var isViewFocused: Bool
-    
+
     var totalPages: Int {
         pdfManager.pdfDocument?.pageCount ?? 0
     }
-    
-    var pageToFileMapping: [Int: Int] {
-        guard totalPages > 0 else { return [:] }
-        
-        let sortedMarkers = splitMarkers.sorted()
-        var mapping: [Int: Int] = [:]
-        var currentFileIndex = 0
-        
-        for pageIndex in 0..<totalPages {
-            if sortedMarkers.contains(pageIndex) && pageIndex > 0 {
-                currentFileIndex += 1
-            }
-            mapping[pageIndex] = currentFileIndex
+
+    // Split markers derived from fileSizes: the page that starts each file (except the first).
+    var splitMarkers: Set<Int> {
+        var markers: Set<Int> = []
+        var pos = 0
+        for size in fileSizes.dropLast() {
+            pos += size
+            markers.insert(pos)
         }
-        
+        return markers
+    }
+
+    var pageToFileMapping: [Int: Int] {
+        guard !fileSizes.isEmpty else { return [:] }
+        var mapping: [Int: Int] = [:]
+        var pos = 0
+        for (fileIndex, size) in fileSizes.enumerated() {
+            for pageIndex in pos..<(pos + size) {
+                mapping[pageIndex] = fileIndex
+            }
+            pos += size
+        }
         return mapping
     }
-    
+
     var numberOfFiles: Int {
-        return (pageToFileMapping.values.max() ?? 0) + 1
+        fileSizes.count
     }
     
     var body: some View {
+        if showingNamingStage, let document = pdfManager.pdfDocument {
+            SplitNamingStageView(
+                pdfDocument: document,
+                fileSizes: fileSizes,
+                baseFileName: $baseFileName,
+                customFileNames: $customFileNames,
+                onBack: { showingNamingStage = false },
+                onSave: { saveSplitPDF() }
+            )
+        } else {
+        splitStageBody
+        }
+    }
+
+    @ViewBuilder
+    private var splitStageBody: some View {
         VStack(spacing: 0) {
             // Top toolbar
             HStack {
-                Text("Split PDF")
+                Text("Split PDF — Step 1: Set Split Points")
                     .font(.title2)
                     .fontWeight(.semibold)
                 
                 Spacer()
                 
                 if pdfManager.pdfDocument != nil {
-                    Button(action: { showingAutoSplitSheet = true }) {
-                        Label("Auto-Split Every N Pages", systemImage: "rectangle.split.3x1")
-                    }
-                    
                     Button(action: clearAllMarkers) {
-                        Label("Clear All Markers", systemImage: "trash")
+                        Label("Clear All Splits", systemImage: "trash")
                     }
                     .disabled(splitMarkers.isEmpty)
-                    
+
                     Button(action: { pdfManager.clearPDF() }) {
                         Label("Clear", systemImage: "xmark.circle.fill")
                     }
@@ -2591,46 +2610,26 @@ struct SplitView: View {
                         VStack(spacing: 16) {
                             // Page navigation and controls
                             SplitControlsSection(
-                                document: document,
                                 currentPage: $currentPage,
-                                splitMarkers: $splitMarkers,
-                                totalPages: totalPages
+                                splitMarkers: splitMarkers,
+                                fileSizes: fileSizes,
+                                totalPages: totalPages,
+                                onToggleMarker: { toggleSplitAt(page: currentPage) }
                             )
-                            
+
                             Divider()
-                            
+
                             // Preview
-                            VStack {
-                                Text("Page \(currentPage + 1) of \(totalPages)")
-                                    .font(.headline)
-                                
-                                if splitMarkers.contains(currentPage) {
-                                    HStack(spacing: 4) {
-                                        Image(systemName: "scissors")
-                                            .foregroundColor(.orange)
-                                        Text("Split marker on this page")
-                                            .font(.caption)
-                                            .foregroundColor(.orange)
-                                    }
-                                } else {
-                                    if let fileIndex = pageToFileMapping[currentPage] {
-                                        Text("Will be in file \(fileIndex + 1)")
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                }
-                                
-                                PDFPageView(
-                                    page: document.page(at: currentPage),
-                                    rotation: 0
-                                )
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
-                                .contentShape(Rectangle())
-                                .onTapGesture {
-                                    isViewFocused = true
-                                }
+                            PDFPageView(
+                                page: document.page(at: currentPage),
+                                rotation: 0
+                            )
+                            .frame(maxWidth: .infinity, maxHeight: .infinity)
+                            .padding(.horizontal)
+                            .contentShape(Rectangle())
+                            .onTapGesture {
+                                isViewFocused = true
                             }
-                            .padding()
                         }
                         .frame(width: geometry.size.width * 0.5)
                         .focusable()
@@ -2638,22 +2637,57 @@ struct SplitView: View {
                         
                         Divider()
                         
-                        // Right: File breakdown
-                        VStack(alignment: .leading, spacing: 16) {
+                        // Right: Stride controls + file preview
+                        VStack(alignment: .leading, spacing: 12) {
+                            // ── Stride / pattern controls ─────────────────────
+                            VStack(alignment: .leading, spacing: 10) {
+                                Text("Split Pattern")
+                                    .font(.headline)
+
+                                HStack(spacing: 8) {
+                                    Text("Stride:")
+                                        .foregroundColor(.secondary)
+                                    Stepper(value: $stride, in: 1...20, label: {
+                                        Text("\(stride) \(stride == 1 ? "page" : "pages")")
+                                            .frame(minWidth: 55, alignment: .leading)
+                                    })
+                                    Button("Apply") {
+                                        applyStride()
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .help("Re-apply stride from scratch, clearing any manual adjustments")
+                                }
+
+                                VStack(alignment: .leading, spacing: 4) {
+                                    Text("**Stride** is the default number of pages per output file. When you load a PDF or press **Apply**, split markers are placed every N pages automatically.")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                    Text("Then navigate with ← → and press **Space** to fine-tune. Pressing Space in the *middle* of a file adds a split there. Pressing Space at the *start* of a file (highlighted in orange) removes that split and merges the file with the one above.")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                }
+                            }
+                            .padding(12)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(Color(NSColor.controlBackgroundColor))
+                            )
+
+                            // ── Output files list ─────────────────────────────
                             HStack {
                                 Text("Output Files (\(numberOfFiles))")
                                     .font(.headline)
-                                
                                 Spacer()
-                                
-                                Button(action: { showingFileNamesSheet = true }) {
-                                    Label("Customise Names", systemImage: "pencil")
+                                if !baseFileName.isEmpty {
+                                    Text("Base: \(baseFileName)")
                                         .font(.caption)
+                                        .foregroundColor(.secondary)
                                 }
                             }
-                            
+
                             ScrollView {
-                                VStack(alignment: .leading, spacing: 12) {
+                                VStack(alignment: .leading, spacing: 8) {
                                     ForEach(0..<numberOfFiles, id: \.self) { fileIndex in
                                         FilePreviewCard(
                                             fileIndex: fileIndex,
@@ -2668,57 +2702,12 @@ struct SplitView: View {
                                     }
                                 }
                             }
-                            
-                            Divider()
-                            
-                            // Base filename display
-                            VStack(alignment: .leading, spacing: 8) {
-                                HStack {
-                                    Text("Base Filename:")
-                                        .font(.headline)
-                                    
-                                    Spacer()
-                                    
-                                    Button(action: {
-                                        editingBaseFileName = baseFileName
-                                        showingBaseNameSheet = true
-                                    }) {
-                                        Label("Edit", systemImage: "pencil")
-                                    }
-                                    .buttonStyle(.bordered)
-                                    .controlSize(.small)
-                                }
-                                
-                                Text(baseFileName.isEmpty ? "(no name set)" : baseFileName)
-                                    .font(.system(.body, design: .monospaced))
-                                    .foregroundColor(baseFileName.isEmpty ? .secondary : .primary)
-                                    .padding(8)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                    .background(
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .fill(Color(NSColor.textBackgroundColor))
-                                    )
-                                    .overlay(
-                                        RoundedRectangle(cornerRadius: 4)
-                                            .stroke(Color.gray.opacity(0.3), lineWidth: 1)
-                                    )
-                                
-                                Text("Files will be named: \(baseFileName)_1.pdf, \(baseFileName)_2.pdf, etc.\nAdd suffixes in 'Customise Names' for: \(baseFileName)Flute.pdf (no automatic numbering)")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                            }
-                            .padding()
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(NSColor.controlBackgroundColor))
-                            )
-                            
+
                             // Action button
                             HStack {
                                 Spacer()
-                                
-                                Button(action: { isShowingFolderPicker = true }) {
-                                    Label("Split and Save", systemImage: "arrow.down.doc.fill")
+                                Button(action: { showingNamingStage = true }) {
+                                    Label("Next: Name Files", systemImage: "arrow.right.circle.fill")
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.large)
@@ -2746,11 +2735,7 @@ struct SplitView: View {
                             return .handled
                         case .space:
                             if currentPage > 0 {
-                                if splitMarkers.contains(currentPage) {
-                                    splitMarkers.remove(currentPage)
-                                } else {
-                                    splitMarkers.insert(currentPage)
-                                }
+                                toggleSplitAt(page: currentPage)
                             }
                             return .handled
                         default:
@@ -2771,66 +2756,64 @@ struct SplitView: View {
             if newValue != nil {
                 baseFileName = pdfManager.currentFileName ?? ""
                 isViewFocused = true
+                applyStride()
             } else {
-                splitMarkers.removeAll()
+                fileSizes = []
                 currentPage = 0
                 customFileNames.removeAll()
             }
         }
-        .onChange(of: isShowingFolderPicker) { newValue in
-            if newValue {
-                saveSplitPDF()
-            }
-        }
-        .sheet(isPresented: $showingBaseNameSheet) {
-            BaseNameEditSheet(
-                baseFileName: $editingBaseFileName,
-                onSave: {
-                    baseFileName = editingBaseFileName
-                    showingBaseNameSheet = false
-                }
-            )
-        }
-        .sheet(isPresented: $showingAutoSplitSheet) {
-            AutoSplitSheet(
-                autoSplitPages: $autoSplitPages,
-                onApply: {
-                    applyAutoSplit()
-                    showingAutoSplitSheet = false
-                }
-            )
-        }
-        .sheet(isPresented: $showingFileNamesSheet) {
-            CustomFileNamesSheet(
-                numberOfFiles: numberOfFiles,
-                baseFileName: baseFileName,
-                customFileNames: $customFileNames,
-                pageToFileMapping: pageToFileMapping,
-                pdfDocument: pdfManager.pdfDocument
-            )
-        }
-    }
+    } // end splitStageBody
     
     private func clearAllMarkers() {
-        splitMarkers.removeAll()
+        fileSizes = totalPages > 0 ? [totalPages] : []
+        customFileNames.removeAll()
     }
-    
-    private func applyAutoSplit() {
-        splitMarkers.removeAll()
-        
-        var pageIndex = autoSplitPages
-        while pageIndex < totalPages {
-            splitMarkers.insert(pageIndex)
-            pageIndex += autoSplitPages
+
+    private func applyStride() {
+        guard totalPages > 0 else { return }
+        var sizes: [Int] = []
+        var remaining = totalPages
+        while remaining > 0 {
+            let chunk = min(stride, remaining)
+            sizes.append(chunk)
+            remaining -= chunk
+        }
+        fileSizes = sizes
+        customFileNames.removeAll()
+    }
+
+    /// Toggle a split point at `page`. If `page` is the start of a file (an existing
+    /// split marker), the file is merged with the one before it. Otherwise, the file
+    /// containing `page` is split at that position.
+    private func toggleSplitAt(page: Int) {
+        guard page > 0, !fileSizes.isEmpty else { return }
+        var pos = 0
+        for (i, size) in fileSizes.enumerated() {
+            if page >= pos && page < pos + size {
+                let localPos = page - pos
+                if localPos == 0 {
+                    // page is the start of file i (an existing split marker): merge with previous
+                    if i > 0 {
+                        fileSizes[i - 1] += fileSizes[i]
+                        fileSizes.remove(at: i)
+                    }
+                } else {
+                    // page is in the middle: split file i here
+                    let firstPart = localPos
+                    let secondPart = size - localPos
+                    fileSizes[i] = firstPart
+                    fileSizes.insert(secondPart, at: i + 1)
+                }
+                return
+            }
+            pos += size
         }
     }
-    
-    private func saveSplitPDF() {
-        guard let document = pdfManager.pdfDocument, numberOfFiles >= 2 else {
-            isShowingFolderPicker = false
-            return
-        }
-        
+
+    func saveSplitPDF() {
+        guard let _ = pdfManager.pdfDocument, numberOfFiles >= 2 else { return }
+
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -2838,7 +2821,7 @@ struct SplitView: View {
         panel.canCreateDirectories = true
         panel.title = "Select Output Folder"
         panel.message = "Choose where to save the split PDF files"
-        
+
         panel.begin { response in
             if response == .OK, let folderURL = panel.url {
                 pdfManager.saveSplitPDF(
@@ -2849,18 +2832,30 @@ struct SplitView: View {
                     pageToFileMapping: pageToFileMapping
                 )
             }
-            isShowingFolderPicker = false
         }
     }
 }
 
 // MARK: - Split Controls Section
 struct SplitControlsSection: View {
-    let document: PDFDocument
     @Binding var currentPage: Int
-    @Binding var splitMarkers: Set<Int>
+    let splitMarkers: Set<Int>
+    let fileSizes: [Int]
     let totalPages: Int
-    
+    let onToggleMarker: () -> Void
+
+    /// Returns which file index the current page belongs to, and the size of that file.
+    private var currentFileInfo: (fileIndex: Int, fileStart: Int, fileSize: Int)? {
+        var pos = 0
+        for (i, size) in fileSizes.enumerated() {
+            if currentPage >= pos && currentPage < pos + size {
+                return (i, pos, size)
+            }
+            pos += size
+        }
+        return nil
+    }
+
     var body: some View {
         VStack(spacing: 12) {
             // Navigation controls
@@ -2877,9 +2872,20 @@ struct SplitControlsSection: View {
 
                 Spacer()
 
-                VStack(spacing: 4) {
+                VStack(spacing: 2) {
                     Text("Page \(currentPage + 1) of \(totalPages)")
                         .font(.headline)
+                    // Show which output file this page belongs to
+                    if let info = currentFileInfo {
+                        let isAtStart = currentPage == info.fileStart
+                        let endPage = info.fileStart + info.fileSize - 1
+                        let rangeText = info.fileStart == endPage
+                            ? "p.\(info.fileStart + 1)"
+                            : "pp.\(info.fileStart + 1)–\(endPage + 1)"
+                        Text("File \(info.fileIndex + 1) (\(rangeText), \(info.fileSize) \(info.fileSize == 1 ? "page" : "pages"))\(isAtStart && currentPage > 0 ? " — split marker" : "")")
+                            .font(.caption)
+                            .foregroundColor(isAtStart && currentPage > 0 ? .orange : .secondary)
+                    }
                 }
 
                 Spacer()
@@ -2895,33 +2901,25 @@ struct SplitControlsSection: View {
                 .disabled(currentPage >= totalPages - 1)
             }
             .padding(.horizontal)
-            
+
             // Split marker controls
             HStack(spacing: 12) {
-                Button(action: toggleMarker) {
+                Button(action: onToggleMarker) {
                     if splitMarkers.contains(currentPage) {
-                        Label("Remove Split Marker", systemImage: "xmark.circle")
+                        Label("Remove Split (merge with previous)", systemImage: "xmark.circle")
                     } else {
-                        Label("Add Split Marker", systemImage: "plus.circle")
+                        Label("Add Split Here", systemImage: "scissors")
                     }
                 }
                 .buttonStyle(.bordered)
                 .disabled(currentPage == 0)
-                
-                Text("Press Space to toggle")
+
+                Text("Space to toggle")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
         }
         .padding()
-    }
-    
-    private func toggleMarker() {
-        if splitMarkers.contains(currentPage) {
-            splitMarkers.remove(currentPage)
-        } else {
-            splitMarkers.insert(currentPage)
-        }
     }
 
     private func firstPage() { currentPage = 0 }
@@ -3004,258 +3002,439 @@ struct FilePreviewCard: View {
     }
 }
 
-// MARK: - Base Name Edit Sheet
-struct BaseNameEditSheet: View {
+// MARK: - Split Naming Stage (Step 2)
+/// Full-window Step 2: lets users set the base filename and per-file name suffixes,
+/// with a large first-page thumbnail for each output file.
+struct SplitNamingStageView: View {
+    let pdfDocument: PDFDocument
+    let fileSizes: [Int]
     @Binding var baseFileName: String
-    let onSave: () -> Void
-    @Environment(\.dismiss) private var dismiss
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            Text("Edit Base Filename")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text("This name will be used for all split files")
-                .font(.callout)
-                .foregroundColor(.secondary)
-            
-            Divider()
-            
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Base Filename:")
-                    .font(.headline)
-                
-                TextField("Enter base filename", text: $baseFileName)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.system(.body, design: .monospaced))
-                
-                Text("Example: \(baseFileName.isEmpty ? "filename" : baseFileName)_1.pdf, \(baseFileName.isEmpty ? "filename" : baseFileName)_2.pdf, etc.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(NSColor.controlBackgroundColor))
-            )
-            
-            Spacer()
-            
-            HStack {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-                
-                Spacer()
-                
-                Button("Save") {
-                    onSave()
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding()
-        .frame(width: 450, height: 280)
-    }
-}
-
-// MARK: - Auto Split Sheet
-struct AutoSplitSheet: View {
-    @Binding var autoSplitPages: Int
-    let onApply: () -> Void
-    @Environment(\.dismiss) private var dismiss
-    
-    var body: some View {
-        VStack(spacing: 20) {
-            Text("Auto-Split Every N Pages")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text("This will automatically add split markers every N pages")
-                .font(.callout)
-                .foregroundColor(.secondary)
-            
-            Divider()
-            
-            HStack {
-                Text("Split every:")
-                
-                TextField("Pages", value: $autoSplitPages, format: .number)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(width: 80)
-                
-                Stepper("", value: $autoSplitPages, in: 1...100)
-                
-                Text("pages")
-                
-                Spacer()
-            }
-            .padding()
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(NSColor.controlBackgroundColor))
-            )
-            
-            Spacer()
-            
-            HStack {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-                
-                Spacer()
-                
-                Button("Apply") {
-                    onApply()
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
-            }
-        }
-        .padding()
-        .frame(width: 400, height: 250)
-    }
-}
-
-// MARK: - Custom File Names Sheet
-struct CustomFileNamesSheet: View {
-    let numberOfFiles: Int
-    let baseFileName: String
     @Binding var customFileNames: [Int: String]
-    let pageToFileMapping: [Int: Int]
-    let pdfDocument: PDFDocument?
-    @Environment(\.dismiss) private var dismiss
-    
-    @State private var editableNames: [Int: String] = [:]
+    let onBack: () -> Void
+    let onSave: () -> Void
+
     @FocusState private var focusedField: Int?
-    
+
+    var numberOfFiles: Int { fileSizes.count }
+
+    /// Page index of the first page in a given file.
+    private func firstPageIndex(for fileIndex: Int) -> Int {
+        fileSizes.prefix(fileIndex).reduce(0, +)
+    }
+
+    /// Ordered, deduplicated instrument name list built from InstrumentOrders
+    /// (orchestra → band → jazz), capitalised first letter only.
+    private var instrumentNames: [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for name in InstrumentOrders.orchestra + InstrumentOrders.band + InstrumentOrders.jazz {
+            let key = name.lowercased()
+            if seen.insert(key).inserted {
+                result.append(name.capitalized)
+            }
+        }
+        return result
+    }
+
+    private var baseNameError: String? {
+        filenameError(for: baseFileName)
+    }
+
+    private var anySuffixError: Bool {
+        customFileNames.values.contains { filenameError(for: $0) != nil }
+    }
+
+    private var canSave: Bool {
+        numberOfFiles >= 2 && baseNameError == nil && !anySuffixError
+    }
+
+    private func filenameError(for text: String) -> String? {
+        guard !text.isEmpty else { return nil }
+        let illegal = CharacterSet(charactersIn: "/:\\\0")
+        if text.unicodeScalars.contains(where: { illegal.contains($0) }) {
+            return "Cannot contain / : or \\"
+        }
+        return nil
+    }
+
     var body: some View {
-        VStack(spacing: 20) {
-            Text("Customise File Names")
-                .font(.title2)
-                .fontWeight(.semibold)
-            
-            Text("Names will be added as suffixes to the base name (no automatic numbering)")
-                .font(.callout)
-                .foregroundColor(.secondary)
-            
+        VStack(spacing: 0) {
+            // ── Top bar (title only) ─────────────────────────────────────
+            HStack {
+                Spacer()
+                Text("Step 2: Name Files")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Spacer()
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
+
             Divider()
-            
+
+            // ── Base filename ─────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Base Filename:")
+                        .font(.headline)
+                        .fixedSize()
+
+                    TextField("e.g. Symphony No. 5", text: $baseFileName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 380)
+
+                    Text("Suffixes appended directly: \(baseFileName.isEmpty ? "basename" : baseFileName)Flute.pdf  ·  Leave blank for auto-numbering: \(baseFileName.isEmpty ? "basename" : baseFileName)_1.pdf")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Spacer()
+                }
+
+                if let err = baseNameError {
+                    Label(err, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .background(Color(NSColor.controlBackgroundColor))
+
+            Divider()
+
+            // ── File list ─────────────────────────────────────────────────
             ScrollViewReader { proxy in
                 ScrollView {
-                    VStack(spacing: 12) {
+                    VStack(spacing: 0) {
                         ForEach(0..<numberOfFiles, id: \.self) { fileIndex in
-                            HStack(alignment: .top, spacing: 12) {
-                                // Preview of first page in this file
-                                if let document = pdfDocument,
-                                   let firstPageIndex = pagesInFile(fileIndex).first,
-                                   let page = document.page(at: firstPageIndex) {
-                                    PageInstrumentPreview(page: page)
-                                        .frame(width: 80, height: 100)
-                                } else {
-                                    Rectangle()
-                                        .fill(Color.gray.opacity(0.2))
-                                        .frame(width: 80, height: 100)
-                                }
-                                
-                                VStack(alignment: .leading, spacing: 4) {
-                                    Text("File \(fileIndex + 1)")
-                                        .font(.headline)
-                                    
-                                    if let pageRange = pagesInFile(fileIndex).first.map({ first in
-                                        let last = pagesInFile(fileIndex).last ?? first
-                                        return first == last ? "Page \(first + 1)" : "Pages \(first + 1)-\(last + 1)"
-                                    }) {
-                                        Text(pageRange)
-                                            .font(.caption)
-                                            .foregroundColor(.secondary)
-                                    }
-                                    
-                                    HStack(spacing: 4) {
-                                        Text(baseFileName)
-                                            .foregroundColor(.secondary)
-                                        
-                                        TextField("suffix (optional)", text: Binding(
-                                            get: { editableNames[fileIndex] ?? "" },
-                                            set: { editableNames[fileIndex] = $0.isEmpty ? nil : $0 }
-                                        ))
-                                        .textFieldStyle(.roundedBorder)
-                                        .focused($focusedField, equals: fileIndex)
-                                        .onSubmit {
-                                            // Move to next field on Return
-                                            if fileIndex < numberOfFiles - 1 {
-                                                focusedField = fileIndex + 1
-                                            }
-                                        }
-                                        
-                                        Text(".pdf")
-                                            .foregroundColor(.secondary)
-                                    }
-                                    
-                                    // Preview of final name
-                                    if let suffix = editableNames[fileIndex], !suffix.isEmpty {
-                                        Text("→ \(baseFileName)\(suffix).pdf")
-                                            .font(.caption)
-                                            .foregroundColor(.blue)
-                                    } else {
-                                        Text("→ (no custom name, will use default: \(baseFileName)_\(fileIndex + 1).pdf)")
-                                            .font(.caption)
-                                            .foregroundColor(.orange)
-                                    }
-                                }
-                            }
-                            .padding()
-                            .background(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .fill(Color(NSColor.controlBackgroundColor))
+                            SplitFileNamingRow(
+                                fileIndex: fileIndex,
+                                fileSizes: fileSizes,
+                                firstPageIndex: firstPageIndex(for: fileIndex),
+                                pdfDocument: pdfDocument,
+                                baseFileName: baseFileName,
+                                suffix: Binding(
+                                    get: { customFileNames[fileIndex] ?? "" },
+                                    set: { customFileNames[fileIndex] = $0.isEmpty ? nil : $0 }
+                                ),
+                                fieldFocus: $focusedField,
+                                instrumentNames: instrumentNames,
+                                allSuffixes: customFileNames
                             )
                             .id(fileIndex)
+                            if fileIndex < numberOfFiles - 1 { Divider() }
                         }
                     }
-                    .onChange(of: focusedField) { newValue in
-                        if let field = newValue {
-                            withAnimation {
-                                proxy.scrollTo(field, anchor: .center)
+                    .padding(.vertical, 8)
+                }
+                .onChange(of: focusedField) { newValue in
+                    if let field = newValue {
+                        withAnimation { proxy.scrollTo(field, anchor: .center) }
+                    }
+                }
+            }
+
+            Divider()
+
+            // ── Bottom bar ───────────────────────────────────────────────
+            HStack {
+                Button(action: onBack) {
+                    Label("Back to Split", systemImage: "chevron.left")
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button(action: onSave) {
+                    Label("Save Split Files", systemImage: "arrow.down.doc.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(!canSave)
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
+        }
+    }
+}
+
+// MARK: - Split File Naming Row
+/// One row in the naming stage: large page thumbnail on the left, file info and
+/// suffix text field on the right.
+struct SplitFileNamingRow: View {
+    let fileIndex: Int
+    let fileSizes: [Int]
+    let firstPageIndex: Int
+    let pdfDocument: PDFDocument
+    let baseFileName: String
+    @Binding var suffix: String
+    /// The parent's FocusState binding — passed directly so that Tab/click
+    /// both update the parent (triggering auto-scroll) without a local copy.
+    var fieldFocus: FocusState<Int?>.Binding
+    let instrumentNames: [String]   // ordered, deduplicated, capitalised
+    let allSuffixes: [Int: String]  // snapshot of all rows' current suffixes
+
+    private var isFieldFocused: Bool { fieldFocus.wrappedValue == fileIndex }
+
+    // Arrow-key selection index into the suggestions list (nil = field, not dropdown)
+    @State private var selectedSuggestionIndex: Int? = nil
+
+    private var fileSize: Int {
+        fileIndex < fileSizes.count ? fileSizes[fileIndex] : 0
+    }
+
+    private var pageRangeText: String {
+        let start = firstPageIndex + 1
+        let end = firstPageIndex + fileSize
+        return start == end ? "Page \(start)" : "Pages \(start)–\(end)"
+    }
+
+    private var finalFileName: String {
+        suffix.isEmpty
+            ? "\(baseFileName)_\(fileIndex + 1).pdf"
+            : "\(baseFileName)\(suffix).pdf"
+    }
+
+    // ── Validation ──────────────────────────────────────────────────────────
+    private var suffixError: String? {
+        guard !suffix.isEmpty else { return nil }
+        let illegal = CharacterSet(charactersIn: "/:\\\0")
+        if suffix.unicodeScalars.contains(where: { illegal.contains($0) }) {
+            return "Cannot contain / : or \\"
+        }
+        return nil
+    }
+
+    // ── Autocomplete ─────────────────────────────────────────────────────────
+    /// Index in `instrumentNames` to start suggestions from — the entry just
+    /// after the most recently used instrument in the rows above this one.
+    private var nextExpectedIndex: Int {
+        for i in Swift.stride(from: fileIndex - 1, through: 0, by: -1) {
+            let prev = (allSuffixes[i] ?? "").lowercased()
+            if !prev.isEmpty,
+               let idx = instrumentNames.firstIndex(where: { $0.lowercased() == prev }) {
+                return min(idx + 1, instrumentNames.count - 1)
+            }
+        }
+        return 0
+    }
+
+    /// If the nearest previous suffix is "InstrumentName N" (e.g. "Flute 1"),
+    /// returns "InstrumentName N+1" ("Flute 2") as the top-priority suggestion.
+    private var numberedSuggestion: String? {
+        for i in Swift.stride(from: fileIndex - 1, through: 0, by: -1) {
+            let prev = (allSuffixes[i] ?? "").trimmingCharacters(in: .whitespaces)
+            guard !prev.isEmpty else { continue }
+            let parts = prev.components(separatedBy: " ")
+            // Must have at least two tokens and last token must be a positive integer
+            if parts.count >= 2, let n = Int(parts.last!), n > 0 {
+                let basePart = parts.dropLast().joined(separator: " ")
+                return "\(basePart) \(n + 1)"
+            }
+            break  // only consider the closest non-empty row
+        }
+        return nil
+    }
+
+    private var suggestions: [String] {
+        // Rotate the base instrument list so "next expected" comes first
+        let start = nextExpectedIndex
+        let rotated = Array(instrumentNames.suffix(from: start))
+                    + Array(instrumentNames.prefix(start))
+
+        var result: [String]
+        if suffix.isEmpty {
+            result = Array(rotated.prefix(8))
+        } else {
+            let q = suffix.lowercased()
+            let prefixMatches  = rotated.filter { $0.lowercased().hasPrefix(q) }
+            let containsMatches = rotated.filter { $0.lowercased().contains(q) && !$0.lowercased().hasPrefix(q) }
+            result = Array((prefixMatches + containsMatches).prefix(8))
+        }
+
+        // Prepend numbered suggestion ("Flute 2") when relevant
+        if let numbered = numberedSuggestion {
+            let show = suffix.isEmpty || numbered.lowercased().hasPrefix(suffix.lowercased())
+            if show {
+                result.removeAll { $0.lowercased() == numbered.lowercased() }
+                result.insert(numbered, at: 0)
+                result = Array(result.prefix(8))
+            }
+        }
+
+        return result
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            // ── File header ───────────────────────────────────────────
+            HStack(spacing: 8) {
+                Image(systemName: "doc.fill")
+                    .foregroundColor(.accentColor)
+                Text("File \(fileIndex + 1)")
+                    .font(.title3)
+                    .fontWeight(.semibold)
+                Text("·")
+                    .foregroundColor(.secondary)
+                Text(pageRangeText)
+                    .foregroundColor(.secondary)
+                Text("·")
+                    .foregroundColor(.secondary)
+                Text("\(fileSize) \(fileSize == 1 ? "page" : "pages")")
+                    .foregroundColor(.secondary)
+                Spacer()
+            }
+
+            // ── Instrument name crop (full-width, zoomed in) ─────────
+            // Shows the top-left corner of the page where instrument names live.
+            // .allowsHitTesting(false) is essential: with .fill content mode the
+            // image's hit-test area can grow beyond its visible frame and silently
+            // absorb clicks meant for the text field below.
+            if let page = pdfDocument.page(at: firstPageIndex) {
+                PageInstrumentPreview(page: page)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 150)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
+                    .allowsHitTesting(false)
+            } else {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.gray.opacity(0.12))
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 150)
+                    .allowsHitTesting(false)
+            }
+
+            // ── Name field ────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Custom suffix (optional — leave blank for automatic numbering)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+
+                HStack(spacing: 4) {
+                    Text(baseFileName.isEmpty ? "basename" : baseFileName)
+                        .foregroundColor(.secondary)
+                        .font(.system(.body, design: .monospaced))
+                    TextField("Flute", text: $suffix)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 220)
+                        .focused(fieldFocus, equals: fileIndex)
+                        // Arrow-key navigation through suggestions
+                        .onKeyPress(.downArrow) {
+                            guard !suggestions.isEmpty else { return .ignored }
+                            selectedSuggestionIndex = min(
+                                (selectedSuggestionIndex ?? -1) + 1,
+                                suggestions.count - 1
+                            )
+                            return .handled
+                        }
+                        .onKeyPress(.upArrow) {
+                            if let idx = selectedSuggestionIndex, idx > 0 {
+                                selectedSuggestionIndex = idx - 1
+                            } else {
+                                selectedSuggestionIndex = nil
+                            }
+                            return .handled
+                        }
+                        .onKeyPress(.return) {
+                            if let idx = selectedSuggestionIndex {
+                                // Accept the highlighted suggestion
+                                suffix = suggestions[idx]
+                                selectedSuggestionIndex = nil
+                                return .handled
+                            }
+                            // No selection active: advance focus to next field
+                            fieldFocus.wrappedValue = fileIndex + 1
+                            return .handled
+                        }
+                        .onKeyPress(.escape) {
+                            selectedSuggestionIndex = nil
+                            return .handled
+                        }
+                        .onChange(of: suffix) { _ in
+                            // Reset arrow-key position whenever text changes
+                            selectedSuggestionIndex = nil
+                        }
+                    Text(".pdf")
+                        .foregroundColor(.secondary)
+                        .font(.system(.body, design: .monospaced))
+                }
+
+                // Validation error
+                if let err = suffixError {
+                    Label(err, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                }
+
+                // Live filename preview
+                if suffixError == nil {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.right")
+                            .font(.caption2)
+                        Text(finalFileName)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                    }
+                    .foregroundColor(suffix.isEmpty ? .secondary : .accentColor)
+                }
+
+                // ── Autocomplete dropdown ────────────────────────────
+                if isFieldFocused && !suggestions.isEmpty {
+                    VStack(alignment: .leading, spacing: 0) {
+                        ForEach(Array(suggestions.enumerated()), id: \.offset) { idx, name in
+                            SuggestionButton(
+                                label: name,
+                                isSelected: selectedSuggestionIndex == idx
+                            ) {
+                                suffix = name
+                                selectedSuggestionIndex = nil
+                            }
+                            if idx < suggestions.count - 1 {
+                                Divider().padding(.leading, 10)
                             }
                         }
                     }
+                    .background(Color(NSColor.controlBackgroundColor))
+                    .clipShape(RoundedRectangle(cornerRadius: 6))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.gray.opacity(0.25), lineWidth: 1)
+                    )
+                    .shadow(color: .black.opacity(0.08), radius: 4, y: 2)
+                    .frame(maxWidth: 340, alignment: .leading)
                 }
-                .frame(height: 400)
-            }
-            
-            HStack {
-                Button("Clear All") {
-                    editableNames.removeAll()
-                }
-                
-                Spacer()
-                
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-                
-                Button("Save") {
-                    customFileNames = editableNames
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
             }
         }
-        .padding()
-        .frame(width: 600, height: 600)
-        .onAppear {
-            editableNames = customFileNames
-        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(isFieldFocused ? Color.accentColor.opacity(0.05) : Color.clear)
     }
-    
-    private func pagesInFile(_ fileIndex: Int) -> [Int] {
-        pageToFileMapping.filter { $0.value == fileIndex }.keys.sorted()
+}
+
+// ── Suggestion button (hover + arrow-key selection highlight) ────────────────
+private struct SuggestionButton: View {
+    let label: String
+    var isSelected: Bool = false
+    let action: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Text(label)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .background(
+            isSelected
+                ? Color.accentColor.opacity(0.20)
+                : (isHovered ? Color.accentColor.opacity(0.10) : Color.clear)
+        )
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -3265,23 +3444,29 @@ struct PageInstrumentPreview: View {
     
     var body: some View {
         if let image = renderInstrumentNameArea(from: page) {
+            // Use .fill so the crop fills its parent frame completely.
+            // The instrument name sits at the left of the crop, so any overflow
+            // clipped on the right is just whitespace.
             Image(nsImage: image)
                 .resizable()
-                .aspectRatio(contentMode: .fit)
+                .aspectRatio(contentMode: .fill)
+                .clipped()
         } else {
             Rectangle()
                 .fill(Color.gray.opacity(0.2))
         }
     }
-    
+
     // Render just the top-left portion where instrument names typically appear
     private func renderInstrumentNameArea(from page: PDFPage) -> NSImage? {
         let pageBounds = page.bounds(for: .mediaBox)
         
-        // Calculate the crop area - top 1 inch (72 points) of the left side
-        let cropHeight: CGFloat = 72 // 1 inch
-        let cropWidth: CGFloat = min(pageBounds.width * 0.4, 200) // Left 40% of page, max 200pt
-        
+        // Calculate the crop area.
+        // Start at the very top of the page (instrument names sit right at the top)
+        // and capture ~1.4 inches (100 pt) of height — enough to show the name box.
+        let cropHeight: CGFloat = 100    // ~1.4 inches
+        let cropWidth: CGFloat = min(pageBounds.width * 0.4, 200) // Left 40%, max 200 pt
+
         // Account for page rotation
         let rotation = page.rotation
         var actualBounds = pageBounds
@@ -3289,7 +3474,8 @@ struct PageInstrumentPreview: View {
             actualBounds = CGRect(x: pageBounds.origin.x, y: pageBounds.origin.y,
                                 width: pageBounds.height, height: pageBounds.width)
         }
-        
+
+        // In PDF coords Y grows upward; the top of the page is at origin.y + height.
         let cropRect = CGRect(
             x: actualBounds.origin.x,
             y: actualBounds.origin.y + actualBounds.height - cropHeight,
