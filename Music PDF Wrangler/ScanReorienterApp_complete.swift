@@ -3176,6 +3176,9 @@ struct SplitFileNamingRow: View {
 
     private var isFieldFocused: Bool { fieldFocus.wrappedValue == fileIndex }
 
+    // Arrow-key selection index into the suggestions list (nil = field, not dropdown)
+    @State private var selectedSuggestionIndex: Int? = nil
+
     private var fileSize: Int {
         fileIndex < fileSizes.count ? fileSizes[fileIndex] : 0
     }
@@ -3206,7 +3209,7 @@ struct SplitFileNamingRow: View {
     /// Index in `instrumentNames` to start suggestions from — the entry just
     /// after the most recently used instrument in the rows above this one.
     private var nextExpectedIndex: Int {
-        for i in stride(from: fileIndex - 1, through: 0, by: -1) {
+        for i in Swift.stride(from: fileIndex - 1, through: 0, by: -1) {
             let prev = (allSuffixes[i] ?? "").lowercased()
             if !prev.isEmpty,
                let idx = instrumentNames.firstIndex(where: { $0.lowercased() == prev }) {
@@ -3216,22 +3219,50 @@ struct SplitFileNamingRow: View {
         return 0
     }
 
+    /// If the nearest previous suffix is "InstrumentName N" (e.g. "Flute 1"),
+    /// returns "InstrumentName N+1" ("Flute 2") as the top-priority suggestion.
+    private var numberedSuggestion: String? {
+        for i in Swift.stride(from: fileIndex - 1, through: 0, by: -1) {
+            let prev = (allSuffixes[i] ?? "").trimmingCharacters(in: .whitespaces)
+            guard !prev.isEmpty else { continue }
+            let parts = prev.components(separatedBy: " ")
+            // Must have at least two tokens and last token must be a positive integer
+            if parts.count >= 2, let n = Int(parts.last!), n > 0 {
+                let basePart = parts.dropLast().joined(separator: " ")
+                return "\(basePart) \(n + 1)"
+            }
+            break  // only consider the closest non-empty row
+        }
+        return nil
+    }
+
     private var suggestions: [String] {
-        // Rotate the list so "next expected" is first
+        // Rotate the base instrument list so "next expected" comes first
         let start = nextExpectedIndex
         let rotated = Array(instrumentNames.suffix(from: start))
                     + Array(instrumentNames.prefix(start))
 
+        var result: [String]
         if suffix.isEmpty {
-            // Show the next ~8 instruments when field is empty
-            return Array(rotated.prefix(8))
+            result = Array(rotated.prefix(8))
         } else {
             let q = suffix.lowercased()
-            // Prefix matches first, then contains matches
-            let prefix = rotated.filter { $0.lowercased().hasPrefix(q) }
-            let contains = rotated.filter { $0.lowercased().contains(q) && !$0.lowercased().hasPrefix(q) }
-            return Array((prefix + contains).prefix(8))
+            let prefixMatches  = rotated.filter { $0.lowercased().hasPrefix(q) }
+            let containsMatches = rotated.filter { $0.lowercased().contains(q) && !$0.lowercased().hasPrefix(q) }
+            result = Array((prefixMatches + containsMatches).prefix(8))
         }
+
+        // Prepend numbered suggestion ("Flute 2") when relevant
+        if let numbered = numberedSuggestion {
+            let show = suffix.isEmpty || numbered.lowercased().hasPrefix(suffix.lowercased())
+            if show {
+                result.removeAll { $0.lowercased() == numbered.lowercased() }
+                result.insert(numbered, at: 0)
+                result = Array(result.prefix(8))
+            }
+        }
+
+        return result
     }
 
     var body: some View {
@@ -3289,6 +3320,42 @@ struct SplitFileNamingRow: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 220)
                         .focused(fieldFocus, equals: fileIndex)
+                        // Arrow-key navigation through suggestions
+                        .onKeyPress(.downArrow) {
+                            guard !suggestions.isEmpty else { return .ignored }
+                            selectedSuggestionIndex = min(
+                                (selectedSuggestionIndex ?? -1) + 1,
+                                suggestions.count - 1
+                            )
+                            return .handled
+                        }
+                        .onKeyPress(.upArrow) {
+                            if let idx = selectedSuggestionIndex, idx > 0 {
+                                selectedSuggestionIndex = idx - 1
+                            } else {
+                                selectedSuggestionIndex = nil
+                            }
+                            return .handled
+                        }
+                        .onKeyPress(.return) {
+                            if let idx = selectedSuggestionIndex {
+                                // Accept the highlighted suggestion
+                                suffix = suggestions[idx]
+                                selectedSuggestionIndex = nil
+                                return .handled
+                            }
+                            // No selection active: advance focus to next field
+                            fieldFocus.wrappedValue = fileIndex + 1
+                            return .handled
+                        }
+                        .onKeyPress(.escape) {
+                            selectedSuggestionIndex = nil
+                            return .handled
+                        }
+                        .onChange(of: suffix) { _ in
+                            // Reset arrow-key position whenever text changes
+                            selectedSuggestionIndex = nil
+                        }
                     Text(".pdf")
                         .foregroundColor(.secondary)
                         .font(.system(.body, design: .monospaced))
@@ -3316,11 +3383,17 @@ struct SplitFileNamingRow: View {
                 // ── Autocomplete dropdown ────────────────────────────
                 if isFieldFocused && !suggestions.isEmpty {
                     VStack(alignment: .leading, spacing: 0) {
-                        ForEach(suggestions, id: \.self) { name in
-                            SuggestionButton(label: name) {
+                        ForEach(Array(suggestions.enumerated()), id: \.offset) { idx, name in
+                            SuggestionButton(
+                                label: name,
+                                isSelected: selectedSuggestionIndex == idx
+                            ) {
                                 suffix = name
+                                selectedSuggestionIndex = nil
                             }
-                            if name != suggestions.last { Divider().padding(.leading, 10) }
+                            if idx < suggestions.count - 1 {
+                                Divider().padding(.leading, 10)
+                            }
                         }
                     }
                     .background(Color(NSColor.controlBackgroundColor))
@@ -3340,9 +3413,10 @@ struct SplitFileNamingRow: View {
     }
 }
 
-// ── Suggestion button (hover highlight, used in autocomplete dropdown) ──────
+// ── Suggestion button (hover + arrow-key selection highlight) ────────────────
 private struct SuggestionButton: View {
     let label: String
+    var isSelected: Bool = false
     let action: () -> Void
     @State private var isHovered = false
 
@@ -3355,7 +3429,11 @@ private struct SuggestionButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .background(isHovered ? Color.accentColor.opacity(0.12) : Color.clear)
+        .background(
+            isSelected
+                ? Color.accentColor.opacity(0.20)
+                : (isHovered ? Color.accentColor.opacity(0.10) : Color.clear)
+        )
         .onHover { isHovered = $0 }
     }
 }
