@@ -238,3 +238,97 @@ struct ScanFolderTests {
         #expect(op.type == .alreadyPrefixed)
     }
 }
+
+// MARK: - Split Logic
+// Tests for the two pure functions that power the Split tab's file-division model.
+// fileSizes is a [Int] where each element is the page count of one output file.
+// e.g. [4] = one 4-page file; [2, 2] = two 2-page files.
+
+@Suite("Split Logic – toggleSplit")
+struct ToggleSplitTests {
+
+    @Test func splitMidFileDividesItInTwo() {
+        // [4] split at page 2 → [2, 2]
+        let result = toggleSplit(in: [4], at: 2)
+        #expect(result == [2, 2])
+    }
+
+    @Test func splitAtBoundaryMergesFiles() {
+        // [2, 2] with toggle at page 2 (the start of the second file) → [4]
+        let result = toggleSplit(in: [2, 2], at: 2)
+        #expect(result == [4])
+    }
+
+    @Test func splitAtPageZeroIsNoOp() {
+        // Page 0 is the very start of the document — no merge is possible before it
+        let result = toggleSplit(in: [4], at: 0)
+        #expect(result == [4])
+    }
+
+    @Test func splitAtFirstPageOfFirstFileIsNoOp() {
+        // Can't merge file 0 with the file before it — there isn't one
+        let result = toggleSplit(in: [2, 2], at: 0)
+        #expect(result == [2, 2])
+    }
+
+    @Test func splitInMiddleOfMultiFileDocument() {
+        // [2, 4, 2] split at page 4 (inside the second file, local offset 2) → [2, 2, 2, 2]
+        let result = toggleSplit(in: [2, 4, 2], at: 4)
+        #expect(result == [2, 2, 2, 2])
+    }
+
+    @Test func mergeMiddleBoundaryInMultiFileDocument() {
+        // [2, 2, 2, 2] toggle at page 4 (start of third file) → [2, 4, 2]
+        let result = toggleSplit(in: [2, 2, 2, 2], at: 4)
+        #expect(result == [2, 4, 2])
+    }
+
+    @Test func emptyArrayIsUnchanged() {
+        let result = toggleSplit(in: [], at: 1)
+        #expect(result == [])
+    }
+
+    @Test func splitAtLastPageProducesTrailingOnePage() {
+        // [4] split at page 3 → [3, 1]
+        let result = toggleSplit(in: [4], at: 3)
+        #expect(result == [3, 1])
+    }
+
+    @Test func splitAtPageOneProducesLeadingOnePage() {
+        // [4] split at page 1 → [1, 3]
+        let result = toggleSplit(in: [4], at: 1)
+        #expect(result == [1, 3])
+    }
+}
+
+@Suite("Split Logic – splitSizes")
+struct SplitSizesTests {
+
+    @Test func evenDivision() {
+        // 8 pages at stride 2 → four 2-page files
+        #expect(splitSizes(totalPages: 8, stride: 2) == [2, 2, 2, 2])
+    }
+
+    @Test func unevenDivisionLastChunkTakesRemainder() {
+        // 7 pages at stride 2 → [2, 2, 2, 1]
+        #expect(splitSizes(totalPages: 7, stride: 2) == [2, 2, 2, 1])
+    }
+
+    @Test func strideLargerThanTotalPages() {
+        // stride > total → single file with all pages
+        #expect(splitSizes(totalPages: 3, stride: 10) == [3])
+    }
+
+    @Test func strideEqualsTotal() {
+        #expect(splitSizes(totalPages: 4, stride: 4) == [4])
+    }
+
+    @Test func zeroPagesReturnsEmpty() {
+        #expect(splitSizes(totalPages: 0, stride: 2) == [])
+    }
+
+    @Test func strideLargerChunk() {
+        // 10 pages at stride 4 → [4, 4, 2]
+        #expect(splitSizes(totalPages: 10, stride: 4) == [4, 4, 2])
+    }
+}
