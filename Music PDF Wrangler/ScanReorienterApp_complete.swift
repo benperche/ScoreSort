@@ -3131,8 +3131,6 @@ struct SplitFileNamingRow: View {
     let isFocused: Bool
     let onSubmit: () -> Void
 
-    @FocusState private var fieldFocused: Bool
-
     private var fileSize: Int {
         fileIndex < fileSizes.count ? fileSizes[fileIndex] : 0
     }
@@ -3199,7 +3197,6 @@ struct SplitFileNamingRow: View {
                     TextField("Flute", text: $suffix)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 220)
-                        .focused($fieldFocused)
                         .onSubmit(onSubmit)
                     Text(".pdf")
                         .foregroundColor(.secondary)
@@ -3220,9 +3217,6 @@ struct SplitFileNamingRow: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 14)
         .background(isFocused ? Color.accentColor.opacity(0.04) : Color.clear)
-        .onChange(of: isFocused) { focused in
-            if focused { fieldFocused = true }
-        }
     }
 }
 
@@ -3250,10 +3244,9 @@ struct PageInstrumentPreview: View {
         let pageBounds = page.bounds(for: .mediaBox)
         
         // Calculate the crop area.
-        // Skip ~1 cm (28 pt) of top-margin whitespace, then capture ~2 inches
-        // (144 pt) so the instrument-name box is well within the crop window.
-        let topMarginSkip: CGFloat = 28  // ~1 cm — clears the page border/margin
-        let cropHeight: CGFloat = 144    // ~2 inches — tall enough to contain the name
+        // Start at the very top of the page (instrument names sit right at the top)
+        // and capture ~1.4 inches (100 pt) of height — enough to show the name box.
+        let cropHeight: CGFloat = 100    // ~1.4 inches
         let cropWidth: CGFloat = min(pageBounds.width * 0.4, 200) // Left 40%, max 200 pt
 
         // Account for page rotation
@@ -3264,12 +3257,10 @@ struct PageInstrumentPreview: View {
                                 width: pageBounds.height, height: pageBounds.width)
         }
 
-        // In PDF coords Y grows upward, so "below the top margin" means:
-        // top-of-page  = actualBounds.origin.y + actualBounds.height
-        // crop starts  = that - topMarginSkip - cropHeight
+        // In PDF coords Y grows upward; the top of the page is at origin.y + height.
         let cropRect = CGRect(
             x: actualBounds.origin.x,
-            y: actualBounds.origin.y + actualBounds.height - topMarginSkip - cropHeight,
+            y: actualBounds.origin.y + actualBounds.height - cropHeight,
             width: cropWidth,
             height: cropHeight
         )
