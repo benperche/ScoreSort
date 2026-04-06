@@ -3024,26 +3024,13 @@ struct SplitNamingStageView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // ── Top bar ──────────────────────────────────────────────────
+            // ── Top bar (title only) ─────────────────────────────────────
             HStack {
-                Button(action: onBack) {
-                    Label("Back to Split", systemImage: "chevron.left")
-                }
-                .buttonStyle(.bordered)
-
                 Spacer()
-
                 Text("Step 2: Name Files")
                     .font(.title2)
                     .fontWeight(.semibold)
-
                 Spacer()
-
-                Button(action: onSave) {
-                    Label("Save Split Files", systemImage: "arrow.down.doc.fill")
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(numberOfFiles < 2)
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
@@ -3106,6 +3093,27 @@ struct SplitNamingStageView: View {
                     }
                 }
             }
+
+            Divider()
+
+            // ── Bottom bar ───────────────────────────────────────────────
+            HStack {
+                Button(action: onBack) {
+                    Label("Back to Split", systemImage: "chevron.left")
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button(action: onSave) {
+                    Label("Save Split Files", systemImage: "arrow.down.doc.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .disabled(numberOfFiles < 2)
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
         }
     }
 }
@@ -3162,11 +3170,12 @@ struct SplitFileNamingRow: View {
             }
 
             // ── Instrument name crop (full-width, zoomed in) ─────────
-            // Shows the top-left corner of the page where instrument names live.
+            // Shows the top-left corner of the page where instrument names live,
+            // skipping the page margin and capturing ~2 inches of content.
             if let page = pdfDocument.page(at: firstPageIndex) {
                 PageInstrumentPreview(page: page)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 110)
+                    .frame(height: 150)
                     .background(Color.white)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                     .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
@@ -3174,7 +3183,7 @@ struct SplitFileNamingRow: View {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.gray.opacity(0.12))
                     .frame(maxWidth: .infinity)
-                    .frame(height: 110)
+                    .frame(height: 150)
             }
 
             // ── Name field ────────────────────────────────────────────
@@ -3240,10 +3249,13 @@ struct PageInstrumentPreview: View {
     private func renderInstrumentNameArea(from page: PDFPage) -> NSImage? {
         let pageBounds = page.bounds(for: .mediaBox)
         
-        // Calculate the crop area - top 1 inch (72 points) of the left side
-        let cropHeight: CGFloat = 72 // 1 inch
-        let cropWidth: CGFloat = min(pageBounds.width * 0.4, 200) // Left 40% of page, max 200pt
-        
+        // Calculate the crop area.
+        // Skip ~1 cm (28 pt) of top-margin whitespace, then capture ~2 inches
+        // (144 pt) so the instrument-name box is well within the crop window.
+        let topMarginSkip: CGFloat = 28  // ~1 cm — clears the page border/margin
+        let cropHeight: CGFloat = 144    // ~2 inches — tall enough to contain the name
+        let cropWidth: CGFloat = min(pageBounds.width * 0.4, 200) // Left 40%, max 200 pt
+
         // Account for page rotation
         let rotation = page.rotation
         var actualBounds = pageBounds
@@ -3251,10 +3263,13 @@ struct PageInstrumentPreview: View {
             actualBounds = CGRect(x: pageBounds.origin.x, y: pageBounds.origin.y,
                                 width: pageBounds.height, height: pageBounds.width)
         }
-        
+
+        // In PDF coords Y grows upward, so "below the top margin" means:
+        // top-of-page  = actualBounds.origin.y + actualBounds.height
+        // crop starts  = that - topMarginSkip - cropHeight
         let cropRect = CGRect(
             x: actualBounds.origin.x,
-            y: actualBounds.origin.y + actualBounds.height - cropHeight,
+            y: actualBounds.origin.y + actualBounds.height - topMarginSkip - cropHeight,
             width: cropWidth,
             height: cropHeight
         )
