@@ -3030,7 +3030,7 @@ struct SplitNamingStageView: View {
         for name in InstrumentOrders.orchestra + InstrumentOrders.band + InstrumentOrders.jazz {
             let key = name.lowercased()
             if seen.insert(key).inserted {
-                result.append(name.prefix(1).uppercased() + name.dropFirst())
+                result.append(name.capitalized)
             }
         }
         return result
