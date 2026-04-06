@@ -1,5 +1,5 @@
 # Music PDF Manager — Code Reference
-> Single file: `ScanReorienterApp_complete.swift` (3219 lines)
+> Single file: `ScanReorienterApp_complete.swift` (~3926 lines)
 > Xcode project: "Music PDF Wrangler"
 
 ---
@@ -155,23 +155,134 @@ Written from built-in defaults on first launch (via `InstrumentOrders.setup()` c
 
 ## Tab 2 — Split PDF
 
-**View:** `SplitView`  
-**ViewModel:** `PDFManager` (shared type, also used by RotateView — each tab creates its own `@StateObject`)  
-**Key state:** `splitMarkers: Set<Int>`, `customFileNames: [Int: String]`, `baseFileName: String`
+**Views:** `SplitView` (Step 1) → `SplitNamingStageView` (Step 2) → `SplitFileNamingRow` (one row per output file)
+**Supporting:** `SuggestionButton`, `PageInstrumentPreview`, `SplitControlsSection`
+**ViewModel:** `PDFManager` (shared type, separate `@StateObject` per tab)
 
-Split markers define where new files begin. `pageToFileMapping` computed from markers → consecutive page ranges → file indices.
+### Data model — `fileSizes: [Int]`
 
-Output naming: if `customFileNames[fileIndex]` exists and non-empty → `"\(baseFileName)\(suffix).pdf"`, else `"\(baseFileName)_\(fileIndex+1).pdf"`.
+The split state is stored as an **ordered array of page counts**, one entry per output file. For example `[2, 2, 1, 3]` means four files containing 2, 2, 1, and 3 pages respectively.
 
-Base filename edited via popup sheet (not inline lock button — previous bug fix).
+This replaces the old `splitMarkers: Set<Int>` approach. Benefits:
+- Adding a split at position P inside file i partitions that entry: `fileSizes[i]` splits into two entries.
+- Removing a split (clicking the first page of file i) merges `fileSizes[i-1]` and `fileSizes[i]`.
+- All subsequent file indices adjust automatically — no stale markers possible.
 
-Keyboard: Space = toggle marker on current page; ←/→ = navigate. Focus must be on preview area.
+`splitMarkers: Set<Int>` is now a **derived computed property** (for rendering the page strip) — the set of page indices that start a new file (excluding page 0).
+
+`pageToFileMapping: [Int: Int]` maps each page index to its output file index.
+
+### SplitView key state
+
+```swift
+@State private var fileSizes: [Int] = []        // primary split model
+@State private var stride: Int = 2               // for auto-split
+@State private var showingNamingStage: Bool = false
+@State private var baseFileName: String = ""
+@State private var customFileNames: [Int: String] = [:]  // fileIndex → suffix
+```
+
+`body` switches between `splitStageBody` (Step 1) and `SplitNamingStageView` (Step 2) based on `showingNamingStage`.
+
+### `toggleSplitAt(page:)`
+Walks `fileSizes` to find which file owns `page`, then either splits that entry or merges it with the previous one (if `page` is the first page of a file).
+
+### Step 1 UI
+
+Two-column layout:
+- **Left:** page strip + large current-page preview
+- **Right:** stride/auto-split controls, output file cards, base filename field, "Name Files →" button
+
+Keyboard shortcuts (focus must be on preview area):
+- `Space` — toggle split on current page
+- `←` / `→` — previous / next page
+- `⌘←` / `⌘→` — jump to first / last page
+
+### Step 2 — `SplitNamingStageView`
+
+Full-window scrollable list of `SplitFileNamingRow` views, one per output file.
+
+Key properties:
+```swift
+let pdfDocument: PDFDocument
+let fileSizes: [Int]
+@Binding var baseFileName: String
+@Binding var customFileNames: [Int: String]
+let onBack: () -> Void
+let onSave: () -> Void
+@FocusState private var focusedField: Int?   // drives auto-scroll
+```
+
+- **`instrumentNames: [String]`** — ordered, deduplicated union of orchestra + band + jazz lists from `InstrumentOrders`, each entry `.capitalized`. Used as autocomplete source across all rows.
+- **`filenameError(for:)`** — returns an error string if text contains `/`, `:`, or `\`.
+- **`canSave`** — requires `numberOfFiles >= 2`, no base name error, no suffix error.
+- Auto-scrolls to the focused row via `.onChange(of: focusedField)` + `ScrollViewReader.scrollTo(_:anchor:.center)`.
+
+Bottom bar: "← Back" button + "Split and Save" button (disabled when `!canSave`).
+
+### `SplitFileNamingRow`
+
+One row per output file. Key properties:
+
+```swift
+let fileIndex: Int
+let fileSizes: [Int]
+let firstPageIndex: Int
+let pdfDocument: PDFDocument
+let baseFileName: String
+@Binding var suffix: String
+var fieldFocus: FocusState<Int?>.Binding   // passed from parent — no local copy
+let instrumentNames: [String]
+let allSuffixes: [Int: String]             // snapshot of all rows' current suffixes
+@State private var selectedSuggestionIndex: Int? = nil
+```
+
+**Important:** `fieldFocus` is a `FocusState<Int?>.Binding` passed directly from the parent, not a local `@FocusState`. This ensures Tab navigation and click both update the parent's scroll logic. A local `@FocusState` copy caused a macOS bug where the initial click on the TextField was silently swallowed.
+
+**`PageInstrumentPreview`** — renders a cropped 2× Retina image of the top-left corner of the page (100 pt tall, left 40% up to 200 pt wide) where instrument names typically appear. Uses `.allowsHitTesting(false)` to prevent the fill-mode image's hit-test area from blocking the TextField below.
+
+#### Autocomplete
+
+**`nextExpectedIndex: Int`** — scans rows above (nearest first) to find the last recognised instrument name, then returns `index + 1` in `instrumentNames`. This rotates the suggestion list so the most likely next instrument appears first.
+
+**`numberedSuggestion: String?`** — checks if the nearest previous non-empty suffix ends with a space and a positive integer (e.g. "Flute 1"). If so, returns the incremented version ("Flute 2") to inject as the top suggestion.
+
+**`suggestions: [String]`** — builds a rotated list from `nextExpectedIndex`, filters to prefix-matches then contains-matches when text is non-empty, then prepends `numberedSuggestion` if applicable. Always ≤ 8 entries.
+
+#### Keyboard interaction on TextField
+
+| Key | Behaviour |
+|-----|-----------|
+| `↓` | Move `selectedSuggestionIndex` down (starts at 0 if nil) |
+| `↑` | Move up; set nil when above index 0 |
+| `Return` | If index set: accept suggestion, clear index. Else: advance `fieldFocus` to next row |
+| `Escape` | Clear `selectedSuggestionIndex` |
+| Any typing | Reset `selectedSuggestionIndex` to nil |
+
+#### `SuggestionButton`
+
+```swift
+private struct SuggestionButton: View {
+    let label: String
+    var isSelected: Bool = false   // arrow-key highlight
+    let action: () -> Void
+    @State private var isHovered = false
+    // background: selected → opacity 0.20, hover → 0.10, default → clear
+}
+```
+
+### `PageInstrumentPreview`
+
+Renders via `renderInstrumentNameArea(from:)`:
+- Crop rect: top of page (`y = origin.y + height - cropHeight`), left 40% (max 200 pt), 100 pt tall
+- Rendered at 2× scale into an `NSImage` via `NSGraphicsContext` / `PDFPage.draw(with:to:)`
+- Handles 90°/270° rotated pages by swapping width/height before cropping
 
 ---
 
 ## Tab 3 — Rotate Pages
 
-**View:** `RotateView`  
+**View:** `RotateView`
 **ViewModel:** `PDFManager`
 
 Controls: `baseRotation: RotationAngle` (all pages) + `additionalRotationMode: RotationMode` (odd/even/none) + `additionalRotationAngle`.
@@ -179,6 +290,8 @@ Controls: `baseRotation: RotationAngle` (all pages) + `additionalRotationMode: R
 Preview: `PDFPageView: NSViewRepresentable` wrapping `PDFView`. Renders page to `NSImage` first (via `renderFullImage`) to avoid mutating shared page state, then sets `clonedPage.rotation`.
 
 Save: `PDFManager.saveRotatedPDF(to:baseRotation:additionalRotationMode:additionalRotationAngle:)` — iterates pages, mutates `page.rotation` on copy, writes new document.
+
+Keyboard navigation: `←` / `→` (previous/next page); `⌘←` / `⌘→` (first/last page). Shared with the Split tab's Step 1 preview.
 
 ### Supporting enums
 ```swift
@@ -206,3 +319,7 @@ enum RotationMode { case odd, even, all, none }
 - **`canCreateDirectories = true`** set on NSOpenPanel for folder selection.
 - **Print automation not possible** — NSPrintOperation / AppleScript all fail reliably; "Open in Preview" + ⌘P is the documented workflow.
 - **App quits on window close** via `NSApplicationDelegateAdaptor(AppDelegate.self)` returning `true` from `applicationShouldTerminateAfterLastWindowClosed`.
+- **`.clipped()` does not restrict hit testing** — in SwiftUI, `.clipped()` clips rendering but the view's hit-test area remains its full layout frame. Use `.allowsHitTesting(false)` when an image with `.fill` content mode would otherwise absorb clicks meant for views below it. (Affected `PageInstrumentPreview` inside `SplitFileNamingRow`.)
+- **`FocusState` must not be duplicated across parent/child boundaries** — passing `FocusState<T>.Binding` from parent to child and using `.focused(binding, equals:)` in the child is the correct pattern. Adding a local `@FocusState` in the child creates a second responder that intercepts the first click on a TextField on macOS (the click is consumed to transfer focus to the local state rather than starting editing).
+- **`fileSizes` array vs `splitMarkers` set** — the array model is the source of truth; `splitMarkers` is only derived for rendering. This prevents the stale-marker problem that arose when pages were removed or re-ordered.
+- **Instrument orders versioning** — `instrument-orders.json` in Application Support contains a `"version"` sentinel. On launch, `InstrumentOrders.setup()` compares the file's version to the built-in default; if the file is older it is regenerated, so new aliases/entries in the code automatically propagate to existing installs.

@@ -33,13 +33,16 @@ Automatically organize your sheet music files by adding sequential prefixes base
 ### ✂️ PDF Splitter
 Split large PDF files into multiple documents with precision control.
 
-- **Visual page preview** with keyboard navigation
-- **Manual split markers** - mark pages where splits should occur
-- **Auto-split mode** - automatically split every N pages
-- **Custom filenames** for each output file
-- **Base filename** with automatic numbering
-- **Keyboard shortcuts** - Space to toggle markers, arrows to navigate
-- **File preview cards** showing page ranges for each output
+- **Visual page preview** with keyboard navigation (including first/last page jumps)
+- **Click-to-toggle split points** directly on the page strip
+- **Auto-split by stride** — split every N pages with a single click
+- **Two-step workflow** — Step 1: mark split points; Step 2: name each output file
+- **Smart naming stage** — zoomed-in crop of each file's first page shows the instrument name corner so you can type it immediately
+- **Instrument name autocomplete** — suggestions drawn from all ensemble presets, ordered by what's most likely to come next
+- **Arrow-key dropdown navigation** — ↓/↑ moves through suggestions without leaving the keyboard; Return accepts, Escape dismisses
+- **Numbered instrument suggestion** — after typing "Flute 1", the next field immediately suggests "Flute 2"
+- **Filename validation** — illegal characters (/ : \\) flagged inline before saving
+- **Base filename** shared across all output files; per-file suffix appended automatically
 
 ### 🔄 Page Rotator
 Rotate PDF pages with flexible options for odd/even page handling.
@@ -172,20 +175,36 @@ After:
 
 ### PDF Splitter
 
-1. **Load a PDF** (drag & drop or click "Choose PDF")
-2. **Navigate pages** using the preview or arrow buttons
-3. **Add split markers**:
-   - Click "Add Split Marker" or press Space
-   - Or use "Auto-Split Every N Pages" for regular intervals
-4. **Review the output files** in the right panel
-5. **Set base filename** (click "Edit" button)
-6. **Customise filenames** (optional)
-   - Click "Customise Names" to specify exact names (e.g., "As Winds Dance - " + "Flute" = "As Winds Dance - Flute.pdf")
-7. **Click "Split and Save"** and choose an output folder
+#### Step 1 — Mark split points
 
-#### Keyboard Shortcuts (Splitter)
-- `Space` - Toggle split marker on current page
-- `←` / `→` - Navigate between pages
+1. **Load a PDF** (drag & drop or click "Choose PDF")
+2. **Navigate pages** using the arrow buttons or click the page strip
+   - `←` / `→` — previous/next page
+   - `⌘←` / `⌘→` — jump to first/last page
+3. **Add split points**:
+   - Click any page in the strip to toggle a split at that page
+   - Press `Space` to toggle a split on the current page
+   - Or use **Auto-Split** in the right panel — choose a stride (every N pages) and click "Apply"
+4. **Review the output file cards** in the right panel (each shows its page range)
+5. **Set base filename** in the right panel
+6. **Click "Name Files →"** to proceed to Step 2
+
+#### Step 2 — Name each output file
+
+1. Each file gets its own row with a **zoomed-in crop** of the first page's top-left corner (where instrument names typically appear)
+2. **Type a suffix** for each file — e.g. base name "As Winds Dance -" + suffix "Flute" → `As Winds Dance - Flute.pdf`
+   - Leave blank for automatic numbering (`basename_1.pdf`, `basename_2.pdf`, …)
+3. **Use autocomplete** to fill in instrument names quickly:
+   - Suggestions appear as you type, ordered by what's likely to come next in the ensemble
+   - If the previous file was "Flute 1", the current field immediately suggests "Flute 2"
+   - Press `↓` / `↑` to navigate the dropdown with arrow keys; `Return` to accept; `Escape` to dismiss
+   - Or press `Tab` to advance through fields in order
+4. **Click "Split and Save"** and choose an output folder
+
+#### Keyboard Shortcuts (Splitter — Step 1)
+- `Space` — Toggle split point on current page
+- `←` / `→` — Navigate between pages
+- `⌘←` / `⌘→` — Jump to first / last page
 - **Tip**: Click on the preview area to ensure keyboard shortcuts are active
 
 ### Page Rotator
@@ -194,6 +213,8 @@ After:
 2. **Set base rotation** (applied to all pages)
 3. **Set additional rotation** (optional, for odd or even pages)
 4. **Preview the result** using page navigation
+   - `←` / `→` — previous/next page
+   - `⌘←` / `⌘→` — jump to first/last page
 5. **Click "Save Rotated PDF"** and choose where to save
 
 ## Technical Details
@@ -269,9 +290,10 @@ If you encounter any issues or have suggestions:
 
 ## Author
 
-Your Name - [@yourhandle](https://twitter.com/yourhandle)
+Your Name - Ben Perche, with all code written by Claude
+Additional contributions from Lachlan Hamilton
 
-Project Link: [https://github.com/yourusername/music-pdf-manager](https://github.com/yourusername/music-pdf-manager)
+Project Link: [https://github.com/benperche/music-pdf-manager](https://github.com/benperche/music-pdf-manager)
 
 ---
 
