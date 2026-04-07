@@ -349,9 +349,8 @@ struct SplitSizesTests {
 // Most tests construct CombineFile values directly and assign them to manager.files,
 // so they don't need real PDF files on disk.
 //
-// Note: createCombinedPDF is not tested here because it calls NSAlert.runModal()
-// on completion, which would block the test runner. It needs a refactor (e.g. a
-// completion callback instead of an inline alert) before it can be unit tested.
+// Note: createCombinedPDF is tested below. The method uses a completion callback
+// for result reporting so tests can capture results without any UI interaction.
 
 @Suite("Combine Manager")
 struct CombineManagerTests {
@@ -545,6 +544,77 @@ struct CombineManagerTests {
 
         #expect(manager.files.map(\.name) == ["A.pdf", "D.pdf", "B.pdf", "C.pdf"])
     }
+
+    // MARK: - createCombinedPDF
+
+    @Test func createCombinedPDFOutputPageCountMatchesTotals() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let urlA = tempDir.appendingPathComponent("A.pdf")
+        let urlB = tempDir.appendingPathComponent("B.pdf")
+        writePDF(pages: 3, to: urlA)
+        writePDF(pages: 2, to: urlB)
+
+        let manager = CombineManager()
+        manager.addFiles(urls: [urlA, urlB], undoManager: nil)
+
+        let outURL = tempDir.appendingPathComponent("combined.pdf")
+        var resultTitle = ""
+        manager.createCombinedPDF(to: outURL, addBlankPages: false) { title, _, _ in
+            resultTitle = title
+        }
+
+        let result = try #require(PDFDocument(url: outURL))
+        #expect(result.pageCount == 5)
+        #expect(resultTitle == "PDF Created Successfully")
+    }
+
+    @Test func createCombinedPDFInsertsBlanksAfterOddPageFiles() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // 3-page file (odd) → should get a blank appended; 2-page file (even) → no blank
+        let urlA = tempDir.appendingPathComponent("A.pdf")
+        let urlB = tempDir.appendingPathComponent("B.pdf")
+        writePDF(pages: 3, to: urlA)
+        writePDF(pages: 2, to: urlB)
+
+        let manager = CombineManager()
+        manager.addFiles(urls: [urlA, urlB], undoManager: nil)
+
+        let outURL = tempDir.appendingPathComponent("combined_blank.pdf")
+        manager.createCombinedPDF(to: outURL, addBlankPages: true) { _, _, _ in }
+
+        // 3 pages + 1 blank + 2 pages = 6
+        let result = try #require(PDFDocument(url: outURL))
+        #expect(result.pageCount == 6)
+    }
+
+    @Test func createCombinedPDFRespectsMultipleCopies() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let url = tempDir.appendingPathComponent("A.pdf")
+        writePDF(pages: 4, to: url)
+
+        let manager = CombineManager()
+        manager.addFiles(urls: [url], undoManager: nil)
+        manager.updateCopies(for: manager.files[0].id, copies: 3, undoManager: nil)
+
+        let outURL = tempDir.appendingPathComponent("combined_copies.pdf")
+        manager.createCombinedPDF(to: outURL, addBlankPages: false) { _, _, _ in }
+
+        // 4 pages × 3 copies = 12
+        let result = try #require(PDFDocument(url: outURL))
+        #expect(result.pageCount == 12)
+    }
 }
 
 // MARK: - PDF Manager
@@ -579,7 +649,7 @@ struct PDFManagerTests {
         let outURL = tempDir.appendingPathComponent("rotated.pdf")
 
         manager.saveRotatedPDF(to: outURL, baseRotation: .rotate90,
-                               additionalRotationMode: .none, additionalRotationAngle: .none)
+                               additionalRotationMode: .none, additionalRotationAngle: .none) { _, _, _ in }
 
         let result = try #require(PDFDocument(url: outURL))
         for i in 0..<result.pageCount {
@@ -596,7 +666,7 @@ struct PDFManagerTests {
 
         let outURL = tempDir.appendingPathComponent("rotated.pdf")
         manager.saveRotatedPDF(to: outURL, baseRotation: .rotate90,
-                               additionalRotationMode: .none, additionalRotationAngle: .none)
+                               additionalRotationMode: .none, additionalRotationAngle: .none) { _, _, _ in }
 
         for i in 0..<originalDoc.pageCount {
             let page = try #require(originalDoc.page(at: i))
@@ -610,7 +680,7 @@ struct PDFManagerTests {
         let outURL = tempDir.appendingPathComponent("odd_rotated.pdf")
 
         manager.saveRotatedPDF(to: outURL, baseRotation: .rotate90,
-                               additionalRotationMode: .odd, additionalRotationAngle: .rotate90)
+                               additionalRotationMode: .odd, additionalRotationAngle: .rotate90) { _, _, _ in }
 
         let result = try #require(PDFDocument(url: outURL))
         #expect(result.page(at: 0)?.rotation == 180)  // page 1 (odd)
@@ -625,7 +695,7 @@ struct PDFManagerTests {
         let outURL = tempDir.appendingPathComponent("even_rotated.pdf")
 
         manager.saveRotatedPDF(to: outURL, baseRotation: .rotate90,
-                               additionalRotationMode: .even, additionalRotationAngle: .rotate90)
+                               additionalRotationMode: .even, additionalRotationAngle: .rotate90) { _, _, _ in }
 
         let result = try #require(PDFDocument(url: outURL))
         #expect(result.page(at: 0)?.rotation == 90)   // page 1 (odd)
@@ -644,7 +714,7 @@ struct PDFManagerTests {
         // [2, 2]: pages 0-1 → file 0, pages 2-3 → file 1
         let mapping: [Int: Int] = [0: 0, 1: 0, 2: 1, 3: 1]
         manager.saveSplitPDF(to: outDir, splitMarkers: [2], baseFileName: "Test",
-                             customFileNames: [:], pageToFileMapping: mapping)
+                             customFileNames: [:], pageToFileMapping: mapping) { _, _, _ in }
 
         let pdfs = try FileManager.default.contentsOfDirectory(at: outDir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "pdf" }
@@ -659,7 +729,7 @@ struct PDFManagerTests {
         // [2, 4]: pages 0-1 → file 0, pages 2-5 → file 1
         let mapping: [Int: Int] = [0: 0, 1: 0, 2: 1, 3: 1, 4: 1, 5: 1]
         manager.saveSplitPDF(to: outDir, splitMarkers: [2], baseFileName: "Test",
-                             customFileNames: [:], pageToFileMapping: mapping)
+                             customFileNames: [:], pageToFileMapping: mapping) { _, _, _ in }
 
         let file1 = try #require(PDFDocument(url: outDir.appendingPathComponent("Test_1.pdf")))
         let file2 = try #require(PDFDocument(url: outDir.appendingPathComponent("Test_2.pdf")))
@@ -674,7 +744,7 @@ struct PDFManagerTests {
 
         let mapping: [Int: Int] = [0: 0, 1: 0, 2: 1, 3: 1]
         manager.saveSplitPDF(to: outDir, splitMarkers: [2], baseFileName: "Sonata",
-                             customFileNames: [0: " Mvt1", 1: " Mvt2"], pageToFileMapping: mapping)
+                             customFileNames: [0: " Mvt1", 1: " Mvt2"], pageToFileMapping: mapping) { _, _, _ in }
 
         let names = try FileManager.default.contentsOfDirectory(at: outDir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "pdf" }
@@ -690,7 +760,7 @@ struct PDFManagerTests {
 
         let mapping: [Int: Int] = [0: 0, 1: 0, 2: 1, 3: 1]
         manager.saveSplitPDF(to: outDir, splitMarkers: [2], baseFileName: "Part",
-                             customFileNames: [:], pageToFileMapping: mapping)
+                             customFileNames: [:], pageToFileMapping: mapping) { _, _, _ in }
 
         let names = try FileManager.default.contentsOfDirectory(at: outDir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "pdf" }

@@ -584,13 +584,17 @@ struct CombineView: View {
         
         panel.begin { response in
             if response == .OK, let url = panel.url {
-                combineManager.createCombinedPDF(to: url, addBlankPages: addBlankPages)
+                combineManager.createCombinedPDF(to: url, addBlankPages: addBlankPages) { title, message, isError in
+                        showNSAlert(title: title, message: message, isError: isError)
+                    }
             }
         }
     }
     
     private func openInPreview() {
-        combineManager.openInPreview(addBlankPages: addBlankPages)
+        combineManager.openInPreview(addBlankPages: addBlankPages) { title, message, isError in
+            showNSAlert(title: title, message: message, isError: isError)
+        }
     }
 
     // MARK: - Menu state sync
@@ -844,13 +848,13 @@ class CombineManager: ObservableObject {
         }
     }
     
-    func createCombinedPDF(to url: URL, addBlankPages: Bool) {
+    func createCombinedPDF(to url: URL, addBlankPages: Bool, completion: PDFAlertHandler) {
         let combinedDocument = PDFDocument()
         var currentPageIndex = 0
-        
+
         for file in files {
             guard let sourceDocument = PDFDocument(url: file.url) else { continue }
-            
+
             for _ in 0..<file.copies {
                 // Add all pages from this document
                 for pageIndex in 0..<sourceDocument.pageCount {
@@ -859,7 +863,7 @@ class CombineManager: ObservableObject {
                         currentPageIndex += 1
                     }
                 }
-                
+
                 // Add blank page if needed (odd page count and blank pages enabled)
                 if addBlankPages && sourceDocument.pageCount % 2 == 1 {
                     if let blankPage = createBlankPage() {
@@ -869,31 +873,23 @@ class CombineManager: ObservableObject {
                 }
             }
         }
-        
+
         if combinedDocument.write(to: url) {
-            let alert = NSAlert()
-            alert.messageText = "PDF Created Successfully"
-            alert.informativeText = "Combined PDF with \(currentPageIndex) pages saved to:\n\(url.path)"
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
+            completion("PDF Created Successfully",
+                       "Combined PDF with \(currentPageIndex) pages saved to:\n\(url.path)",
+                       false)
         } else {
-            let alert = NSAlert()
-            alert.messageText = "Error"
-            alert.informativeText = "Failed to create PDF"
-            alert.alertStyle = .critical
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
+            completion("Error", "Failed to create PDF", true)
         }
     }
     
-    func openInPreview(addBlankPages: Bool) {
+    func openInPreview(addBlankPages: Bool, onError: PDFAlertHandler) {
         let combinedDocument = PDFDocument()
         var currentPageIndex = 0
-        
+
         for file in files {
             guard let sourceDocument = PDFDocument(url: file.url) else { continue }
-            
+
             for _ in 0..<file.copies {
                 // Add all pages from this document
                 for pageIndex in 0..<sourceDocument.pageCount {
@@ -902,7 +898,7 @@ class CombineManager: ObservableObject {
                         currentPageIndex += 1
                     }
                 }
-                
+
                 // Add blank page if needed
                 if addBlankPages && sourceDocument.pageCount % 2 == 1 {
                     if let blankPage = createBlankPage() {
@@ -912,20 +908,15 @@ class CombineManager: ObservableObject {
                 }
             }
         }
-        
+
         // Save to temporary file
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedForPrint.pdf")
-        
+
         guard combinedDocument.write(to: tempURL) else {
-            let alert = NSAlert()
-            alert.messageText = "Error"
-            alert.informativeText = "Failed to create temporary PDF"
-            alert.alertStyle = .critical
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
+            onError("Error", "Failed to create temporary PDF", true)
             return
         }
-        
+
         // Open in Preview
         NSWorkspace.shared.open(tempURL)
     }
@@ -2489,7 +2480,9 @@ struct RotateView: View {
                     baseRotation: baseRotation,
                     additionalRotationMode: additionalRotationMode,
                     additionalRotationAngle: additionalRotationAngle
-                )
+                ) { title, message, isError in
+                    showNSAlert(title: title, message: message, isError: isError)
+                }
             }
             isShowingSavePanel = false
         }
@@ -2827,7 +2820,9 @@ struct SplitView: View {
                     baseFileName: baseFileName,
                     customFileNames: customFileNames,
                     pageToFileMapping: pageToFileMapping
-                )
+                ) { title, message, isError in
+                    showNSAlert(title: title, message: message, isError: isError)
+                }
             }
         }
     }
@@ -3794,11 +3789,11 @@ class PDFManager: ObservableObject {
         currentFileName = nil
     }
     
-    func saveRotatedPDF(to url: URL, baseRotation: RotationAngle, additionalRotationMode: RotationMode, additionalRotationAngle: RotationAngle) {
+    func saveRotatedPDF(to url: URL, baseRotation: RotationAngle, additionalRotationMode: RotationMode, additionalRotationAngle: RotationAngle, completion: PDFAlertHandler) {
         guard let document = pdfDocument else { return }
-        
+
         let newDocument = PDFDocument()
-        
+
         for pageIndex in 0..<document.pageCount {
             guard let originalPage = document.page(at: pageIndex),
                   let page = originalPage.copy() as? PDFPage else { continue }
@@ -3808,7 +3803,7 @@ class PDFManager: ObservableObject {
             if baseRotation.degrees != 0 {
                 page.rotation += baseRotation.degrees
             }
-            
+
             let shouldApplyAdditional: Bool
             switch additionalRotationMode {
             case .odd:
@@ -3818,37 +3813,32 @@ class PDFManager: ObservableObject {
             case .none:
                 shouldApplyAdditional = false
             }
-            
+
             if shouldApplyAdditional {
                 page.rotation += additionalRotationAngle.degrees
             }
-            
+
             newDocument.insert(page, at: pageIndex)
         }
-        
-        newDocument.write(to: url)
-        
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            alert.messageText = "PDF Saved Successfully"
-            alert.informativeText = "Your rotated PDF has been saved to:\n\(url.path)"
-            alert.alertStyle = .informational
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
+
+        if newDocument.write(to: url) {
+            completion("PDF Saved Successfully", "Your rotated PDF has been saved to:\n\(url.path)", false)
+        } else {
+            completion("Error", "Failed to save rotated PDF", true)
         }
     }
     
-    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int]) {
+    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], completion: PDFAlertHandler) {
         guard let document = pdfDocument else { return }
-        
+
         let numberOfFiles = (pageToFileMapping.values.max() ?? 0) + 1
         var fileDocuments: [Int: PDFDocument] = [:]
-        
+
         // Initialize PDF documents for each file
         for fileIndex in 0..<numberOfFiles {
             fileDocuments[fileIndex] = PDFDocument()
         }
-        
+
         // Distribute pages to files
         for pageIndex in 0..<document.pageCount {
             guard let page = document.page(at: pageIndex),
@@ -3856,51 +3846,62 @@ class PDFManager: ObservableObject {
                   let targetDoc = fileDocuments[fileIndex] else {
                 continue
             }
-            
+
             targetDoc.insert(page, at: targetDoc.pageCount)
         }
-        
+
         // Save each file
         var savedFiles: [String] = []
         var errors: [String] = []
-        
+
         for fileIndex in 0..<numberOfFiles {
             guard let doc = fileDocuments[fileIndex] else { continue }
-            
+
             let fileName: String
             if let customSuffix = customFileNames[fileIndex], !customSuffix.isEmpty {
                 fileName = "\(baseFileName)\(customSuffix).pdf"
             } else {
                 fileName = "\(baseFileName)_\(fileIndex + 1).pdf"
             }
-            
+
             let fileURL = folderURL.appendingPathComponent(fileName)
-            
+
             if doc.write(to: fileURL) {
                 savedFiles.append(fileName)
             } else {
                 errors.append(fileName)
             }
         }
-        
-        DispatchQueue.main.async {
-            let alert = NSAlert()
-            if errors.isEmpty {
-                alert.messageText = "PDF Split Successfully"
-                alert.informativeText = "Created \(savedFiles.count) file(s) in:\n\(folderURL.path)"
-                alert.alertStyle = .informational
-            } else {
-                alert.messageText = "Partial Success"
-                alert.informativeText = "Created \(savedFiles.count) file(s), but \(errors.count) failed:\n\(errors.joined(separator: ", "))"
-                alert.alertStyle = .warning
-            }
-            alert.addButton(withTitle: "OK")
-            alert.runModal()
+
+        if errors.isEmpty {
+            completion("PDF Split Successfully",
+                       "Created \(savedFiles.count) file(s) in:\n\(folderURL.path)",
+                       false)
+        } else {
+            completion("Partial Success",
+                       "Created \(savedFiles.count) file(s), but \(errors.count) failed:\n\(errors.joined(separator: ", "))",
+                       true)
         }
     }
 }
 
 // MARK: - Supporting Types
+
+/// Completion handler for PDF save/export operations. Called with a title, message, and
+/// a flag indicating whether the operation failed. The caller is responsible for presenting
+/// the alert — managers never show UI directly.
+typealias PDFAlertHandler = (_ title: String, _ message: String, _ isError: Bool) -> Void
+
+/// Convenience wrapper so call sites don't repeat the NSAlert boilerplate.
+private func showNSAlert(title: String, message: String, isError: Bool) {
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = message
+    alert.alertStyle = isError ? .critical : .informational
+    alert.addButton(withTitle: "OK")
+    alert.runModal()
+}
+
 enum RotationMode {
     case odd
     case even
