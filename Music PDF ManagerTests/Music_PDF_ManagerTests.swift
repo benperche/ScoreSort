@@ -5,6 +5,7 @@
 
 import Testing
 import Foundation
+import PDFKit
 @testable import Music_PDF_Manager
 
 // MARK: - Filename Validation
@@ -330,5 +331,218 @@ struct SplitSizesTests {
     @Test func strideLargerChunk() {
         // 10 pages at stride 4 → [4, 4, 2]
         #expect(splitSizes(totalPages: 10, stride: 4) == [4, 4, 2])
+    }
+}
+
+// MARK: - Combine Manager
+// Tests for CombineManager — the model behind the Combine tab.
+// Most tests construct CombineFile values directly and assign them to manager.files,
+// so they don't need real PDF files on disk.
+//
+// Note: createCombinedPDF is not tested here because it calls NSAlert.runModal()
+// on completion, which would block the test runner. It needs a refactor (e.g. a
+// completion callback instead of an inline alert) before it can be unit tested.
+
+@Suite("Combine Manager")
+struct CombineManagerTests {
+
+    // MARK: Helpers
+
+    // Create a CombineFile without going through addFiles — lets us control
+    // pageCount and copies directly without needing a real PDF on disk.
+    func makeFile(name: String, pageCount: Int, copies: Int = 1) -> CombineFile {
+        CombineFile(url: URL(fileURLWithPath: "/dev/null"), name: name, pageCount: pageCount, copies: copies)
+    }
+
+    // Write a real PDF with the given number of blank pages to a temp URL.
+    // Used only for tests that exercise addFiles(), which needs PDFDocument(url:) to succeed.
+    func writePDF(pages: Int, to url: URL) {
+        let doc = PDFDocument()
+        for i in 0..<pages {
+            doc.insert(PDFPage(), at: i)
+        }
+        doc.write(to: url)
+    }
+
+    // MARK: - Computed properties
+
+    @Test func totalFilesCountsCopies() {
+        let manager = CombineManager()
+        manager.files = [
+            makeFile(name: "A.pdf", pageCount: 4, copies: 2),
+            makeFile(name: "B.pdf", pageCount: 2, copies: 3),
+        ]
+        #expect(manager.totalFiles == 5)
+    }
+
+    @Test func totalPagesMultipliesPageCountByCopies() {
+        let manager = CombineManager()
+        manager.files = [
+            makeFile(name: "A.pdf", pageCount: 4, copies: 2),  // 8
+            makeFile(name: "B.pdf", pageCount: 3, copies: 1),  // 3
+        ]
+        #expect(manager.totalPages == 11)
+    }
+
+    @Test func emptyManagerHasZeroTotals() {
+        let manager = CombineManager()
+        #expect(manager.totalFiles == 0)
+        #expect(manager.totalPages == 0)
+    }
+
+    // MARK: - addFiles
+
+    @Test func addFilesPopulatesListAndTotals() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        let url = tempDir.appendingPathComponent("Test.pdf")
+        writePDF(pages: 4, to: url)
+
+        let manager = CombineManager()
+        manager.addFiles(urls: [url], undoManager: nil)
+
+        #expect(manager.files.count == 1)
+        #expect(manager.files.first?.pageCount == 4)
+        #expect(manager.totalPages == 4)
+        #expect(manager.totalFiles == 1)
+    }
+
+    @Test func addFilesIgnoresNonPDFURLs() throws {
+        let tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: tempDir) }
+
+        // A plain text file — PDFDocument(url:) will return nil and it should be skipped
+        let url = tempDir.appendingPathComponent("notes.txt")
+        try "hello".write(to: url, atomically: true, encoding: .utf8)
+
+        let manager = CombineManager()
+        manager.addFiles(urls: [url], undoManager: nil)
+
+        #expect(manager.files.isEmpty)
+    }
+
+    // MARK: - removeFiles
+
+    @Test func removeFilesByID() {
+        let manager = CombineManager()
+        let a = makeFile(name: "A.pdf", pageCount: 2)
+        let b = makeFile(name: "B.pdf", pageCount: 3)
+        let c = makeFile(name: "C.pdf", pageCount: 1)
+        manager.files = [a, b, c]
+
+        manager.removeFiles(ids: [b.id], undoManager: nil)
+
+        #expect(manager.files.count == 2)
+        #expect(manager.files.map(\.name) == ["A.pdf", "C.pdf"])
+    }
+
+    @Test func removeAllFiles() {
+        let manager = CombineManager()
+        manager.files = [makeFile(name: "A.pdf", pageCount: 2), makeFile(name: "B.pdf", pageCount: 3)]
+        manager.clearAll(undoManager: nil)
+        #expect(manager.files.isEmpty)
+    }
+
+    // MARK: - updateCopies
+
+    @Test func updateCopiesChangesTotalPages() {
+        let manager = CombineManager()
+        let file = makeFile(name: "A.pdf", pageCount: 4, copies: 1)
+        manager.files = [file]
+
+        manager.updateCopies(for: file.id, copies: 3, undoManager: nil)
+
+        #expect(manager.files.first?.copies == 3)
+        #expect(manager.totalPages == 12)
+    }
+
+    @Test func updateCopiesBelowOneClampedToOne() {
+        let manager = CombineManager()
+        let file = makeFile(name: "A.pdf", pageCount: 4, copies: 2)
+        manager.files = [file]
+
+        manager.updateCopies(for: file.id, copies: 0, undoManager: nil)
+
+        #expect(manager.files.first?.copies == 1)
+    }
+
+    // MARK: - moveUp / moveDown
+
+    @Test func moveUpShiftsFileEarlier() {
+        let manager = CombineManager()
+        let a = makeFile(name: "A.pdf", pageCount: 1)
+        let b = makeFile(name: "B.pdf", pageCount: 1)
+        let c = makeFile(name: "C.pdf", pageCount: 1)
+        manager.files = [a, b, c]
+
+        manager.moveUp(ids: [c.id], undoManager: nil)
+
+        #expect(manager.files.map(\.name) == ["A.pdf", "C.pdf", "B.pdf"])
+    }
+
+    @Test func moveUpFirstFileIsNoOp() {
+        let manager = CombineManager()
+        let a = makeFile(name: "A.pdf", pageCount: 1)
+        let b = makeFile(name: "B.pdf", pageCount: 1)
+        manager.files = [a, b]
+
+        manager.moveUp(ids: [a.id], undoManager: nil)
+
+        #expect(manager.files.map(\.name) == ["A.pdf", "B.pdf"])
+    }
+
+    @Test func moveDownShiftsFileLater() {
+        let manager = CombineManager()
+        let a = makeFile(name: "A.pdf", pageCount: 1)
+        let b = makeFile(name: "B.pdf", pageCount: 1)
+        let c = makeFile(name: "C.pdf", pageCount: 1)
+        manager.files = [a, b, c]
+
+        manager.moveDown(ids: [a.id], undoManager: nil)
+
+        #expect(manager.files.map(\.name) == ["B.pdf", "A.pdf", "C.pdf"])
+    }
+
+    @Test func moveDownLastFileIsNoOp() {
+        let manager = CombineManager()
+        let a = makeFile(name: "A.pdf", pageCount: 1)
+        let b = makeFile(name: "B.pdf", pageCount: 1)
+        manager.files = [a, b]
+
+        manager.moveDown(ids: [b.id], undoManager: nil)
+
+        #expect(manager.files.map(\.name) == ["A.pdf", "B.pdf"])
+    }
+
+    @Test func moveUpAdjacentSelectionMovesAsBlock() {
+        // B and C are both selected — they should move together, not pass through each other
+        let manager = CombineManager()
+        let a = makeFile(name: "A.pdf", pageCount: 1)
+        let b = makeFile(name: "B.pdf", pageCount: 1)
+        let c = makeFile(name: "C.pdf", pageCount: 1)
+        let d = makeFile(name: "D.pdf", pageCount: 1)
+        manager.files = [a, b, c, d]
+
+        manager.moveUp(ids: [b.id, c.id], undoManager: nil)
+
+        #expect(manager.files.map(\.name) == ["B.pdf", "C.pdf", "A.pdf", "D.pdf"])
+    }
+
+    @Test func moveDownAdjacentSelectionMovesAsBlock() {
+        let manager = CombineManager()
+        let a = makeFile(name: "A.pdf", pageCount: 1)
+        let b = makeFile(name: "B.pdf", pageCount: 1)
+        let c = makeFile(name: "C.pdf", pageCount: 1)
+        let d = makeFile(name: "D.pdf", pageCount: 1)
+        manager.files = [a, b, c, d]
+
+        manager.moveDown(ids: [b.id, c.id], undoManager: nil)
+
+        #expect(manager.files.map(\.name) == ["A.pdf", "D.pdf", "B.pdf", "C.pdf"])
     }
 }
