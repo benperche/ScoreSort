@@ -123,18 +123,56 @@ struct HelpCommands: Commands {
 struct MusicPDFManagerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState()
-    
+    @Environment(\.openWindow) private var openWindow
+
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
         }
         .commands {
+            CommandGroup(replacing: .appInfo) {
+                Button("About Music PDF Manager") {
+                    openWindow(id: "about")
+                }
+            }
             CommandGroup(replacing: .newItem) { }
             NavigateCommands(appState: appState)
             CombinerCommands(state: appState.combineMenuState)
             HelpCommands(appState: appState)
         }
+
+        Window("About Music PDF Manager", id: "about") {
+            AboutView()
+        }
+        .windowResizability(.contentSize)
+        .defaultPosition(.center)
+    }
+}
+
+// MARK: - About View
+struct AboutView: View {
+    var body: some View {
+        VStack(spacing: 16) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .frame(width: 80, height: 80)
+
+            Text("Music PDF Manager")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("Version 0.2")
+                .foregroundStyle(.secondary)
+
+            Text("Developed by Ben Perche and Claude")
+
+            Link("github.com/benperche/music-pdf-manager",
+                 destination: URL(string: "https://github.com/benperche/music-pdf-manager")!)
+                .font(.callout)
+        }
+        .padding(32)
+        .frame(width: 340)
     }
 }
 
