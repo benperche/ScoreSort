@@ -14,6 +14,7 @@ MusicPDFManagerApp (@main)
         ├── 1: RenamerView
         ├── 2: SplitView
         └── 3: RotateView
+  └── Window("about")  — AboutView (custom About panel, version 0.2)
 ```
 
 Window min size: 900×700.
@@ -25,6 +26,8 @@ Window min size: 900×700.
 | `NavigateCommands` | Navigate | Tab switching (⌘1–⌘4) |
 | `CombinerCommands` | Combiner | File list shortcuts (arrow keys, ⌘↑/↓, ⌫, ⌘A) |
 | `HelpCommands` | Help | Opens `ShortcutsHelpView` sheet |
+
+`CommandGroup(replacing: .appInfo)` replaces the system About panel with a button that calls `openWindow(id: "about")`, opening `AboutView` as a separate `Window` scene.
 
 **`CombineCommands`** (plain struct, not `Commands`) — passed via `FocusedValues` (key: `CombineCommandsKey`) using `.focusedSceneValue(\.combineCommands, …)` on `CombineView`. `CombinerCommands` reads it with `@FocusedSceneValue`. All `can*` flags are gated on `appState.selectedTab == 0` so shortcuts are inert on other tabs.
 
@@ -44,15 +47,17 @@ Window min size: 900×700.
 ### CombineManager key methods
 | Method | Purpose |
 |--------|---------|
-| `addFiles(urls:)` | Reads PDFs via PDFKit, appends CombineFile |
-| `removeFiles(ids:)` | Removes by UUID set |
-| `updateCopies(for:copies:)` | Clamps to min 1 |
-| `moveUp/Down(ids:)` | Multi-select block move via `swapAt` |
-| `clearAll()` | Removes all files |
-| `createCombinedPDF(to:addBlankPages:)` | Writes to URL |
-| `openInPreview(addBlankPages:)` | Writes temp file → NSWorkspace.open |
+| `addFiles(urls:undoManager:)` | Reads PDFs via PDFKit, appends CombineFile |
+| `removeFiles(ids:undoManager:)` | Removes by UUID set |
+| `updateCopies(for:copies:undoManager:)` | Clamps to min 1 |
+| `moveUp/Down(ids:undoManager:)` | Multi-select block move via `swapAt` |
+| `clearAll(undoManager:)` | Removes all files |
+| `createCombinedPDF(to:addBlankPages:completion:)` | Writes to URL, calls `completion` with result |
+| `openInPreview(addBlankPages:onError:)` | Writes temp file → NSWorkspace.open; calls `onError` on failure only |
 
 All mutating methods take an `undoManager: UndoManager?` and use snapshot-based undo (captures pre-action state; registers undo handler that also registers redo).
+
+`createCombinedPDF` and `openInPreview` take a `PDFAlertHandler` callback — they never show UI directly. The caller (the view) is responsible for presenting any alert. See `PDFAlertHandler` in Shared Infrastructure.
 
 **Computed:** `totalFiles` = sum of copies; `totalPages` = sum of pageCount×copies.
 
@@ -184,8 +189,14 @@ This replaces the old `splitMarkers: Set<Int>` approach. Benefits:
 
 `body` switches between `splitStageBody` (Step 1) and `SplitNamingStageView` (Step 2) based on `showingNamingStage`.
 
-### `toggleSplitAt(page:)`
-Walks `fileSizes` to find which file owns `page`, then either splits that entry or merges it with the previous one (if `page` is the first page of a file).
+### Pure split functions (top-level, above `SplitView`)
+
+| Function | Purpose |
+|----------|---------|
+| `toggleSplit(in sizes: [Int], at page: Int) -> [Int]` | Returns new sizes array with split toggled at `page`. Splits mid-file or merges at a boundary. |
+| `splitSizes(totalPages: Int, stride: Int) -> [Int]` | Returns sizes array dividing `totalPages` into `stride`-sized chunks (last chunk takes remainder). |
+
+These are pure functions with no side effects — extracted from `SplitView` for testability. The private view methods `toggleSplitAt(page:)` and `applyStride()` are now one-line wrappers that call these and assign the result to `fileSizes`.
 
 ### Step 1 UI
 
@@ -296,16 +307,21 @@ Keyboard navigation: `←` / `→` (previous/next page); `⌘←` / `⌘→` (fi
 ### Supporting enums
 ```swift
 enum RotationAngle: Int { case none=0, rotate90=90, rotate180=180, rotate270=270 }
-enum RotationMode { case odd, even, all, none }
+enum RotationMode { case odd, even, none }
 ```
 
 ---
 
 ## Shared Infrastructure
 
-**`PDFManager: ObservableObject`** — used by both SplitView and RotateView (separate instances).  
-- `loadPDF(from:)`, `clearPDF()`  
-- `saveRotatedPDF(...)`, `saveSplitPDF(...)`
+**`PDFAlertHandler`** — `typealias PDFAlertHandler = (_ title: String, _ message: String, _ isError: Bool) -> Void`. Passed to all PDF save/export methods so managers never show UI directly. `showNSAlert(title:message:isError:)` is a private free function used at view call sites to avoid repeating the NSAlert boilerplate.
+
+**`PDFManager: ObservableObject`** — used by both SplitView and RotateView (separate instances).
+- `loadPDF(from:)`, `clearPDF()`
+- `saveRotatedPDF(to:baseRotation:additionalRotationMode:additionalRotationAngle:completion:)` — copies each page before rotating (source document is never mutated); calls `completion` on finish
+- `saveSplitPDF(to:splitMarkers:baseFileName:customFileNames:pageToFileMapping:completion:)` — calls `completion` with success or partial-success result
+
+**`pdfFilenameError(for:) -> String?`** — top-level free function; returns an error string if the input contains `/`, `:`, `\`, or a null character. Used by both `SplitNamingStageView` and `SplitFileNamingRow`.
 
 **`PDFPageView: NSViewRepresentable`** — safe preview clone via `renderFullImage(from:) -> NSImage?` using `NSGraphicsContext` / `CGContext`.
 
@@ -323,3 +339,26 @@ enum RotationMode { case odd, even, all, none }
 - **`FocusState` must not be duplicated across parent/child boundaries** — passing `FocusState<T>.Binding` from parent to child and using `.focused(binding, equals:)` in the child is the correct pattern. Adding a local `@FocusState` in the child creates a second responder that intercepts the first click on a TextField on macOS (the click is consumed to transfer focus to the local state rather than starting editing).
 - **`fileSizes` array vs `splitMarkers` set** — the array model is the source of truth; `splitMarkers` is only derived for rendering. This prevents the stale-marker problem that arose when pages were removed or re-ordered.
 - **Instrument orders versioning** — `instrument-orders.json` in Application Support contains a `"version"` sentinel. On launch, `InstrumentOrders.setup()` compares the file's version to the built-in default; if the file is older it is regenerated, so new aliases/entries in the code automatically propagate to existing installs.
+
+---
+
+## Test Suite
+
+**Target:** `MusicPDFManagerTests` (Swift Testing framework — `@Suite` / `@Test` / `#expect`)
+**File:** `Music PDF ManagerTests/Music_PDF_ManagerTests.swift`
+**Import:** `@testable import Music_PDF_Manager`
+
+**Shared helper:** `writePDF(pages: Int, to: URL)` — creates a real blank-page PDF using PDFKit; used wherever a test needs `PDFDocument(url:)` to succeed with a non-zero page count.
+
+| Suite | What it covers |
+|-------|----------------|
+| `FilenameValidationTests` | `pdfFilenameError(for:)` — valid names, illegal chars (`/` `:` `\` null) |
+| `InstrumentDetectionTests` | `detectInstrument(in:)` — case insensitivity, leftmost match, length-sort, nil on no match, order index |
+| `ManualOverrideTests` | `setManualOverride(for:number:)` — assign, replace, conflict shift, chain shift |
+| `ScanFolderTests` | `loadFolder(url:)` pipeline — score prefix, sequential prefixes, undetected, manual override, already-prefixed skip |
+| `ToggleSplitTests` | `toggleSplit(in:at:)` — mid-file split, boundary merge, edge cases (page 0, first page, empty array) |
+| `SplitSizesTests` | `splitSizes(totalPages:stride:)` — even division, remainder, stride > total, zero pages |
+| `CombineManagerTests` | Computed properties, `addFiles`, `removeFiles`, `clearAll`, `updateCopies`, `moveUp/Down` block behaviour, `createCombinedPDF` (page count, blank insertion, copies) |
+| `PDFManagerTests` | `saveRotatedPDF` (rotation values, source-not-mutated regression guard, odd/even additional rotation); `saveSplitPDF` (file count, page counts, custom filenames, auto-numbering) |
+
+**Not covered:** rescan mode stripping (planned but deferred); `performRename()` filesystem operation; UI/integration tests.
