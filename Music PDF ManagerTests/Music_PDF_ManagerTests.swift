@@ -8,6 +8,16 @@ import Foundation
 import PDFKit
 @testable import Music_PDF_Manager
 
+// MARK: - Shared test helpers
+
+/// Writes a real PDF with `pages` blank pages to `url` using PDFKit.
+/// Used wherever a test needs PDFDocument(url:) to succeed and return a non-zero page count.
+func writePDF(pages: Int, to url: URL) {
+    let doc = PDFDocument()
+    for i in 0..<pages { doc.insert(PDFPage(), at: i) }
+    doc.write(to: url)
+}
+
 // MARK: - Filename Validation
 // Tests for pdfFilenameError(for:) — the shared validation used in the Split tab
 // to catch characters that are illegal in macOS filenames.
@@ -354,16 +364,6 @@ struct CombineManagerTests {
         CombineFile(url: URL(fileURLWithPath: "/dev/null"), name: name, pageCount: pageCount, copies: copies)
     }
 
-    // Write a real PDF with the given number of blank pages to a temp URL.
-    // Used only for tests that exercise addFiles(), which needs PDFDocument(url:) to succeed.
-    func writePDF(pages: Int, to url: URL) {
-        let doc = PDFDocument()
-        for i in 0..<pages {
-            doc.insert(PDFPage(), at: i)
-        }
-        doc.write(to: url)
-    }
-
     // MARK: - Computed properties
 
     @Test func totalFilesCountsCopies() {
@@ -544,5 +544,158 @@ struct CombineManagerTests {
         manager.moveDown(ids: [b.id, c.id], undoManager: nil)
 
         #expect(manager.files.map(\.name) == ["A.pdf", "D.pdf", "B.pdf", "C.pdf"])
+    }
+}
+
+// MARK: - PDF Manager
+// Tests for PDFManager.saveRotatedPDF and saveSplitPDF.
+// Both methods post their completion alerts via DispatchQueue.main.async,
+// so they return before the alert fires — no blocking in tests.
+
+@Suite("PDF Manager")
+struct PDFManagerTests {
+
+    var tempDir: URL
+
+    init() throws {
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    }
+
+    /// Writes a PDF to a temp file, loads it into a fresh PDFManager, and returns it.
+    func makeManager(pages: Int) -> PDFManager {
+        let url = tempDir.appendingPathComponent("\(UUID().uuidString).pdf")
+        writePDF(pages: pages, to: url)
+        let manager = PDFManager()
+        manager.loadPDF(from: url)
+        return manager
+    }
+
+    // MARK: - saveRotatedPDF
+
+    @Test func baseRotationAppliedToAllPages() throws {
+        let manager = makeManager(pages: 4)
+        let outURL = tempDir.appendingPathComponent("rotated.pdf")
+
+        manager.saveRotatedPDF(to: outURL, baseRotation: .rotate90,
+                               additionalRotationMode: .none, additionalRotationAngle: .none)
+
+        let result = try #require(PDFDocument(url: outURL))
+        for i in 0..<result.pageCount {
+            #expect(result.page(at: i)?.rotation == 90)
+        }
+    }
+
+    @Test func saveRotatedPDFDoesNotMutateSourceDocument() throws {
+        // Regression guard: pages must be copied, not modified in place.
+        // If this fails it means the copy() call was removed from saveRotatedPDF.
+        let manager = makeManager(pages: 2)
+        let originalDoc = try #require(manager.pdfDocument)
+        let originalRotations = (0..<originalDoc.pageCount).compactMap { originalDoc.page(at: $0)?.rotation }
+
+        let outURL = tempDir.appendingPathComponent("rotated.pdf")
+        manager.saveRotatedPDF(to: outURL, baseRotation: .rotate90,
+                               additionalRotationMode: .none, additionalRotationAngle: .none)
+
+        for i in 0..<originalDoc.pageCount {
+            let page = try #require(originalDoc.page(at: i))
+            #expect(page.rotation == originalRotations[i])
+        }
+    }
+
+    @Test func additionalRotationAppliedToOddPagesOnly() throws {
+        // Base 90° + additional 90° on odd pages → odd pages 180°, even pages 90°
+        let manager = makeManager(pages: 4)
+        let outURL = tempDir.appendingPathComponent("odd_rotated.pdf")
+
+        manager.saveRotatedPDF(to: outURL, baseRotation: .rotate90,
+                               additionalRotationMode: .odd, additionalRotationAngle: .rotate90)
+
+        let result = try #require(PDFDocument(url: outURL))
+        #expect(result.page(at: 0)?.rotation == 180)  // page 1 (odd)
+        #expect(result.page(at: 1)?.rotation == 90)   // page 2 (even)
+        #expect(result.page(at: 2)?.rotation == 180)  // page 3 (odd)
+        #expect(result.page(at: 3)?.rotation == 90)   // page 4 (even)
+    }
+
+    @Test func additionalRotationAppliedToEvenPagesOnly() throws {
+        // Base 90° + additional 90° on even pages → odd pages 90°, even pages 180°
+        let manager = makeManager(pages: 4)
+        let outURL = tempDir.appendingPathComponent("even_rotated.pdf")
+
+        manager.saveRotatedPDF(to: outURL, baseRotation: .rotate90,
+                               additionalRotationMode: .even, additionalRotationAngle: .rotate90)
+
+        let result = try #require(PDFDocument(url: outURL))
+        #expect(result.page(at: 0)?.rotation == 90)   // page 1 (odd)
+        #expect(result.page(at: 1)?.rotation == 180)  // page 2 (even)
+        #expect(result.page(at: 2)?.rotation == 90)   // page 3 (odd)
+        #expect(result.page(at: 3)?.rotation == 180)  // page 4 (even)
+    }
+
+    // MARK: - saveSplitPDF
+
+    @Test func splitCreatesCorrectNumberOfFiles() throws {
+        let manager = makeManager(pages: 4)
+        let outDir = tempDir.appendingPathComponent("split_count")
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+
+        // [2, 2]: pages 0-1 → file 0, pages 2-3 → file 1
+        let mapping: [Int: Int] = [0: 0, 1: 0, 2: 1, 3: 1]
+        manager.saveSplitPDF(to: outDir, splitMarkers: [2], baseFileName: "Test",
+                             customFileNames: [:], pageToFileMapping: mapping)
+
+        let pdfs = try FileManager.default.contentsOfDirectory(at: outDir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "pdf" }
+        #expect(pdfs.count == 2)
+    }
+
+    @Test func splitFilesHaveCorrectPageCounts() throws {
+        let manager = makeManager(pages: 6)
+        let outDir = tempDir.appendingPathComponent("split_pages")
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+
+        // [2, 4]: pages 0-1 → file 0, pages 2-5 → file 1
+        let mapping: [Int: Int] = [0: 0, 1: 0, 2: 1, 3: 1, 4: 1, 5: 1]
+        manager.saveSplitPDF(to: outDir, splitMarkers: [2], baseFileName: "Test",
+                             customFileNames: [:], pageToFileMapping: mapping)
+
+        let file1 = try #require(PDFDocument(url: outDir.appendingPathComponent("Test_1.pdf")))
+        let file2 = try #require(PDFDocument(url: outDir.appendingPathComponent("Test_2.pdf")))
+        #expect(file1.pageCount == 2)
+        #expect(file2.pageCount == 4)
+    }
+
+    @Test func splitUsesCustomFilenames() throws {
+        let manager = makeManager(pages: 4)
+        let outDir = tempDir.appendingPathComponent("split_names")
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+
+        let mapping: [Int: Int] = [0: 0, 1: 0, 2: 1, 3: 1]
+        manager.saveSplitPDF(to: outDir, splitMarkers: [2], baseFileName: "Sonata",
+                             customFileNames: [0: " Mvt1", 1: " Mvt2"], pageToFileMapping: mapping)
+
+        let names = try FileManager.default.contentsOfDirectory(at: outDir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "pdf" }
+            .map(\.lastPathComponent)
+            .sorted()
+        #expect(names == ["Sonata Mvt1.pdf", "Sonata Mvt2.pdf"])
+    }
+
+    @Test func splitAutoNumbersFilesWithoutCustomNames() throws {
+        let manager = makeManager(pages: 4)
+        let outDir = tempDir.appendingPathComponent("split_autonumber")
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+
+        let mapping: [Int: Int] = [0: 0, 1: 0, 2: 1, 3: 1]
+        manager.saveSplitPDF(to: outDir, splitMarkers: [2], baseFileName: "Part",
+                             customFileNames: [:], pageToFileMapping: mapping)
+
+        let names = try FileManager.default.contentsOfDirectory(at: outDir, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "pdf" }
+            .map(\.lastPathComponent)
+            .sorted()
+        #expect(names == ["Part_1.pdf", "Part_2.pdf"])
     }
 }
