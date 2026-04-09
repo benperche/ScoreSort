@@ -70,36 +70,29 @@ Rotate PDF pages with flexible options for odd/even page handling.
 
 ### Requirements
 - macOS 14.0 (Sonoma) or later
-- Xcode 15.0 or later (for building from source)
+
+### Download (Beta)
+
+> **This is a beta release.** The app is unsigned, so macOS will show a security warning the first time you open it. Follow the steps below to allow it.
+
+1. Download the latest `Music.PDF.Manager.zip` from the [Releases](https://github.com/benperche/music-pdf-manager/releases) page
+2. Unzip it and move **Music PDF Manager.app** to your Applications folder
+3. Double-click to open — macOS will show *"Music PDF Manager cannot be opened because it is from an unidentified developer"*
+4. Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**
+5. Confirm in the dialog that appears — you'll only need to do this once
 
 ### Building from Source
 
+If you'd prefer to build it yourself:
+
 1. Clone the repository:
 ```bash
-git clone https://github.com/yourusername/music-pdf-manager.git
-cd music-pdf-manager
+git clone https://github.com/benperche/music-pdf-manager.git
 ```
 
-2. Open in Xcode:
-```bash
-open MusicPDFManager.swift
-```
+2. Open `Music PDF Wrangler.xcodeproj` in Xcode 15 or later
 
-3. Build and run:
-   - Select your target device (Mac)
-   - Press ⌘R or click the Run button
-
-### Installing the App
-
-Option 1: Build and copy to Applications folder
-```bash
-# After building in Xcode
-cp -r ~/Library/Developer/Xcode/DerivedData/MusicPDFManager-*/Build/Products/Release/MusicPDFManager.app /Applications/
-```
-
-Option 2: Create an archive for distribution
-- In Xcode: Product → Archive
-- Follow the distribution wizard
+3. Press ⌘R to build and run
 
 ## Usage
 
@@ -290,7 +283,7 @@ If you encounter any issues or have suggestions:
 
 ## Author
 
-Your Name - Ben Perche, with all code written by Claude
+Ben Perche, developed with Claude
 Additional contributions from Lachlan Hamilton
 
 Project Link: [https://github.com/benperche/music-pdf-manager](https://github.com/benperche/music-pdf-manager)
