@@ -162,7 +162,7 @@ struct AboutView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            Text("Version 0.2")
+            Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")")
                 .foregroundStyle(.secondary)
 
             Text("Developed by Ben Perche and Claude")
