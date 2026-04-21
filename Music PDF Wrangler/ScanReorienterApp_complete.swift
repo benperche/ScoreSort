@@ -24,10 +24,11 @@ class AppState: ObservableObject {
 // Shared object observed by CombinerCommands. Updated from CombineView via
 // .onChange/.onAppear (after body completes) to avoid mid-update publishing.
 class CombineMenuState: ObservableObject {
-    @Published var canRemove  = false
-    @Published var canMoveUp  = false
+    @Published var canRemove   = false
+    @Published var canMoveUp   = false
     @Published var canMoveDown = false
-    @Published var hasFiles   = false
+    @Published var hasFiles    = false
+    @Published var isPanelOpen = false  // disables menu shortcuts while a file panel is open
 
     var removeSelected:          () -> Void = {}
     var moveUp:                  () -> Void = {}
@@ -65,41 +66,41 @@ struct CombinerCommands: Commands {
         CommandMenu("Combiner") {
             Button("Select Previous") { state.selectPrevious() }
                 .keyboardShortcut(.upArrow, modifiers: [])
-                .disabled(!state.hasFiles)
+                .disabled(state.isPanelOpen || !state.hasFiles)
 
             Button("Extend Selection Up") { state.selectPreviousExtending() }
                 .keyboardShortcut(.upArrow, modifiers: .shift)
-                .disabled(!state.hasFiles)
+                .disabled(state.isPanelOpen || !state.hasFiles)
 
             Button("Select Next") { state.selectNext() }
                 .keyboardShortcut(.downArrow, modifiers: [])
-                .disabled(!state.hasFiles)
+                .disabled(state.isPanelOpen || !state.hasFiles)
 
             Button("Extend Selection Down") { state.selectNextExtending() }
                 .keyboardShortcut(.downArrow, modifiers: .shift)
-                .disabled(!state.hasFiles)
+                .disabled(state.isPanelOpen || !state.hasFiles)
 
             Divider()
 
             Button("Move Up") { state.moveUp() }
                 .keyboardShortcut(.upArrow, modifiers: .command)
-                .disabled(!state.canMoveUp)
+                .disabled(state.isPanelOpen || !state.canMoveUp)
 
             Button("Move Down") { state.moveDown() }
                 .keyboardShortcut(.downArrow, modifiers: .command)
-                .disabled(!state.canMoveDown)
+                .disabled(state.isPanelOpen || !state.canMoveDown)
 
             Divider()
 
             Button("Remove Selected Files") { state.removeSelected() }
                 .keyboardShortcut(.delete, modifiers: [])
-                .disabled(!state.canRemove)
+                .disabled(state.isPanelOpen || !state.canRemove)
 
             Divider()
 
             Button("Select All Files") { state.selectAll() }
                 .keyboardShortcut("a", modifiers: .command)
-                .disabled(!state.hasFiles)
+                .disabled(state.isPanelOpen || !state.hasFiles)
         }
     }
 }
@@ -369,6 +370,7 @@ struct CombineView: View {
                     .focusable()
                     .focused($listFocused)
                     .onKeyPress { press in
+                        guard !menuState.isPanelOpen else { return .ignored }
                         let isShift = press.modifiers.contains(.shift)
                         switch press.key {
                         case .upArrow:
@@ -506,13 +508,15 @@ struct CombineView: View {
     }
     
     private func selectFiles() {
+        menuState.isPanelOpen = true
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.pdf]
         panel.allowsMultipleSelection = true
         panel.canCreateDirectories = false
         panel.title = "Select PDF Files"
-        
+
         panel.begin { response in
+            menuState.isPanelOpen = false
             if response == .OK {
                 combineManager.addFiles(urls: panel.urls, undoManager: undoManager)
             }
@@ -615,16 +619,30 @@ struct CombineView: View {
     }
     
     private func createPDF() {
+        menuState.isPanelOpen = true
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
         panel.nameFieldStringValue = "Combined.pdf"
         panel.title = "Save Combined PDF"
-        
+
         panel.begin { response in
+            menuState.isPanelOpen = false
             if response == .OK, let url = panel.url {
                 combineManager.createCombinedPDF(to: url, addBlankPages: addBlankPages) { title, message, isError in
-                        showNSAlert(title: title, message: message, isError: isError)
+                    if isError {
+                        showNSAlert(title: title, message: message, isError: true)
+                    } else {
+                        let alert = NSAlert()
+                        alert.messageText = title
+                        alert.informativeText = message
+                        alert.alertStyle = .informational
+                        alert.addButton(withTitle: "OK")
+                        alert.addButton(withTitle: "Open in Preview")
+                        if alert.runModal() == .alertSecondButtonReturn {
+                            NSWorkspace.shared.open(url)
+                        }
                     }
+                }
             }
         }
     }
@@ -665,20 +683,24 @@ struct CombineFileRow: View {
     let onCopiesChanged: (Int) -> Void
     let onRemove: () -> Void
 
+    @State private var isEditingCopies = false
+    @State private var copiesText = ""
+    @FocusState private var copiesFieldFocused: Bool
+
     var body: some View {
         HStack {
             Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                 .foregroundColor(isSelected ? .accentColor : .secondary)
-            
+
             Text(file.name)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            
+
             Text("\(file.pageCount)")
                 .frame(width: 80, alignment: .center)
                 .foregroundColor(.secondary)
-            
+
             HStack(spacing: 4) {
                 Button(action: {
                     if file.copies > 1 {
@@ -690,11 +712,27 @@ struct CombineFileRow: View {
                     Image(systemName: "minus.circle")
                 }
                 .buttonStyle(.plain)
-                
-                Text("\(file.copies)")
-                    .frame(width: 40, alignment: .center)
-                    .font(.system(.body, design: .monospaced))
-                
+
+                if isEditingCopies {
+                    TextField("", text: $copiesText)
+                        .frame(width: 40)
+                        .multilineTextAlignment(.center)
+                        .font(.system(.body, design: .monospaced))
+                        .focused($copiesFieldFocused)
+                        .onSubmit { commitCopiesEdit() }
+                        .onExitCommand { isEditingCopies = false }
+                        .onTapGesture {}   // prevent tap propagating to row selection
+                } else {
+                    Text("\(file.copies)")
+                        .frame(width: 40, alignment: .center)
+                        .font(.system(.body, design: .monospaced))
+                        .onTapGesture(count: 2) {
+                            copiesText = "\(file.copies)"
+                            isEditingCopies = true
+                            copiesFieldFocused = true
+                        }
+                }
+
                 Button(action: {
                     onCopiesChanged(file.copies + 1)
                 }) {
@@ -715,6 +753,16 @@ struct CombineFileRow: View {
         .onTapGesture {
             onToggleSelect()
         }
+        .onChange(of: copiesFieldFocused) { focused in
+            if !focused && isEditingCopies { commitCopiesEdit() }
+        }
+    }
+
+    private func commitCopiesEdit() {
+        if let value = Int(copiesText), value >= 1 {
+            onCopiesChanged(value)
+        }
+        isEditingCopies = false
     }
 }
 
