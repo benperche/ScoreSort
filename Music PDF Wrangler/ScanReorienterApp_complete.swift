@@ -536,13 +536,28 @@ struct CombineView: View {
     }
     
     private func toggleSelection(_ id: UUID) {
-        if selectedFiles.contains(id) {
-            selectedFiles.remove(id)
-            if focusedFileId == id { focusedFileId = nil; anchorFileId = nil }
-        } else {
-            selectedFiles.insert(id)
+        let isShiftHeld = NSEvent.modifierFlags.contains(.shift)
+
+        if isShiftHeld,
+           let anchor = anchorFileId,
+           let anchorIndex = combineManager.files.firstIndex(where: { $0.id == anchor }),
+           let clickedIndex = combineManager.files.firstIndex(where: { $0.id == id }) {
+            // Range selection: select everything from anchor to clicked item.
+            // Anchor stays fixed so further shift+clicks extend/shrink the range.
+            let lo = min(anchorIndex, clickedIndex)
+            let hi = max(anchorIndex, clickedIndex)
+            selectedFiles = Set(combineManager.files[lo...hi].map { $0.id })
             focusedFileId = id
-            anchorFileId = id
+        } else {
+            // Plain click: toggle this item and set it as the new anchor.
+            if selectedFiles.contains(id) {
+                selectedFiles.remove(id)
+                if focusedFileId == id { focusedFileId = nil; anchorFileId = nil }
+            } else {
+                selectedFiles.insert(id)
+                focusedFileId = id
+                anchorFileId = id
+            }
         }
         listFocused = true  // pull keyboard focus to the list after a click
     }
