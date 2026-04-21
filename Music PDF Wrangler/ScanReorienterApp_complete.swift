@@ -508,6 +508,7 @@ struct CombineView: View {
     }
     
     private func selectFiles() {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
         menuState.isPanelOpen = true
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.pdf]
@@ -515,7 +516,7 @@ struct CombineView: View {
         panel.canCreateDirectories = false
         panel.title = "Select PDF Files"
 
-        panel.begin { response in
+        panel.beginSheetModal(for: window) { response in
             menuState.isPanelOpen = false
             if response == .OK {
                 combineManager.addFiles(urls: panel.urls, undoManager: undoManager)
@@ -634,13 +635,14 @@ struct CombineView: View {
     }
     
     private func createPDF() {
+        guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
         menuState.isPanelOpen = true
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
         panel.nameFieldStringValue = "Combined.pdf"
         panel.title = "Save Combined PDF"
 
-        panel.begin { response in
+        panel.beginSheetModal(for: window) { response in
             menuState.isPanelOpen = false
             if response == .OK, let url = panel.url {
                 combineManager.createCombinedPDF(to: url, addBlankPages: addBlankPages) { title, message, isError in
