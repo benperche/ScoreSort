@@ -99,7 +99,6 @@ struct CombinerCommands: Commands {
             Divider()
 
             Button("Select All Files") { state.selectAll() }
-                .keyboardShortcut("a", modifiers: .command)
                 .disabled(state.isPanelOpen || !state.hasFiles)
         }
     }
@@ -378,6 +377,9 @@ struct CombineView: View {
                             return .handled
                         case .downArrow:
                             navigateSelection(direction: 1, extending: isShift)
+                            return .handled
+                        case KeyEquivalent("a") where press.modifiers == .command:
+                            selectAll()
                             return .handled
                         default:
                             return .ignored
