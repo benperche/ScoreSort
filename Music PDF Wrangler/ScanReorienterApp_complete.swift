@@ -842,6 +842,199 @@ struct CombineFileRow: View {
 }
 
 
+// MARK: - Preset Part Row (shared by sidebar and preferences)
+/// One row in a parts list. Minus at copies == 1 deletes the part.
+/// Double-click the copy count to type a number directly.
+struct PresetPartRow: View {
+    @Binding var part: PresetPart
+    var onMarkDirty: () -> Void
+    var onDelete: () -> Void
+
+    @State private var isEditingCopies = false
+    @State private var copiesText = ""
+    @FocusState private var fieldFocused: Bool
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(part.name)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .lineLimit(1)
+                .font(.callout)
+
+            HStack(spacing: 2) {
+                Button {
+                    if part.copies > 1 {
+                        part.copies -= 1
+                        onMarkDirty()
+                    } else {
+                        onDelete()
+                    }
+                } label: { Image(systemName: "minus.circle") }
+                .buttonStyle(.plain)
+
+                if isEditingCopies {
+                    TextField("", text: $copiesText)
+                        .frame(width: 32)
+                        .multilineTextAlignment(.center)
+                        .font(.system(.callout, design: .monospaced))
+                        .focused($fieldFocused)
+                        .onSubmit { commitEdit() }
+                        .onExitCommand { isEditingCopies = false }
+                        .onTapGesture {}   // prevent tap propagating to list selection
+                } else {
+                    Text("\(part.copies)")
+                        .frame(width: 28, alignment: .center)
+                        .font(.system(.callout, design: .monospaced))
+                        .onTapGesture(count: 2) {
+                            copiesText = "\(part.copies)"
+                            isEditingCopies = true
+                            fieldFocused = true
+                        }
+                }
+
+                Button {
+                    part.copies += 1
+                    onMarkDirty()
+                } label: { Image(systemName: "plus.circle") }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(.vertical, 1)
+        .onChange(of: fieldFocused) { focused in
+            if !focused && isEditingCopies { commitEdit() }
+        }
+    }
+
+    private func commitEdit() {
+        if let v = Int(copiesText), v >= 1 {
+            part.copies = v
+            onMarkDirty()
+        }
+        isEditingCopies = false
+    }
+}
+
+// MARK: - New Preset Sheet
+/// Modal sheet for creating a new preset. Lets the user pick one of three
+/// starting templates and give it a custom name before confirming.
+struct NewPresetSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    let onCreate: (_ name: String, _ parts: [PresetPart]) -> Void
+
+    enum PresetTemplate: String, CaseIterable, Identifiable {
+        case windBand   = "Wind Band"
+        case jazzBand   = "Jazz Band"
+        case orchestra  = "Orchestra"
+        var id: Self { self }
+
+        var parts: [PresetPart] {
+            switch self {
+            case .windBand:  return EnsemblePresetStore.windBandTemplate
+            case .jazzBand:  return EnsemblePresetStore.jazzTemplate
+            case .orchestra: return EnsemblePresetStore.orchestraTemplate
+            }
+        }
+        var subtitle: String {
+            switch self {
+            case .windBand:  return "Concert band — woodwinds, brass & percussion"
+            case .jazzBand:  return "Big band — saxes, brass & rhythm section"
+            case .orchestra: return "Strings, woodwinds, brass & percussion"
+            }
+        }
+    }
+
+    @State private var selected: PresetTemplate = .windBand
+    @State private var name: String = PresetTemplate.windBand.rawValue
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("New Preset")
+                .font(.title2)
+                .fontWeight(.semibold)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            Text("Choose a starting template:")
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .center)
+
+            HStack(spacing: 10) {
+                ForEach(PresetTemplate.allCases) { template in
+                    TemplateCard(
+                        title: template.rawValue,
+                        subtitle: template.subtitle,
+                        isSelected: selected == template
+                    ) {
+                        selected = template
+                        // Auto-fill name when it still matches a template name
+                        if PresetTemplate.allCases.map(\.rawValue).contains(name) {
+                            name = template.rawValue
+                        }
+                    }
+                }
+            }
+
+            HStack {
+                Text("Name:")
+                    .fontWeight(.medium)
+                TextField("Preset name", text: $name)
+                    .textFieldStyle(.roundedBorder)
+            }
+
+            HStack {
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Create Preset") {
+                    let n = name.trimmingCharacters(in: .whitespaces)
+                    guard !n.isEmpty else { return }
+                    onCreate(n, selected.parts)
+                    dismiss()
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+                .disabled(name.trimmingCharacters(in: .whitespaces).isEmpty)
+            }
+        }
+        .padding(28)
+        .frame(width: 500)
+    }
+}
+
+private struct TemplateCard: View {
+    let title: String
+    let subtitle: String
+    let isSelected: Bool
+    let onSelect: () -> Void
+
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(spacing: 6) {
+                Text(title)
+                    .fontWeight(.semibold)
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            .padding(12)
+            .frame(maxWidth: .infinity)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isSelected ? Color.accentColor.opacity(0.12) : Color(NSColor.controlBackgroundColor))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(
+                                isSelected ? Color.accentColor : Color.secondary.opacity(0.3),
+                                lineWidth: isSelected ? 2 : 1
+                            )
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 // MARK: - Preset Sidebar View
 struct PresetSidebarView: View {
     @EnvironmentObject var presetStore: EnsemblePresetStore
@@ -850,23 +1043,32 @@ struct PresetSidebarView: View {
     /// Local draft — changes aren't committed to the preset until "Save to Preset"
     @State private var draftParts: [PresetPart] = []
     @State private var isDirty = false
+    @State private var showingNewPreset = false
 
     private var selectedPreset: EnsemblePreset? { presetStore.selectedPreset }
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header + preset picker
-            VStack(spacing: 6) {
-                HStack {
-                    Text("Presets")
-                        .font(.headline)
-                    Spacer()
-                }
+            // Header + preset picker (only shown when presets exist)
+            if !presetStore.presets.isEmpty {
+                VStack(spacing: 6) {
+                    HStack {
+                        Text("Presets")
+                            .font(.headline)
+                        Spacer()
+                        Button {
+                            showingNewPreset = true
+                        } label: {
+                            Image(systemName: "plus.circle")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundStyle(.secondary)
+                        .help("New Preset")
+                    }
 
-                if !presetStore.presets.isEmpty {
                     Picker("", selection: Binding(
                         get: { presetStore.selectedPresetId },
-                        set: { newId in switchPreset(to: newId) }
+                        set: { switchPreset(to: $0) }
                     )) {
                         ForEach(presetStore.presets) { preset in
                             Text(preset.name).tag(Optional(preset.id))
@@ -874,40 +1076,44 @@ struct PresetSidebarView: View {
                     }
                     .labelsHidden()
                 }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+
+                Divider()
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
 
-            Divider()
+            if presetStore.presets.isEmpty {
+                // Empty state — prompt to create first preset
+                VStack(spacing: 14) {
+                    Image(systemName: "music.note.list")
+                        .font(.system(size: 32))
+                        .foregroundStyle(.secondary)
+                    Text("No presets yet")
+                        .font(.headline)
+                    Text("Create a preset to store copy counts for an ensemble.")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                    Button("New Preset…") {
+                        showingNewPreset = true
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .padding(20)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-            if !draftParts.isEmpty {
-                // Parts list — scrollable
+            } else if !draftParts.isEmpty {
+                // Parts list
                 List {
                     ForEach($draftParts) { $part in
-                        HStack(spacing: 4) {
-                            Text(part.name)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .lineLimit(1)
-                                .font(.callout)
-
-                            HStack(spacing: 2) {
-                                Button {
-                                    if part.copies > 1 { part.copies -= 1; isDirty = true }
-                                } label: { Image(systemName: "minus.circle") }
-                                .buttonStyle(.plain)
-                                .disabled(part.copies <= 1)
-
-                                Text("\(part.copies)")
-                                    .frame(width: 24, alignment: .center)
-                                    .font(.system(.callout, design: .monospaced))
-
-                                Button {
-                                    part.copies += 1; isDirty = true
-                                } label: { Image(systemName: "plus.circle") }
-                                .buttonStyle(.plain)
+                        PresetPartRow(
+                            part: $part,
+                            onMarkDirty: { isDirty = true },
+                            onDelete: {
+                                draftParts.removeAll { $0.id == part.id }
+                                isDirty = true
                             }
-                        }
-                        .padding(.vertical, 1)
+                        )
                     }
                 }
                 .listStyle(.plain)
@@ -948,23 +1154,17 @@ struct PresetSidebarView: View {
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
-
-            } else {
-                // No preset loaded
-                VStack(spacing: 12) {
-                    Text("No presets yet")
-                        .foregroundStyle(.secondary)
-                    Button("Create Preset") {
-                        presetStore.addPreset(name: "Wind Band")
-                    }
-                    .buttonStyle(.borderedProminent)
-                }
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .background(Color(NSColor.controlBackgroundColor))
         .onAppear { loadDraft() }
         .onChange(of: presetStore.selectedPresetId) { _ in loadDraft() }
+        .sheet(isPresented: $showingNewPreset) {
+            NewPresetSheet { name, parts in
+                presetStore.addPreset(name: name, parts: parts)
+                loadDraft()
+            }
+        }
     }
 
     private func loadDraft() {
@@ -1093,7 +1293,6 @@ class EnsemblePresetStore: ObservableObject {
 
     init() {
         load()
-        if presets.isEmpty { seedDefaults() }
         if selectedPresetId == nil { selectedPresetId = presets.first?.id }
     }
 
@@ -1114,8 +1313,8 @@ class EnsemblePresetStore: ObservableObject {
         selectedPresetId = presets.first?.id
     }
 
-    func addPreset(name: String) {
-        let p = EnsemblePreset(name: name, parts: EnsemblePresetStore.windBandTemplate)
+    func addPreset(name: String, parts: [PresetPart]) {
+        let p = EnsemblePreset(name: name, parts: parts)
         presets.append(p)
         selectedPresetId = p.id
         save()
@@ -1136,14 +1335,8 @@ class EnsemblePresetStore: ObservableObject {
         save()
     }
 
-    private func seedDefaults() {
-        let starter = EnsemblePreset(name: "Wind Band", parts: EnsemblePresetStore.windBandTemplate)
-        presets = [starter]
-        selectedPresetId = starter.id
-        save()
-    }
+    // MARK: - Built-in templates
 
-    // Standard wind-band template: one copy of each core part
     static let windBandTemplate: [PresetPart] = [
         "Score",
         "Piccolo", "Flute 1", "Flute 2",
@@ -1158,6 +1351,32 @@ class EnsemblePresetStore: ObservableObject {
         "Euphonium", "Tuba",
         "Timpani",
         "Percussion 1", "Percussion 2", "Percussion 3",
+    ].map { PresetPart(name: $0, copies: 1) }
+
+    static let jazzTemplate: [PresetPart] = [
+        "Score",
+        "Alto Saxophone 1", "Alto Saxophone 2",
+        "Tenor Saxophone 1", "Tenor Saxophone 2",
+        "Baritone Saxophone",
+        "Trumpet 1", "Trumpet 2", "Trumpet 3", "Trumpet 4",
+        "Trombone 1", "Trombone 2", "Trombone 3", "Bass Trombone",
+        "Guitar", "Piano", "Bass", "Drums",
+    ].map { PresetPart(name: $0, copies: 1) }
+
+    static let orchestraTemplate: [PresetPart] = [
+        "Score",
+        "Flute 1", "Flute 2", "Piccolo",
+        "Oboe 1", "Oboe 2",
+        "Clarinet 1", "Clarinet 2",
+        "Bassoon 1", "Bassoon 2",
+        "Horn 1", "Horn 2", "Horn 3", "Horn 4",
+        "Trumpet 1", "Trumpet 2",
+        "Trombone 1", "Trombone 2", "Bass Trombone",
+        "Tuba",
+        "Timpani", "Percussion",
+        "Harp",
+        "Violin I", "Violin II",
+        "Viola", "Cello", "Double Bass",
     ].map { PresetPart(name: $0, copies: 1) }
 }
 
@@ -1941,7 +2160,6 @@ struct CombinerPreferencesView: View {
     @State private var editingPreset: EnsemblePreset?
     @State private var newPartName: String = ""
     @State private var showingAddPreset = false
-    @State private var newPresetName: String = ""
 
     var body: some View {
         HSplitView {
@@ -2058,11 +2276,22 @@ struct CombinerPreferencesView: View {
                     Divider()
 
                     HStack {
-                        Button("Reset to Band Template") {
-                            editingPreset?.parts = EnsemblePresetStore.windBandTemplate
-                            saveEditing()
+                        Menu("Reset to Template…") {
+                            Button("Wind Band") {
+                                editingPreset?.parts = EnsemblePresetStore.windBandTemplate
+                                saveEditing()
+                            }
+                            Button("Jazz Band") {
+                                editingPreset?.parts = EnsemblePresetStore.jazzTemplate
+                                saveEditing()
+                            }
+                            Button("Orchestra") {
+                                editingPreset?.parts = EnsemblePresetStore.orchestraTemplate
+                                saveEditing()
+                            }
                         }
                         .buttonStyle(.bordered)
+                        .fixedSize()
                         Spacer()
                     }
                     .padding(12)
@@ -2084,18 +2313,12 @@ struct CombinerPreferencesView: View {
         .onChange(of: selectedId) { newId in
             editingPreset = presetStore.presets.first { $0.id == newId }
         }
-        .alert("New Preset", isPresented: $showingAddPreset) {
-            TextField("Preset name", text: $newPresetName)
-            Button("Create") {
-                let n = newPresetName.trimmingCharacters(in: .whitespaces)
-                if !n.isEmpty { presetStore.addPreset(name: n) }
-                newPresetName = ""
+        .sheet(isPresented: $showingAddPreset) {
+            NewPresetSheet { name, parts in
+                presetStore.addPreset(name: name, parts: parts)
                 selectedId = presetStore.presets.last?.id
                 editingPreset = presetStore.presets.last
             }
-            Button("Cancel", role: .cancel) { newPresetName = "" }
-        } message: {
-            Text("A new preset will be created with the standard wind band template.")
         }
     }
 
