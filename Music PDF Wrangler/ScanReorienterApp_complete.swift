@@ -2224,35 +2224,23 @@ struct CombinerPreferencesView: View {
 
                     List {
                         ForEach(editingPreset?.parts ?? [], id: \.id) { part in
-                            HStack(spacing: 6) {
-                                Text(part.name)
-                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                HStack(spacing: 2) {
-                                    Button { adjustCopies(for: part.id, delta: -1) } label: {
-                                        Image(systemName: "minus.circle")
+                            PresetPartRow(
+                                part: Binding(
+                                    get: {
+                                        editingPreset?.parts.first { $0.id == part.id } ?? part
+                                    },
+                                    set: { newVal in
+                                        if let idx = editingPreset?.parts.firstIndex(where: { $0.id == part.id }) {
+                                            editingPreset?.parts[idx] = newVal
+                                        }
                                     }
-                                    .buttonStyle(.plain)
-                                    .disabled(part.copies <= 1)
-
-                                    Text("\(part.copies)")
-                                        .frame(width: 28, alignment: .center)
-                                        .font(.system(.body, design: .monospaced))
-
-                                    Button { adjustCopies(for: part.id, delta: 1) } label: {
-                                        Image(systemName: "plus.circle")
-                                    }
-                                    .buttonStyle(.plain)
-                                }
-                                Button {
+                                ),
+                                onMarkDirty: { saveEditing() },
+                                onDelete: {
                                     editingPreset?.parts.removeAll { $0.id == part.id }
                                     saveEditing()
-                                } label: {
-                                    Image(systemName: "minus.circle.fill")
-                                        .foregroundColor(.red)
                                 }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.vertical, 2)
+                            )
                         }
                         .onMove { from, to in
                             editingPreset?.parts.move(fromOffsets: from, toOffset: to)
@@ -2328,13 +2316,6 @@ struct CombinerPreferencesView: View {
         editingPreset?.parts.append(PresetPart(name: trimmed, copies: 1))
         saveEditing()
         newPartName = ""
-    }
-
-    private func adjustCopies(for partId: UUID, delta: Int) {
-        guard let idx = editingPreset?.parts.firstIndex(where: { $0.id == partId }) else { return }
-        let current = editingPreset?.parts[idx].copies ?? 1
-        editingPreset?.parts[idx].copies = max(1, current + delta)
-        saveEditing()
     }
 
     private func saveEditing() {
