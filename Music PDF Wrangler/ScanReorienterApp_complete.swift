@@ -732,19 +732,23 @@ struct CombineView: View {
     /// Parts are matched against file names via case-insensitive substring search,
     /// longest part name first so "Bass Clarinet" wins over "Clarinet".
     /// Files that don't match any part are highlighted orange.
-    private func applyPreset(parts: [PresetPart]) {
+    @discardableResult
+    private func applyPreset(parts: [PresetPart]) -> (matched: Int, unmatched: Int) {
         let sortedParts = parts.sorted { $0.name.count > $1.name.count }
         var newUnmatched: Set<UUID> = []
+        var matched = 0
 
         for file in combineManager.files {
             let filename = file.name.lowercased()
             if let match = sortedParts.first(where: { filename.contains($0.name.lowercased()) }) {
                 combineManager.updateCopies(for: file.id, copies: match.copies, undoManager: undoManager)
+                matched += 1
             } else {
                 newUnmatched.insert(file.id)
             }
         }
         unmatchedFileIds = newUnmatched
+        return (matched: matched, unmatched: newUnmatched.count)
     }
 }
 
@@ -1103,12 +1107,13 @@ private struct TemplateCard: View {
 // MARK: - Preset Sidebar View
 struct PresetSidebarView: View {
     @EnvironmentObject var presetStore: EnsemblePresetStore
-    let onApply: (_ parts: [PresetPart]) -> Void
+    let onApply: (_ parts: [PresetPart]) -> (matched: Int, unmatched: Int)
 
     /// Local draft — changes aren't committed to the preset until "Save to Preset"
     @State private var draftParts: [PresetPart] = []
     @State private var isDirty = false
     @State private var showingNewPreset = false
+    @State private var applyResult: (matched: Int, unmatched: Int)? = nil
 
     private var selectedPreset: EnsemblePreset? { presetStore.selectedPreset }
 
@@ -1173,11 +1178,12 @@ struct PresetSidebarView: View {
                     ForEach($draftParts) { $part in
                         PresetPartRow(
                             part: $part,
-                            onMarkDirty: { isDirty = true },
+                            onMarkDirty: { isDirty = true; applyResult = nil },
                             onDelete: {
                                 draftParts.removeAll { $0.id == part.id }
                                 draftParts = renumberAfterDeletion(draftParts)
                                 isDirty = true
+                                applyResult = nil
                             }
                         )
                     }
@@ -1210,13 +1216,33 @@ struct PresetSidebarView: View {
                     }
 
                     Button {
-                        onApply(draftParts)
+                        applyResult = onApply(draftParts)
                     } label: {
                         Label("Apply to Files", systemImage: "arrow.left.to.line")
                             .frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.regular)
+
+                    // Apply result summary
+                    if let result = applyResult {
+                        if result.unmatched == 0 {
+                            Label("\(result.matched) file\(result.matched == 1 ? "" : "s") matched", systemImage: "checkmark.circle.fill")
+                                .font(.callout)
+                                .foregroundStyle(.green)
+                                .frame(maxWidth: .infinity, alignment: .center)
+                        } else {
+                            VStack(spacing: 2) {
+                                Label("\(result.matched) matched", systemImage: "checkmark.circle.fill")
+                                    .font(.callout)
+                                    .foregroundStyle(.green)
+                                Label("\(result.unmatched) not matched — see orange rows", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.callout)
+                                    .foregroundStyle(.orange)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .center)
+                        }
+                    }
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 10)
@@ -1236,6 +1262,7 @@ struct PresetSidebarView: View {
     private func loadDraft() {
         draftParts = selectedPreset?.parts ?? []
         isDirty = false
+        applyResult = nil
     }
 
     private func switchPreset(to newId: UUID?) {
@@ -1398,6 +1425,11 @@ class EnsemblePresetStore: ObservableObject {
         if selectedPresetId == id {
             selectedPresetId = presets.first?.id
         }
+        save()
+    }
+
+    func movePresets(from: IndexSet, to: Int) {
+        presets.move(fromOffsets: from, toOffset: to)
         save()
     }
 
@@ -2231,8 +2263,13 @@ struct CombinerPreferencesView: View {
         HSplitView {
             // Left panel: preset list
             VStack(spacing: 0) {
-                List(presetStore.presets, selection: $selectedId) { preset in
-                    Text(preset.name).tag(preset.id)
+                List(selection: $selectedId) {
+                    ForEach(presetStore.presets) { preset in
+                        Text(preset.name).tag(preset.id)
+                    }
+                    .onMove { from, to in
+                        presetStore.movePresets(from: from, to: to)
+                    }
                 }
                 .listStyle(.bordered)
 
@@ -2258,12 +2295,51 @@ struct CombinerPreferencesView: View {
                     .buttonStyle(.plain)
                     .disabled(presetStore.presets.count <= 1)
 
+                    Divider()
+                        .frame(height: 16)
+                        .padding(.horizontal, 2)
+
+                    // Up / Down reorder buttons
+                    Button {
+                        guard let id = selectedId,
+                              let idx = presetStore.presets.firstIndex(where: { $0.id == id }),
+                              idx > 0 else { return }
+                        presetStore.movePresets(from: [idx], to: idx - 1)
+                    } label: {
+                        Image(systemName: "chevron.up")
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled({
+                        guard let id = selectedId,
+                              let idx = presetStore.presets.firstIndex(where: { $0.id == id })
+                        else { return true }
+                        return idx == 0
+                    }())
+
+                    Button {
+                        guard let id = selectedId,
+                              let idx = presetStore.presets.firstIndex(where: { $0.id == id }),
+                              idx < presetStore.presets.count - 1 else { return }
+                        presetStore.movePresets(from: [idx], to: idx + 2)
+                    } label: {
+                        Image(systemName: "chevron.down")
+                            .frame(width: 24, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled({
+                        guard let id = selectedId,
+                              let idx = presetStore.presets.firstIndex(where: { $0.id == id })
+                        else { return true }
+                        return idx == presetStore.presets.count - 1
+                    }())
+
                     Spacer()
                 }
                 .padding(.horizontal, 4)
                 .padding(.vertical, 4)
             }
-            .frame(minWidth: 140, idealWidth: 160, maxWidth: 200)
+            .frame(minWidth: 160, idealWidth: 180, maxWidth: 220)
 
             // Right panel: edit selected preset
             if editingPreset != nil {
@@ -2369,6 +2445,15 @@ struct CombinerPreferencesView: View {
         }
         .onChange(of: selectedId) { newId in
             editingPreset = presetStore.presets.first { $0.id == newId }
+        }
+        // Keep the right panel in sync when the store is changed externally
+        // (e.g. "Save to Preset" from the sidebar while preferences is open).
+        // Since saveEditing() always writes before this fires, reloading is safe.
+        .onChange(of: presetStore.presets) { updated in
+            guard let id = selectedId,
+                  let fresh = updated.first(where: { $0.id == id }),
+                  fresh != editingPreset else { return }
+            editingPreset = fresh
         }
         .sheet(isPresented: $showingAddPreset) {
             NewPresetSheet { name, parts in
