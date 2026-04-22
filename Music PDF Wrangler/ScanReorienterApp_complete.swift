@@ -733,22 +733,25 @@ struct CombineView: View {
     /// longest part name first so "Bass Clarinet" wins over "Clarinet".
     /// Files that don't match any part are highlighted orange.
     @discardableResult
-    private func applyPreset(parts: [PresetPart]) -> (matched: Int, unmatched: Int) {
+    private func applyPreset(parts: [PresetPart]) -> (matched: Int, unmatched: Int, unmatchedPartNames: Set<String>) {
         let sortedParts = parts.sorted { $0.name.count > $1.name.count }
         var newUnmatched: Set<UUID> = []
         var matched = 0
+        var matchedPartNames: Set<String> = []
 
         for file in combineManager.files {
             let filename = file.name.lowercased()
             if let match = sortedParts.first(where: { filename.contains($0.name.lowercased()) }) {
                 combineManager.updateCopies(for: file.id, copies: match.copies, undoManager: undoManager)
                 matched += 1
+                matchedPartNames.insert(match.name)
             } else {
                 newUnmatched.insert(file.id)
             }
         }
         unmatchedFileIds = newUnmatched
-        return (matched: matched, unmatched: newUnmatched.count)
+        let unmatchedPartNames = Set(parts.map(\.name)).subtracting(matchedPartNames)
+        return (matched: matched, unmatched: newUnmatched.count, unmatchedPartNames: unmatchedPartNames)
     }
 }
 
@@ -851,6 +854,7 @@ struct CombineFileRow: View {
 /// Double-click the copy count to type a number directly.
 struct PresetPartRow: View {
     @Binding var part: PresetPart
+    var isUnmatched: Bool = false
     var onMarkDirty: () -> Void
     var onDelete: () -> Void
 
@@ -926,6 +930,7 @@ struct PresetPartRow: View {
             }
         }
         .padding(.vertical, 1)
+        .background(isUnmatched ? Color.orange.opacity(0.12) : Color.clear)
         .onChange(of: nameFocused) { focused in
             if !focused && isEditingName { commitNameEdit() }
         }
@@ -1107,13 +1112,13 @@ private struct TemplateCard: View {
 // MARK: - Preset Sidebar View
 struct PresetSidebarView: View {
     @EnvironmentObject var presetStore: EnsemblePresetStore
-    let onApply: (_ parts: [PresetPart]) -> (matched: Int, unmatched: Int)
+    let onApply: (_ parts: [PresetPart]) -> (matched: Int, unmatched: Int, unmatchedPartNames: Set<String>)
 
     /// Local draft — changes aren't committed to the preset until "Save to Preset"
     @State private var draftParts: [PresetPart] = []
     @State private var isDirty = false
     @State private var showingNewPreset = false
-    @State private var applyResult: (matched: Int, unmatched: Int)? = nil
+    @State private var applyResult: (matched: Int, unmatched: Int, unmatchedPartNames: Set<String>)? = nil
 
     private var selectedPreset: EnsemblePreset? { presetStore.selectedPreset }
 
@@ -1178,6 +1183,7 @@ struct PresetSidebarView: View {
                     ForEach($draftParts) { $part in
                         PresetPartRow(
                             part: $part,
+                            isUnmatched: applyResult?.unmatchedPartNames.contains(part.name) ?? false,
                             onMarkDirty: { isDirty = true; applyResult = nil },
                             onDelete: {
                                 draftParts.removeAll { $0.id == part.id }
