@@ -769,3 +769,83 @@ struct PDFManagerTests {
         #expect(names == ["Part_1.pdf", "Part_2.pdf"])
     }
 }
+
+// MARK: - Roman Numeral Normalisation Tests
+@Suite("Roman numeral normalisation")
+struct RomanNumeralTests {
+    @Test("leaves plain strings unchanged")
+    func noChange() {
+        #expect(normalizeRomanNumerals("flute") == "flute")
+        #expect(normalizeRomanNumerals("celli") == "celli")   // no space before i
+        #expect(normalizeRomanNumerals("violin") == "violin")
+    }
+
+    @Test("converts trailing I II III IV")
+    func converts() {
+        #expect(normalizeRomanNumerals("violin i")   == "violin 1")
+        #expect(normalizeRomanNumerals("violin ii")  == "violin 2")
+        #expect(normalizeRomanNumerals("violin iii") == "violin 3")
+        #expect(normalizeRomanNumerals("violin iv")  == "violin 4")
+    }
+
+    @Test("IV is matched before I")
+    func ivBeforeI() {
+        // If I were checked first "violin iv" would become "violin 1v"
+        #expect(normalizeRomanNumerals("violin iv") == "violin 4")
+    }
+}
+
+// MARK: - Numbered Base Tests
+@Suite("numberedBase helper")
+struct NumberedBaseTests {
+    @Test("arabic numerals")
+    func arabic() {
+        #expect(numberedBase(of: "Flute 1") == "flute")
+        #expect(numberedBase(of: "Clarinet 3") == "clarinet")
+    }
+
+    @Test("roman numerals")
+    func roman() {
+        #expect(numberedBase(of: "Violin I")  == "violin")
+        #expect(numberedBase(of: "Violin II") == "violin")
+    }
+
+    @Test("returns nil for unnumbered names")
+    func unnumbered() {
+        #expect(numberedBase(of: "Tuba") == nil)
+        #expect(numberedBase(of: "Bass Clarinet") == nil)
+    }
+}
+
+// MARK: - Renumber After Deletion Tests
+@Suite("renumberAfterDeletion")
+struct RenumberAfterDeletionTests {
+    @Test("strips number from sole arabic survivor")
+    func arabic() {
+        let parts = [PresetPart(name: "Flute 1", copies: 1)]
+        let result = renumberAfterDeletion(parts)
+        #expect(result[0].name == "Flute")
+    }
+
+    @Test("strips numeral from sole roman-numeral survivor")
+    func roman() {
+        let parts = [PresetPart(name: "Violin I", copies: 1)]
+        let result = renumberAfterDeletion(parts)
+        #expect(result[0].name == "Violin")
+    }
+
+    @Test("leaves pair untouched")
+    func pair() {
+        let parts = [PresetPart(name: "Horn 1", copies: 1),
+                     PresetPart(name: "Horn 2", copies: 1)]
+        let result = renumberAfterDeletion(parts)
+        #expect(result.map(\.name) == ["Horn 1", "Horn 2"])
+    }
+
+    @Test("preserves capitalisation of survivor")
+    func capitalisation() {
+        let parts = [PresetPart(name: "Alto Saxophone 1", copies: 1)]
+        let result = renumberAfterDeletion(parts)
+        #expect(result[0].name == "Alto Saxophone")
+    }
+}
