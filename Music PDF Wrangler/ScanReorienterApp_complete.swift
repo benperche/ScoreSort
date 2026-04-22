@@ -850,16 +850,38 @@ struct PresetPartRow: View {
     var onMarkDirty: () -> Void
     var onDelete: () -> Void
 
+    // Name editing
+    @State private var isEditingName = false
+    @State private var nameText = ""
+    @FocusState private var nameFocused: Bool
+
+    // Copies editing
     @State private var isEditingCopies = false
     @State private var copiesText = ""
-    @FocusState private var fieldFocused: Bool
+    @FocusState private var copiesFocused: Bool
 
     var body: some View {
         HStack(spacing: 4) {
-            Text(part.name)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .lineLimit(1)
-                .font(.callout)
+            // Name — double-click to rename inline
+            if isEditingName {
+                TextField("", text: $nameText)
+                    .frame(maxWidth: .infinity)
+                    .font(.callout)
+                    .focused($nameFocused)
+                    .onSubmit { commitNameEdit() }
+                    .onExitCommand { isEditingName = false }
+                    .onTapGesture {}
+            } else {
+                Text(part.name)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .lineLimit(1)
+                    .font(.callout)
+                    .onTapGesture(count: 2) {
+                        nameText = part.name
+                        isEditingName = true
+                        nameFocused = true
+                    }
+            }
 
             HStack(spacing: 2) {
                 Button {
@@ -877,10 +899,10 @@ struct PresetPartRow: View {
                         .frame(width: 32)
                         .multilineTextAlignment(.center)
                         .font(.system(.callout, design: .monospaced))
-                        .focused($fieldFocused)
-                        .onSubmit { commitEdit() }
+                        .focused($copiesFocused)
+                        .onSubmit { commitCopiesEdit() }
                         .onExitCommand { isEditingCopies = false }
-                        .onTapGesture {}   // prevent tap propagating to list selection
+                        .onTapGesture {}
                 } else {
                     Text("\(part.copies)")
                         .frame(width: 28, alignment: .center)
@@ -888,7 +910,7 @@ struct PresetPartRow: View {
                         .onTapGesture(count: 2) {
                             copiesText = "\(part.copies)"
                             isEditingCopies = true
-                            fieldFocused = true
+                            copiesFocused = true
                         }
                 }
 
@@ -900,17 +922,60 @@ struct PresetPartRow: View {
             }
         }
         .padding(.vertical, 1)
-        .onChange(of: fieldFocused) { focused in
-            if !focused && isEditingCopies { commitEdit() }
+        .onChange(of: nameFocused) { focused in
+            if !focused && isEditingName { commitNameEdit() }
+        }
+        .onChange(of: copiesFocused) { focused in
+            if !focused && isEditingCopies { commitCopiesEdit() }
         }
     }
 
-    private func commitEdit() {
+    private func commitNameEdit() {
+        let trimmed = nameText.trimmingCharacters(in: .whitespaces)
+        if !trimmed.isEmpty {
+            part.name = trimmed
+            onMarkDirty()
+        }
+        isEditingName = false
+    }
+
+    private func commitCopiesEdit() {
         if let v = Int(copiesText), v >= 1 {
             part.copies = v
             onMarkDirty()
         }
         isEditingCopies = false
+    }
+}
+
+/// When a numbered part is deleted, any sibling that is now the sole survivor of its
+/// base name loses its trailing number.
+/// Example: delete "Horn 2" → "Horn 1" becomes "Horn".
+/// Does nothing if siblings remain (e.g. deleting "Clarinet 3" while "Clarinet 1/2" still exist).
+func renumberAfterDeletion(_ parts: [PresetPart]) -> [PresetPart] {
+    // Recognise a trailing " N" pattern (one or more digits after a space)
+    func baseName(of name: String) -> String? {
+        let words = name.split(separator: " ")
+        guard words.count >= 2, Int(String(words.last!)) != nil else { return nil }
+        return words.dropLast().joined(separator: " ")
+    }
+
+    // Count how many parts share each base name
+    var baseCounts: [String: Int] = [:]
+    for part in parts {
+        if let base = baseName(of: part.name) {
+            baseCounts[base, default: 0] += 1
+        }
+    }
+
+    // Strip the trailing number from any part whose base name is now unique
+    return parts.map { part in
+        if let base = baseName(of: part.name), baseCounts[base] == 1 {
+            var renamed = part
+            renamed.name = base
+            return renamed
+        }
+        return part
     }
 }
 
@@ -1111,6 +1176,7 @@ struct PresetSidebarView: View {
                             onMarkDirty: { isDirty = true },
                             onDelete: {
                                 draftParts.removeAll { $0.id == part.id }
+                                draftParts = renumberAfterDeletion(draftParts)
                                 isDirty = true
                             }
                         )
@@ -2238,6 +2304,9 @@ struct CombinerPreferencesView: View {
                                 onMarkDirty: { saveEditing() },
                                 onDelete: {
                                     editingPreset?.parts.removeAll { $0.id == part.id }
+                                    if let updated = editingPreset?.parts {
+                                        editingPreset?.parts = renumberAfterDeletion(updated)
+                                    }
                                     saveEditing()
                                 }
                             )
