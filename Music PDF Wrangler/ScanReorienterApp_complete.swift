@@ -123,12 +123,16 @@ struct HelpCommands: Commands {
 struct MusicPDFManagerApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState()
+    @StateObject private var renamerManager = RenamerManager()
+    @StateObject private var presetStore = EnsemblePresetStore()
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         WindowGroup {
             ContentView()
                 .environmentObject(appState)
+                .environmentObject(renamerManager)
+                .environmentObject(presetStore)
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
@@ -140,6 +144,12 @@ struct MusicPDFManagerApp: App {
             NavigateCommands(appState: appState)
             CombinerCommands(state: appState.combineMenuState)
             HelpCommands(appState: appState)
+        }
+
+        Settings {
+            AppPreferencesView()
+                .environmentObject(renamerManager)
+                .environmentObject(presetStore)
         }
 
         Window("About Music PDF Manager", id: "about") {
@@ -228,6 +238,7 @@ struct ContentView: View {
 struct CombineView: View {
     @Binding var showingKeyboardHelp: Bool
     let menuState: CombineMenuState
+    @EnvironmentObject var presetStore: EnsemblePresetStore
     @StateObject private var combineManager = CombineManager()
     @State private var addBlankPages = false
     @State private var isTargeted = false
@@ -236,19 +247,50 @@ struct CombineView: View {
     @State private var removalNoticeCount = 1
     @State private var focusedFileId: UUID?     // keyboard navigation cursor
     @State private var anchorFileId: UUID?      // anchor for shift-range selection
+    @State private var showPresetSidebar = false
+    @State private var unmatchedFileIds: Set<UUID> = []
     @FocusState private var listFocused: Bool
     @Environment(\.undoManager) var undoManager
     
     var body: some View {
+        HStack(spacing: 0) {
+            mainContent
+            if showPresetSidebar {
+                Divider()
+                PresetSidebarView(onApply: applyPreset)
+                    .frame(width: 260)
+                    .transition(.move(edge: .trailing).combined(with: .opacity))
+            }
+        }
+        .animation(.easeInOut(duration: 0.2), value: showPresetSidebar)
+        .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
+            handleDrop(providers: providers)
+            return true
+        }
+        .onAppear { syncMenuClosures() }
+        .onChange(of: selectedFiles)          { _ in syncMenuFlags() }
+        .onChange(of: combineManager.files)   { _ in syncMenuFlags() }
+    }
+
+    private var mainContent: some View {
         VStack(spacing: 0) {
             // Top toolbar
             HStack {
                 Text("Combine PDFs")
                     .font(.title2)
                     .fontWeight(.semibold)
-                
+
                 Spacer()
-                
+
+                Button {
+                    withAnimation { showPresetSidebar.toggle() }
+                } label: {
+                    Label("Presets", systemImage: "sidebar.right")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(showPresetSidebar ? .accentColor : .secondary)
+                .help(showPresetSidebar ? "Hide Presets" : "Show Presets")
+
                 Button(action: { showingKeyboardHelp = true }) {
                     Image(systemName: "keyboard")
                 }
@@ -352,12 +394,14 @@ struct CombineView: View {
                                     file: file,
                                     isSelected: selectedFiles.contains(file.id),
                                     isFocused: focusedFileId == file.id,
+                                    isUnmatched: unmatchedFileIds.contains(file.id),
                                     onToggleSelect: { toggleSelection(file.id) },
                                     onCopiesChanged: { newValue in
                                         combineManager.updateCopies(for: file.id, copies: newValue, undoManager: undoManager)
                                     },
                                     onRemove: {
                                         selectedFiles.remove(file.id)
+                                        unmatchedFileIds.remove(file.id)
                                         combineManager.removeFiles(ids: [file.id], undoManager: undoManager)
                                         showRemovalNotice(undoManager: undoManager)
                                     }
@@ -446,18 +490,8 @@ struct CombineView: View {
                 }
             }
         }
-        .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
-            handleDrop(providers: providers)
-            return true
-        }
-        // Wire closures once on appear; update flags after every relevant state change.
-        // Using onAppear/onChange (post-body) avoids the "publishing during view update" warning
-        // that .focusedValue triggered.
-        .onAppear { syncMenuClosures() }
-        .onChange(of: selectedFiles)          { _ in syncMenuFlags() }
-        .onChange(of: combineManager.files)   { _ in syncMenuFlags() }
     }
-    
+
     private var emptyStateView: some View {
         VStack(spacing: 20) {
             Image(systemName: "doc.on.doc")
@@ -580,6 +614,7 @@ struct CombineView: View {
     private func removeSelected() {
         guard !selectedFiles.isEmpty else { return }
         let count = selectedFiles.count
+        unmatchedFileIds.subtract(selectedFiles)
         combineManager.removeFiles(ids: selectedFiles, undoManager: undoManager)
         selectedFiles.removeAll()
         focusedFileId = nil
@@ -691,6 +726,26 @@ struct CombineView: View {
         menuState.canMoveDown = canMoveDown
         menuState.hasFiles   = !combineManager.files.isEmpty
     }
+
+    // MARK: - Apply Preset
+    /// Applies copy counts from the given preset parts to the file list.
+    /// Parts are matched against file names via case-insensitive substring search,
+    /// longest part name first so "Bass Clarinet" wins over "Clarinet".
+    /// Files that don't match any part are highlighted orange.
+    private func applyPreset(parts: [PresetPart]) {
+        let sortedParts = parts.sorted { $0.name.count > $1.name.count }
+        var newUnmatched: Set<UUID> = []
+
+        for file in combineManager.files {
+            let filename = file.name.lowercased()
+            if let match = sortedParts.first(where: { filename.contains($0.name.lowercased()) }) {
+                combineManager.updateCopies(for: file.id, copies: match.copies, undoManager: undoManager)
+            } else {
+                newUnmatched.insert(file.id)
+            }
+        }
+        unmatchedFileIds = newUnmatched
+    }
 }
 
 // MARK: - Combine File Row
@@ -698,6 +753,7 @@ struct CombineFileRow: View {
     let file: CombineFile
     let isSelected: Bool
     let isFocused: Bool
+    let isUnmatched: Bool
     let onToggleSelect: () -> Void
     let onCopiesChanged: (Int) -> Void
     let onRemove: () -> Void
@@ -766,7 +822,7 @@ struct CombineFileRow: View {
         .background(
             isSelected
                 ? Color.accentColor.opacity(isFocused ? 0.18 : 0.1)
-                : Color.clear
+                : isUnmatched ? Color.orange.opacity(0.12) : Color.clear
         )
         .contentShape(Rectangle())
         .onTapGesture {
@@ -785,6 +841,150 @@ struct CombineFileRow: View {
     }
 }
 
+
+// MARK: - Preset Sidebar View
+struct PresetSidebarView: View {
+    @EnvironmentObject var presetStore: EnsemblePresetStore
+    let onApply: (_ parts: [PresetPart]) -> Void
+
+    /// Local draft — changes aren't committed to the preset until "Save to Preset"
+    @State private var draftParts: [PresetPart] = []
+    @State private var isDirty = false
+
+    private var selectedPreset: EnsemblePreset? { presetStore.selectedPreset }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header + preset picker
+            VStack(spacing: 6) {
+                HStack {
+                    Text("Presets")
+                        .font(.headline)
+                    Spacer()
+                }
+
+                if !presetStore.presets.isEmpty {
+                    Picker("", selection: Binding(
+                        get: { presetStore.selectedPresetId },
+                        set: { newId in switchPreset(to: newId) }
+                    )) {
+                        ForEach(presetStore.presets) { preset in
+                            Text(preset.name).tag(Optional(preset.id))
+                        }
+                    }
+                    .labelsHidden()
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            if !draftParts.isEmpty {
+                // Parts list — scrollable
+                List {
+                    ForEach($draftParts) { $part in
+                        HStack(spacing: 4) {
+                            Text(part.name)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .lineLimit(1)
+                                .font(.callout)
+
+                            HStack(spacing: 2) {
+                                Button {
+                                    if part.copies > 1 { part.copies -= 1; isDirty = true }
+                                } label: { Image(systemName: "minus.circle") }
+                                .buttonStyle(.plain)
+                                .disabled(part.copies <= 1)
+
+                                Text("\(part.copies)")
+                                    .frame(width: 24, alignment: .center)
+                                    .font(.system(.callout, design: .monospaced))
+
+                                Button {
+                                    part.copies += 1; isDirty = true
+                                } label: { Image(systemName: "plus.circle") }
+                                .buttonStyle(.plain)
+                            }
+                        }
+                        .padding(.vertical, 1)
+                    }
+                }
+                .listStyle(.plain)
+
+                Divider()
+
+                // Action area
+                VStack(spacing: 8) {
+                    if isDirty {
+                        HStack(spacing: 8) {
+                            Button("Revert") {
+                                draftParts = selectedPreset?.parts ?? []
+                                isDirty = false
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+
+                            Button("Save to Preset") {
+                                if var p = selectedPreset {
+                                    p.parts = draftParts
+                                    presetStore.updatePreset(p)
+                                    isDirty = false
+                                }
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .controlSize(.small)
+                        }
+                    }
+
+                    Button {
+                        onApply(draftParts)
+                    } label: {
+                        Label("Apply to Files", systemImage: "arrow.left.to.line")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.regular)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+
+            } else {
+                // No preset loaded
+                VStack(spacing: 12) {
+                    Text("No presets yet")
+                        .foregroundStyle(.secondary)
+                    Button("Create Preset") {
+                        presetStore.addPreset(name: "Wind Band")
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .background(Color(NSColor.controlBackgroundColor))
+        .onAppear { loadDraft() }
+        .onChange(of: presetStore.selectedPresetId) { _ in loadDraft() }
+    }
+
+    private func loadDraft() {
+        draftParts = selectedPreset?.parts ?? []
+        isDirty = false
+    }
+
+    private func switchPreset(to newId: UUID?) {
+        if isDirty {
+            let alert = NSAlert()
+            alert.messageText = "Unsaved Changes"
+            alert.informativeText = "Discard changes to this preset?"
+            alert.addButton(withTitle: "Discard")
+            alert.addButton(withTitle: "Cancel")
+            guard alert.runModal() == .alertFirstButtonReturn else { return }
+        }
+        presetStore.selectedPresetId = newId
+        isDirty = false
+    }
+}
 
 // MARK: - Keyboard Shortcuts Help
 struct ShortcutsHelpView: View {
@@ -859,6 +1059,106 @@ struct ShortcutsHelpView: View {
         }
         .padding(.leading, 8)
     }
+}
+
+// MARK: - Ensemble Preset Model
+
+struct PresetPart: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var name: String
+    var copies: Int
+}
+
+struct EnsemblePreset: Identifiable, Codable, Equatable {
+    var id = UUID()
+    var name: String
+    var parts: [PresetPart]
+}
+
+class EnsemblePresetStore: ObservableObject {
+    @Published var presets: [EnsemblePreset] = []
+    @Published var selectedPresetId: UUID?
+
+    var selectedPreset: EnsemblePreset? {
+        presets.first { $0.id == selectedPresetId }
+    }
+
+    private var storeURL: URL? {
+        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
+        else { return nil }
+        let folder = dir.appendingPathComponent("Music PDF Manager", isDirectory: true)
+        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        return folder.appendingPathComponent("ensemble-presets.json")
+    }
+
+    init() {
+        load()
+        if presets.isEmpty { seedDefaults() }
+        if selectedPresetId == nil { selectedPresetId = presets.first?.id }
+    }
+
+    func save() {
+        guard let url = storeURL else { return }
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = .prettyPrinted
+        guard let data = try? encoder.encode(presets) else { return }
+        try? data.write(to: url, options: .atomic)
+    }
+
+    private func load() {
+        guard let url = storeURL,
+              let data = try? Data(contentsOf: url),
+              let decoded = try? JSONDecoder().decode([EnsemblePreset].self, from: data)
+        else { return }
+        presets = decoded
+        selectedPresetId = presets.first?.id
+    }
+
+    func addPreset(name: String) {
+        let p = EnsemblePreset(name: name, parts: EnsemblePresetStore.windBandTemplate)
+        presets.append(p)
+        selectedPresetId = p.id
+        save()
+    }
+
+    func updatePreset(_ preset: EnsemblePreset) {
+        if let idx = presets.firstIndex(where: { $0.id == preset.id }) {
+            presets[idx] = preset
+            save()
+        }
+    }
+
+    func deletePreset(_ id: UUID) {
+        presets.removeAll { $0.id == id }
+        if selectedPresetId == id {
+            selectedPresetId = presets.first?.id
+        }
+        save()
+    }
+
+    private func seedDefaults() {
+        let starter = EnsemblePreset(name: "Wind Band", parts: EnsemblePresetStore.windBandTemplate)
+        presets = [starter]
+        selectedPresetId = starter.id
+        save()
+    }
+
+    // Standard wind-band template: one copy of each core part
+    static let windBandTemplate: [PresetPart] = [
+        "Score",
+        "Piccolo", "Flute 1", "Flute 2",
+        "Oboe", "Bassoon",
+        "Clarinet 1", "Clarinet 2", "Clarinet 3",
+        "Bass Clarinet",
+        "Alto Saxophone 1", "Alto Saxophone 2",
+        "Tenor Saxophone", "Baritone Saxophone",
+        "Trumpet 1", "Trumpet 2", "Trumpet 3",
+        "Horn 1", "Horn 2",
+        "Trombone 1", "Trombone 2", "Bass Trombone",
+        "Euphonium", "Tuba",
+        "Timpani",
+        "Percussion 1", "Percussion 2", "Percussion 3",
+    ].map { PresetPart(name: $0, copies: 1) }
 }
 
 // MARK: - Combine File Model
@@ -1037,8 +1337,8 @@ class CombineManager: ObservableObject {
 
 // MARK: - Renamer View
 struct RenamerView: View {
-    @StateObject private var renamerManager = RenamerManager()
-    @State private var showingPreferences = false
+    @EnvironmentObject private var renamerManager: RenamerManager
+    @Environment(\.openSettings) private var openSettings
     @State private var selectedFileForAssignment: RenameOperation?
     @State private var isFolderTargeted = false
     @State private var sortColumn: SortColumn = .newName
@@ -1066,7 +1366,7 @@ struct RenamerView: View {
                     }
                     .help("Rescan all files and suggest corrections")
                     
-                    Button(action: { showingPreferences = true }) {
+                    Button(action: { openSettings() }) {
                         Label("Preferences", systemImage: "gearshape")
                     }
                     
@@ -1098,12 +1398,6 @@ struct RenamerView: View {
                 folderSelectionView
             }
         }
-        .sheet(isPresented: $showingPreferences) {
-            PreferencesView(
-                ensembleType: $renamerManager.ensembleType,
-                instrumentOrder: $renamerManager.customInstrumentOrder
-            )
-        }
         .sheet(item: $selectedFileForAssignment) { operation in
             ManualAssignmentView(
                 operation: operation,
@@ -1114,20 +1408,6 @@ struct RenamerView: View {
                 }
             )
         }
-        .onAppear {
-            // Workaround for SwiftUI sheet initialization bug
-            // This "warms up" the sheet system so the first popup renders correctly
-            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
-                // Just accessing the sheet system is enough
-                _ = showingPreferences
-            }
-        }
-        // ⌘, always opens preferences regardless of whether a folder is loaded
-        .background(
-            Button("") { showingPreferences = true }
-                .keyboardShortcut(",", modifiers: .command)
-                .hidden()
-        )
     }
     
     private var folderSelectionView: some View {
@@ -1631,6 +1911,211 @@ struct PreferencesView: View {
             editableOrder.append(trimmed)
             newInstrument = ""
         }
+    }
+}
+
+// MARK: - App Preferences View (Settings scene root — two tabs)
+struct AppPreferencesView: View {
+    @EnvironmentObject var renamerManager: RenamerManager
+    @EnvironmentObject var presetStore: EnsemblePresetStore
+
+    var body: some View {
+        TabView {
+            PreferencesView(
+                ensembleType: $renamerManager.ensembleType,
+                instrumentOrder: $renamerManager.customInstrumentOrder
+            )
+            .tabItem { Label("Renamer", systemImage: "folder.badge.gearshape") }
+
+            CombinerPreferencesView()
+                .tabItem { Label("Combiner", systemImage: "doc.on.doc") }
+        }
+        .frame(width: 680, height: 720)
+    }
+}
+
+// MARK: - Combiner Preferences View
+struct CombinerPreferencesView: View {
+    @EnvironmentObject var presetStore: EnsemblePresetStore
+    @State private var selectedId: UUID?
+    @State private var editingPreset: EnsemblePreset?
+    @State private var newPartName: String = ""
+    @State private var showingAddPreset = false
+    @State private var newPresetName: String = ""
+
+    var body: some View {
+        HSplitView {
+            // Left panel: preset list
+            VStack(spacing: 0) {
+                List(presetStore.presets, selection: $selectedId) { preset in
+                    Text(preset.name).tag(preset.id)
+                }
+                .listStyle(.bordered)
+
+                Divider()
+
+                HStack(spacing: 0) {
+                    Button { showingAddPreset = true } label: {
+                        Image(systemName: "plus")
+                            .frame(width: 28, height: 24)
+                    }
+                    .buttonStyle(.plain)
+
+                    Button {
+                        if let id = selectedId {
+                            presetStore.deletePreset(id)
+                            selectedId = presetStore.presets.first?.id
+                            editingPreset = presetStore.selectedPreset
+                        }
+                    } label: {
+                        Image(systemName: "minus")
+                            .frame(width: 28, height: 24)
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(presetStore.presets.count <= 1)
+
+                    Spacer()
+                }
+                .padding(.horizontal, 4)
+                .padding(.vertical, 4)
+            }
+            .frame(minWidth: 140, idealWidth: 160, maxWidth: 200)
+
+            // Right panel: edit selected preset
+            if editingPreset != nil {
+                VStack(alignment: .leading, spacing: 0) {
+                    // Name
+                    HStack {
+                        Text("Name:")
+                            .fontWeight(.medium)
+                        TextField("Preset name", text: Binding(
+                            get: { editingPreset?.name ?? "" },
+                            set: { editingPreset?.name = $0; saveEditing() }
+                        ))
+                        .textFieldStyle(.roundedBorder)
+                    }
+                    .padding(12)
+
+                    Divider()
+
+                    Text("Parts (drag to reorder):")
+                        .fontWeight(.medium)
+                        .padding(.horizontal, 12)
+                        .padding(.top, 10)
+                        .padding(.bottom, 4)
+
+                    List {
+                        ForEach(editingPreset?.parts ?? [], id: \.id) { part in
+                            HStack(spacing: 6) {
+                                Text(part.name)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                HStack(spacing: 2) {
+                                    Button { adjustCopies(for: part.id, delta: -1) } label: {
+                                        Image(systemName: "minus.circle")
+                                    }
+                                    .buttonStyle(.plain)
+                                    .disabled(part.copies <= 1)
+
+                                    Text("\(part.copies)")
+                                        .frame(width: 28, alignment: .center)
+                                        .font(.system(.body, design: .monospaced))
+
+                                    Button { adjustCopies(for: part.id, delta: 1) } label: {
+                                        Image(systemName: "plus.circle")
+                                    }
+                                    .buttonStyle(.plain)
+                                }
+                                Button {
+                                    editingPreset?.parts.removeAll { $0.id == part.id }
+                                    saveEditing()
+                                } label: {
+                                    Image(systemName: "minus.circle.fill")
+                                        .foregroundColor(.red)
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.vertical, 2)
+                        }
+                        .onMove { from, to in
+                            editingPreset?.parts.move(fromOffsets: from, toOffset: to)
+                            saveEditing()
+                        }
+                    }
+                    .listStyle(.bordered)
+
+                    // Add part
+                    HStack {
+                        TextField("Add part...", text: $newPartName)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit { addPart() }
+                        Button(action: addPart) {
+                            Image(systemName: "plus.circle.fill")
+                        }
+                        .disabled(newPartName.trimmingCharacters(in: .whitespaces).isEmpty)
+                    }
+                    .padding(12)
+
+                    Divider()
+
+                    HStack {
+                        Button("Reset to Band Template") {
+                            editingPreset?.parts = EnsemblePresetStore.windBandTemplate
+                            saveEditing()
+                        }
+                        .buttonStyle(.bordered)
+                        Spacer()
+                    }
+                    .padding(12)
+                }
+            } else {
+                VStack {
+                    Text(presetStore.presets.isEmpty
+                         ? "No presets — click + to create one"
+                         : "Select a preset to edit")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            }
+        }
+        .onAppear {
+            selectedId = presetStore.presets.first?.id
+            editingPreset = presetStore.presets.first
+        }
+        .onChange(of: selectedId) { newId in
+            editingPreset = presetStore.presets.first { $0.id == newId }
+        }
+        .alert("New Preset", isPresented: $showingAddPreset) {
+            TextField("Preset name", text: $newPresetName)
+            Button("Create") {
+                let n = newPresetName.trimmingCharacters(in: .whitespaces)
+                if !n.isEmpty { presetStore.addPreset(name: n) }
+                newPresetName = ""
+                selectedId = presetStore.presets.last?.id
+                editingPreset = presetStore.presets.last
+            }
+            Button("Cancel", role: .cancel) { newPresetName = "" }
+        } message: {
+            Text("A new preset will be created with the standard wind band template.")
+        }
+    }
+
+    private func addPart() {
+        let trimmed = newPartName.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        editingPreset?.parts.append(PresetPart(name: trimmed, copies: 1))
+        saveEditing()
+        newPartName = ""
+    }
+
+    private func adjustCopies(for partId: UUID, delta: Int) {
+        guard let idx = editingPreset?.parts.firstIndex(where: { $0.id == partId }) else { return }
+        let current = editingPreset?.parts[idx].copies ?? 1
+        editingPreset?.parts[idx].copies = max(1, current + delta)
+        saveEditing()
+    }
+
+    private func saveEditing() {
+        if let p = editingPreset { presetStore.updatePreset(p) }
     }
 }
 
