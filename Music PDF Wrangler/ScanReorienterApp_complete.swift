@@ -734,14 +734,18 @@ struct CombineView: View {
     /// Files that don't match any part are highlighted orange.
     @discardableResult
     private func applyPreset(parts: [PresetPart]) -> (matched: Int, unmatched: Int, unmatchedPartNames: Set<String>) {
+        // Sort longest-name-first so "Bass Clarinet" wins over "Clarinet"
         let sortedParts = parts.sorted { $0.name.count > $1.name.count }
         var newUnmatched: Set<UUID> = []
         var matched = 0
         var matchedPartNames: Set<String> = []
 
+        // ── Phase 1: direct match (with roman-numeral normalisation) ──────────
         for file in combineManager.files {
-            let filename = file.name.lowercased()
-            if let match = sortedParts.first(where: { filename.contains($0.name.lowercased()) }) {
+            let filename = normalizeRomanNumerals(file.name.lowercased())
+            if let match = sortedParts.first(where: {
+                filename.contains(normalizeRomanNumerals($0.name.lowercased()))
+            }) {
                 combineManager.updateCopies(for: file.id, copies: match.copies, undoManager: undoManager)
                 matched += 1
                 matchedPartNames.insert(match.name)
@@ -749,6 +753,41 @@ struct CombineView: View {
                 newUnmatched.insert(file.id)
             }
         }
+
+        // ── Phase 2: consolidation ────────────────────────────────────────────
+        // When ALL numbered siblings of a base name went unmatched AND exactly
+        // one file contains that base name, sum their copies and apply to that file.
+        // (Any more complex situation — 2 files vs 3 parts etc. — stays orange.)
+        let unmatchedParts = parts.filter { !matchedPartNames.contains($0.name) }
+
+        // Group unmatched parts by their (normalised) base name
+        var baseGroups: [String: [PresetPart]] = [:]
+        for part in unmatchedParts {
+            if let base = numberedBase(of: part.name) {
+                baseGroups[base, default: []].append(part)
+            }
+        }
+
+        for (base, group) in baseGroups {
+            // All preset parts with this base must be in the unmatched group
+            let allWithBase = parts.filter { numberedBase(of: $0.name) == base }
+            guard group.count == allWithBase.count else { continue }
+
+            // Find still-unmatched files that contain the base name
+            let candidates = newUnmatched.filter { id in
+                guard let file = combineManager.files.first(where: { $0.id == id }) else { return false }
+                return normalizeRomanNumerals(file.name.lowercased()).contains(base)
+            }
+            guard candidates.count == 1, let fileId = candidates.first else { continue }
+
+            // Apply summed copies and mark everything resolved
+            let total = group.reduce(0) { $0 + $1.copies }
+            combineManager.updateCopies(for: fileId, copies: total, undoManager: undoManager)
+            newUnmatched.remove(fileId)
+            matched += 1
+            for part in group { matchedPartNames.insert(part.name) }
+        }
+
         unmatchedFileIds = newUnmatched
         let unmatchedPartNames = Set(parts.map(\.name)).subtracting(matchedPartNames)
         return (matched: matched, unmatched: newUnmatched.count, unmatchedPartNames: unmatchedPartNames)
@@ -961,27 +1000,47 @@ struct PresetPartRow: View {
 /// base name loses its trailing number.
 /// Example: delete "Horn 2" → "Horn 1" becomes "Horn".
 /// Does nothing if siblings remain (e.g. deleting "Clarinet 3" while "Clarinet 1/2" still exist).
-func renumberAfterDeletion(_ parts: [PresetPart]) -> [PresetPart] {
-    // Recognise a trailing " N" pattern (one or more digits after a space)
-    func baseName(of name: String) -> String? {
-        let words = name.split(separator: " ")
-        guard words.count >= 2, Int(String(words.last!)) != nil else { return nil }
-        return words.dropLast().joined(separator: " ")
-    }
+// MARK: - Preset matching helpers
 
-    // Count how many parts share each base name
+/// Converts a trailing roman numeral part number (I/II/III/IV) to arabic (1/2/3/4).
+/// Input must already be lowercased. Checks longest suffix first to avoid IV→I collision.
+/// Only matches when preceded by a space, preventing false hits on words like "celli".
+func normalizeRomanNumerals(_ s: String) -> String {
+    let pairs: [(String, String)] = [(" iv", " 4"), (" iii", " 3"), (" ii", " 2"), (" i", " 1")]
+    for (roman, arabic) in pairs {
+        if s.hasSuffix(roman) { return String(s.dropLast(roman.count)) + arabic }
+    }
+    return s
+}
+
+/// Returns the base name (lowercased) if the name ends with a trailing part number
+/// (arabic or roman numeral), otherwise nil.
+/// E.g. "Violin II" → "violin",  "Flute 1" → "flute",  "Tuba" → nil
+func numberedBase(of name: String) -> String? {
+    let normalized = normalizeRomanNumerals(name.lowercased())
+    let words = normalized.split(separator: " ")
+    guard words.count >= 2, Int(String(words.last!)) != nil else { return nil }
+    return words.dropLast().joined(separator: " ")
+}
+
+/// After removing a part, strips the trailing number/numeral from any sibling that is now
+/// the sole survivor of its base name.
+/// E.g. delete "Horn 2" → "Horn 1" becomes "Horn"; delete "Violin II" → "Violin I" becomes "Violin".
+func renumberAfterDeletion(_ parts: [PresetPart]) -> [PresetPart] {
+    // Count remaining parts per base name (using normalised comparison)
     var baseCounts: [String: Int] = [:]
     for part in parts {
-        if let base = baseName(of: part.name) {
+        if let base = numberedBase(of: part.name) {
             baseCounts[base, default: 0] += 1
         }
     }
-
-    // Strip the trailing number from any part whose base name is now unique
+    // Strip the trailing word (the number or numeral) from solo survivors
     return parts.map { part in
-        if let base = baseName(of: part.name), baseCounts[base] == 1 {
+        if let base = numberedBase(of: part.name), baseCounts[base] == 1 {
             var renamed = part
-            renamed.name = base
+            // Drop the last word from the *original* name to preserve capitalisation
+            let words = part.name.split(separator: " ", omittingEmptySubsequences: true)
+            renamed.name = words.dropLast().joined(separator: " ")
             return renamed
         }
         return part
