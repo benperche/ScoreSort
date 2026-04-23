@@ -1,6 +1,6 @@
 # Music PDF Manager
 
-A powerful macOS application for managing music PDFs with three essential tools for musicians and music librarians: automatic file renaming based on instrument detection, PDF splitting, and page rotation.
+A powerful macOS application for managing music PDFs with four tools for musicians and music librarians: PDF combining with smart copy management, automatic file renaming based on instrument detection, PDF splitting, and page rotation.
 
 ## Features
 
@@ -9,7 +9,10 @@ Combine multiple PDF files into a single document with flexible copying and page
 
 - **Drag-and-drop or browse** to add multiple PDF files
 - **Specify copies** for each file (great for printing multiple parts)
-- **Reorder files** with Move Up/Down buttons or by dragging
+- **Collate groups** — select files and press `C` to create a group whose copies are printed *interleaved*: 4 copies of [Perc 1, Perc 2, Timpani] → P1, P2, T, P1, P2, T, … ready to hand out by player
+- **Reorder files** with Move Up/Down buttons; groups always move as a unit
+- **Ensemble Presets** — save named instrument lists (Wind Band, Jazz Band, Orchestra, or your own) with per-part copy counts; drag in files, click "Apply to Files" and copy counts are set automatically
+- **Smart preset matching** — handles roman-numeral filenames (Violin I/II → matches Violin 1/2 preset parts) and single-file consolidation (one Flute.pdf against Flute 1 + Flute 2 in preset → summed copies)
 - **Smart blank pages** - automatically add blank sheets after odd-page files for double-sided printing
 - **Open in Preview** - opens combined PDF in Preview for quick printing (⌘P)
 - **Or save to file** - create a permanent combined PDF document
@@ -101,21 +104,49 @@ git clone https://github.com/benperche/music-pdf-manager.git
 1. **Add PDF files**
    - Drag and drop PDFs onto the window
    - Or click "Add Files" to browse
-   
+
 2. **Set copy counts** for each file
-   - Use + / - buttons to adjust how many copies of each file
-   
+   - Use + / − buttons, or double-click the number to type directly
+   - The status bar at the bottom shows running totals
+
 3. **Reorder files** (optional)
-   - Select a file and use "Move Up" / "Move Down" buttons
+   - Select files and use "Move Up" / "Move Down" buttons, or ⌘↑ / ⌘↓
    - Files will be combined in the order shown
-   
-4. **Configure double-sided printing** (optional)
+
+4. **Create collate groups** (optional — for interleaved multi-part printing)
+   - Select 2 or more files and click **Collate** or press `C`
+   - A group header row appears showing the shared copy count for the whole set
+   - When combining, the group repeats N times interleaved — e.g. 4 copies of [Perc 1, Perc 2, Timpani] produces Perc 1, Perc 2, Timp, Perc 1, Perc 2, Timp, … ready to hand out one stack per player
+   - Double-click the copy count to type it directly
+   - Click the ↗ button on the header to dissolve the group back to individual files
+
+5. **Apply an Ensemble Preset** (optional — auto-sets copy counts for each part)
+   - Click the **Presets** button (top-right of the toolbar) to open the preset sidebar
+   - Choose a preset from the dropdown (Wind Band, Jazz Band, Orchestra, or any you've saved)
+   - Click **Apply to Files** — copy counts are matched to the preset's parts automatically
+   - Files with no matching preset part are highlighted in orange
+   - Preset parts with no matching file are also highlighted in orange in the sidebar
+   - Matching is smart: roman-numeral filenames (Violin I, Violin II) match numbered preset parts; a single Flute.pdf against Flute 1 + Flute 2 in the preset gets the summed copies
+   - Create and edit presets in **Preferences** (⌘,) — the Combine Presets tab lets you add, rename, reorder, and template from Wind Band / Jazz Band / Orchestra
+
+6. **Configure double-sided printing** (optional)
    - Check "Add blank sheet to the end of files with an odd number of pages"
    - Ensures each new file starts on the front of a sheet when printing double-sided
-   
-5. **Output your combined PDF**
+
+7. **Output your combined PDF**
    - Click "Open in Preview" to create a temporary PDF and open it in Preview (press ⌘P to print)
    - Or click "Create PDF" to save as a permanent file
+
+#### Keyboard Shortcuts (Combiner)
+| Key | Action |
+|-----|--------|
+| `↑` / `↓` | Select previous / next file |
+| `⇧↑` / `⇧↓` | Extend selection up / down |
+| `⌘A` | Select all files |
+| `⌫` | Remove selected files |
+| `⌘↑` / `⌘↓` | Move selected files up / down |
+| `C` | Group selected files into a collate set |
+| `⌘Z` / `⌘⇧Z` | Undo / Redo |
 
 ### Sheet Music Renamer
 
