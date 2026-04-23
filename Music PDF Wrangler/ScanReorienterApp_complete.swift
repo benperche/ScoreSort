@@ -3855,7 +3855,8 @@ struct SplitView: View {
                 baseFileName: $baseFileName,
                 customFileNames: $customFileNames,
                 onBack: { showingNamingStage = false },
-                onSave: { saveSplitPDF() }
+                onSave: { saveSplitPDF() },
+                onClear: { clearSplitWorkflow() }
             )
         } else {
         splitStageBody
@@ -4068,6 +4069,15 @@ struct SplitView: View {
         fileSizes = toggleSplit(in: fileSizes, at: page)
     }
 
+    private func clearSplitWorkflow() {
+        pdfManager.clearPDF()
+        fileSizes = []
+        currentPage = 0
+        showingNamingStage = false
+        baseFileName = ""
+        customFileNames.removeAll()
+    }
+
     func saveSplitPDF() {
         guard let _ = pdfManager.pdfDocument, numberOfFiles >= 2 else { return }
 
@@ -4271,6 +4281,182 @@ func pdfFilenameError(for text: String) -> String? {
     return nil
 }
 
+private func splitSuggestionDisplayNames(from names: [String]) -> [String] {
+    var seen = Set<String>()
+    var result: [String] = []
+
+    for name in names {
+        let key = splitSuggestionBaseName(name)
+        if seen.insert(key).inserted {
+            result.append(name.capitalized)
+        }
+    }
+
+    return result
+}
+
+private func splitSuggestionBaseName(_ text: String) -> String {
+    var parts = text
+        .lowercased()
+        .replacingOccurrences(of: "-", with: " ")
+        .components(separatedBy: .whitespacesAndNewlines)
+        .filter { !$0.isEmpty }
+
+    if let last = parts.last, Int(last) != nil {
+        parts.removeLast()
+    }
+
+    return parts.joined(separator: " ")
+}
+
+private func splitSuggestionGroupKey(for name: String) -> String {
+    let base = splitSuggestionBaseName(name)
+
+    if base.contains("alto sax") || base.contains("saxophone alto") || base == "alto" {
+        return "alto saxophone"
+    }
+    if base.contains("tenor sax") || base.contains("saxophone tenor") || base == "tenor" {
+        return "tenor saxophone"
+    }
+    if base.contains("bari sax")
+        || base.contains("baritone sax")
+        || base.contains("saxophone bari")
+        || base.contains("sax bari")
+        || base == "baritone"
+        || base == "bari" {
+        return "baritone saxophone"
+    }
+    if base.contains("bass trombone") || base.contains("trombone bass") {
+        return "bass trombone"
+    }
+    if base == "flute" {
+        return "flute"
+    }
+    if base == "oboe" {
+        return "oboe"
+    }
+    if base == "clarinet" {
+        return "clarinet"
+    }
+    if base == "bassoon" {
+        return "bassoon"
+    }
+    if base == "horn" {
+        return "horn"
+    }
+    if base.contains("trumpet") || base == "cornet" || base == "flugelhorn" {
+        return "trumpet"
+    }
+    if base.contains("trombone") {
+        return "trombone"
+    }
+
+    return base
+}
+
+private func splitSuggestionPreferredName(for groupKey: String, fallback: String) -> String {
+    switch groupKey {
+    case "alto saxophone":
+        return "Alto Saxophone"
+    case "tenor saxophone":
+        return "Tenor Saxophone"
+    case "baritone saxophone":
+        return "Baritone Saxophone"
+    case "trumpet":
+        return "Trumpet"
+    case "trombone":
+        return "Trombone"
+    case "flute":
+        return "Flute"
+    case "oboe":
+        return "Oboe"
+    case "clarinet":
+        return "Clarinet"
+    case "bassoon":
+        return "Bassoon"
+    case "horn":
+        return "Horn"
+    case "violin":
+        return "Violin"
+    case "viola":
+        return "Viola"
+    case "cello":
+        return "Cello"
+    default:
+        return fallback.capitalized
+    }
+}
+
+private func splitSuggestionPreferredName(
+    for groupKey: String,
+    fallback: String,
+    matchingConventionFrom sourceName: String
+) -> String {
+    let sourceBase = splitSuggestionBaseName(sourceName)
+    let usesShortSax = sourceBase.contains("sax") && !sourceBase.contains("saxophone")
+
+    if usesShortSax {
+        switch groupKey {
+        case "alto saxophone":
+            return "Alto Sax"
+        case "tenor saxophone":
+            return "Tenor Sax"
+        case "baritone saxophone":
+            return sourceBase.contains("bari") ? "Bari Sax" : "Baritone Sax"
+        default:
+            break
+        }
+    }
+
+    return splitSuggestionPreferredName(for: groupKey, fallback: fallback)
+}
+
+private func splitSuggestionTypicalPartCount(for groupKey: String) -> Int? {
+    switch groupKey {
+    case "flute", "oboe", "bassoon", "violin", "viola", "cello":
+        return 2
+    case "clarinet":
+        return 3
+    case "alto saxophone", "tenor saxophone":
+        return 2
+    case "horn", "trumpet", "trombone":
+        return 4
+    default:
+        return nil
+    }
+}
+
+private func splitSuggestionStartingNumberedName(for name: String) -> String? {
+    let groupKey = splitSuggestionGroupKey(for: name)
+    guard splitSuggestionTypicalPartCount(for: groupKey) != nil else {
+        return nil
+    }
+
+    let preferredName = splitSuggestionPreferredName(
+        for: groupKey,
+        fallback: name,
+        matchingConventionFrom: name
+    )
+    return "\(preferredName) 1"
+}
+
+private func inferredSplitSuggestionEnsemble(from firstSuffix: String?) -> EnsembleType? {
+    guard let firstSuffix, !firstSuffix.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        return nil
+    }
+
+    switch splitSuggestionGroupKey(for: firstSuffix) {
+    case "violin", "viola", "cello":
+        return .orchestra
+    case "alto saxophone", "tenor saxophone", "baritone saxophone":
+        return .jazz
+    case "piccolo", "flute":
+        return .band
+    default:
+        return nil
+    }
+}
+
 // MARK: - Split Naming Stage (Step 2)
 /// Full-window Step 2: lets users set the base filename and per-file name suffixes,
 /// with a large first-page thumbnail for each output file.
@@ -4281,8 +4467,11 @@ struct SplitNamingStageView: View {
     @Binding var customFileNames: [Int: String]
     let onBack: () -> Void
     let onSave: () -> Void
+    let onClear: () -> Void
 
     @FocusState private var focusedField: Int?
+    @State private var instrumentPreviewOffset: CGSize = .zero
+    @State private var instrumentPreviewZoom: CGFloat = 1.0
 
     var numberOfFiles: Int { fileSizes.count }
 
@@ -4291,18 +4480,22 @@ struct SplitNamingStageView: View {
         fileSizes.prefix(fileIndex).reduce(0, +)
     }
 
-    /// Ordered, deduplicated instrument name list built from InstrumentOrders
-    /// (orchestra → band → jazz), capitalised first letter only.
+    /// Ordered, deduplicated instrument name list built from InstrumentOrders.
+    /// The first named file can quietly bias suggestions toward a specific ensemble.
     private var instrumentNames: [String] {
-        var seen = Set<String>()
-        var result: [String] = []
-        for name in InstrumentOrders.orchestra + InstrumentOrders.band + InstrumentOrders.jazz {
-            let key = name.lowercased()
-            if seen.insert(key).inserted {
-                result.append(name.capitalized)
-            }
+        let source: [String]
+        switch inferredSplitSuggestionEnsemble(from: customFileNames[0]) {
+        case .some(.band):
+            source = InstrumentOrders.band
+        case .some(.jazz):
+            source = InstrumentOrders.jazz
+        case .some(.orchestra):
+            source = InstrumentOrders.orchestra
+        case .none:
+            source = InstrumentOrders.orchestra + InstrumentOrders.band + InstrumentOrders.jazz
         }
-        return result
+
+        return splitSuggestionDisplayNames(from: source)
     }
 
     private var baseNameError: String? {
@@ -4350,6 +4543,18 @@ struct SplitNamingStageView: View {
                         .foregroundColor(.secondary)
 
                     Spacer()
+
+                    HStack(spacing: 8) {
+                        Image(systemName: "magnifyingglass")
+                            .foregroundColor(.secondary)
+                        Slider(value: $instrumentPreviewZoom, in: 0.25...3)
+                            .frame(width: 110)
+                        Text(String(format: "%.1fx", Double(instrumentPreviewZoom)))
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .frame(width: 38, alignment: .trailing)
+                    }
+                    .help("Adjusts the crop preview zoom")
                 }
 
                 if let err = baseNameError {
@@ -4381,7 +4586,9 @@ struct SplitNamingStageView: View {
                                 ),
                                 fieldFocus: $focusedField,
                                 instrumentNames: instrumentNames,
-                                allSuffixes: customFileNames
+                                allSuffixes: customFileNames,
+                                instrumentPreviewOffset: $instrumentPreviewOffset,
+                                instrumentPreviewZoom: $instrumentPreviewZoom
                             )
                             .id(fileIndex)
                             if fileIndex < numberOfFiles - 1 { Divider() }
@@ -4404,6 +4611,12 @@ struct SplitNamingStageView: View {
                     Label("Back to Split", systemImage: "chevron.left")
                 }
                 .buttonStyle(.bordered)
+
+                Button(action: onClear) {
+                    Label("Clear", systemImage: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
 
                 Spacer()
 
@@ -4435,8 +4648,21 @@ struct SplitFileNamingRow: View {
     var fieldFocus: FocusState<Int?>.Binding
     let instrumentNames: [String]   // ordered, deduplicated, capitalised
     let allSuffixes: [Int: String]  // snapshot of all rows' current suffixes
+    @Binding var instrumentPreviewOffset: CGSize
+    @Binding var instrumentPreviewZoom: CGFloat
 
     private var isFieldFocused: Bool { fieldFocus.wrappedValue == fileIndex }
+
+    private func moveFocusToNextFile() {
+        let nextIndex = fileIndex + 1
+        fieldFocus.wrappedValue = nextIndex < fileSizes.count ? nextIndex : nil
+    }
+
+    private func acceptSuggestion(_ name: String) {
+        suffix = name
+        selectedSuggestionIndex = nil
+        moveFocusToNextFile()
+    }
 
     // Arrow-key selection index into the suggestions list (nil = field, not dropdown)
     @State private var selectedSuggestionIndex: Int? = nil
@@ -4465,13 +4691,47 @@ struct SplitFileNamingRow: View {
     /// after the most recently used instrument in the rows above this one.
     private var nextExpectedIndex: Int {
         for i in Swift.stride(from: fileIndex - 1, through: 0, by: -1) {
-            let prev = (allSuffixes[i] ?? "").lowercased()
+            let prev = allSuffixes[i] ?? ""
             if !prev.isEmpty,
-               let idx = instrumentNames.firstIndex(where: { $0.lowercased() == prev }) {
-                return min(idx + 1, instrumentNames.count - 1)
+               let nextIndex = indexAfterInstrumentGroup(named: prev) {
+                return nextIndex
             }
         }
         return 0
+    }
+
+    private func indexAfterInstrumentGroup(named name: String) -> Int? {
+        let previousBase = splitSuggestionBaseName(name)
+        let previousKey = splitSuggestionGroupKey(for: name)
+
+        if let exactIndex = instrumentNames.firstIndex(where: { splitSuggestionBaseName($0) == previousBase }) {
+            return indexAfterConsecutiveInstrumentGroup(startingAt: exactIndex, groupKey: previousKey)
+        }
+
+        for idx in instrumentNames.indices where splitSuggestionGroupKey(for: instrumentNames[idx]) == previousKey {
+            return indexAfterConsecutiveInstrumentGroup(startingAt: idx, groupKey: previousKey)
+        }
+
+        return nil
+    }
+
+    private func indexAfterConsecutiveInstrumentGroup(startingAt idx: Int, groupKey: String) -> Int {
+        var nextIndex = idx + 1
+        while nextIndex < instrumentNames.count,
+              splitSuggestionGroupKey(for: instrumentNames[nextIndex]) == groupKey {
+            nextIndex += 1
+        }
+
+        return nextIndex < instrumentNames.count ? nextIndex : 0
+    }
+
+    private func nextInstrumentName(afterGroupKey groupKey: String) -> String? {
+        guard let nextIndex = indexAfterInstrumentGroup(named: groupKey),
+              !instrumentNames.isEmpty else {
+            return nil
+        }
+
+        return instrumentNames[nextIndex]
     }
 
     /// If the nearest previous suffix is "InstrumentName N" (e.g. "Flute 1"),
@@ -4484,6 +4744,29 @@ struct SplitFileNamingRow: View {
             // Must have at least two tokens and last token must be a positive integer
             if parts.count >= 2, let n = Int(parts.last!), n > 0 {
                 let basePart = parts.dropLast().joined(separator: " ")
+                let previousKey = splitSuggestionGroupKey(for: basePart)
+
+                if let maxPartCount = splitSuggestionTypicalPartCount(for: previousKey) {
+                    if n < maxPartCount {
+                        return "\(basePart) \(n + 1)"
+                    }
+
+                    if let nextName = nextInstrumentName(afterGroupKey: previousKey) {
+                        let nextKey = splitSuggestionGroupKey(for: nextName)
+                        let preferredName = splitSuggestionPreferredName(
+                            for: nextKey,
+                            fallback: nextName,
+                            matchingConventionFrom: basePart
+                        )
+                        if splitSuggestionTypicalPartCount(for: nextKey) != nil {
+                            return "\(preferredName) 1"
+                        }
+                        return preferredName
+                    }
+
+                    return nil
+                }
+
                 return "\(basePart) \(n + 1)"
             }
             break  // only consider the closest non-empty row
@@ -4496,14 +4779,15 @@ struct SplitFileNamingRow: View {
         let start = nextExpectedIndex
         let rotated = Array(instrumentNames.suffix(from: start))
                     + Array(instrumentNames.prefix(start))
+        let expanded = suggestionsWithStartingNumbers(from: rotated)
 
         var result: [String]
         if suffix.isEmpty {
-            result = Array(rotated.prefix(8))
+            result = Array(expanded.prefix(8))
         } else {
             let q = suffix.lowercased()
-            let prefixMatches  = rotated.filter { $0.lowercased().hasPrefix(q) }
-            let containsMatches = rotated.filter { $0.lowercased().contains(q) && !$0.lowercased().hasPrefix(q) }
+            let prefixMatches  = expanded.filter { $0.lowercased().hasPrefix(q) }
+            let containsMatches = expanded.filter { $0.lowercased().contains(q) && !$0.lowercased().hasPrefix(q) }
             result = Array((prefixMatches + containsMatches).prefix(8))
         }
 
@@ -4511,13 +4795,43 @@ struct SplitFileNamingRow: View {
         if let numbered = numberedSuggestion {
             let show = suffix.isEmpty || numbered.lowercased().hasPrefix(suffix.lowercased())
             if show {
-                result.removeAll { $0.lowercased() == numbered.lowercased() }
+                let numberedGroup = splitSuggestionGroupKey(for: numbered)
+                result.removeAll {
+                    $0.lowercased() == numbered.lowercased()
+                        || splitSuggestionGroupKey(for: $0) == numberedGroup
+                }
                 result.insert(numbered, at: 0)
                 result = Array(result.prefix(8))
             }
         }
 
         return result
+    }
+
+    private func suggestionsWithStartingNumbers(from names: [String]) -> [String] {
+        var seen = Set<String>()
+        var seenGroups = Set<String>()
+        var result: [String] = []
+
+        for name in names {
+            let groupKey = splitSuggestionGroupKey(for: name)
+            guard seenGroups.insert(groupKey).inserted else { continue }
+
+            appendSuggestion(name, to: &result, seen: &seen)
+
+            if let numbered = splitSuggestionStartingNumberedName(for: name) {
+                appendSuggestion(numbered, to: &result, seen: &seen)
+            }
+        }
+
+        return result
+    }
+
+    private func appendSuggestion(_ suggestion: String, to result: inout [String], seen: inout Set<String>) {
+        let key = suggestion.lowercased()
+        if seen.insert(key).inserted {
+            result.append(suggestion)
+        }
     }
 
     var body: some View {
@@ -4541,18 +4855,18 @@ struct SplitFileNamingRow: View {
             }
 
             // ── Instrument name crop (full-width, zoomed in) ─────────
-            // Shows the top-left corner of the page where instrument names live.
-            // .allowsHitTesting(false) is essential: with .fill content mode the
-            // image's hit-test area can grow beyond its visible frame and silently
-            // absorb clicks meant for the text field below.
+            // Shows a shared crop of each first page. Dragging any row pans all rows.
             if let page = pdfDocument.page(at: firstPageIndex) {
-                PageInstrumentPreview(page: page)
+                PageInstrumentPreview(
+                    page: page,
+                    cropOffset: $instrumentPreviewOffset,
+                    zoom: $instrumentPreviewZoom
+                )
                     .frame(maxWidth: .infinity)
                     .frame(height: 150)
                     .background(Color.white)
                     .clipShape(RoundedRectangle(cornerRadius: 4))
                     .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
-                    .allowsHitTesting(false)
             } else {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.gray.opacity(0.12))
@@ -4595,12 +4909,11 @@ struct SplitFileNamingRow: View {
                         .onKeyPress(.return) {
                             if let idx = selectedSuggestionIndex {
                                 // Accept the highlighted suggestion
-                                suffix = suggestions[idx]
-                                selectedSuggestionIndex = nil
+                                acceptSuggestion(suggestions[idx])
                                 return .handled
                             }
                             // No selection active: advance focus to next field
-                            fieldFocus.wrappedValue = fileIndex + 1
+                            moveFocusToNextFile()
                             return .handled
                         }
                         .onKeyPress(.escape) {
@@ -4643,8 +4956,7 @@ struct SplitFileNamingRow: View {
                                 label: name,
                                 isSelected: selectedSuggestionIndex == idx
                             ) {
-                                suffix = name
-                                selectedSuggestionIndex = nil
+                                acceptSuggestion(name)
                             }
                             if idx < suggestions.count - 1 {
                                 Divider().padding(.leading, 10)
@@ -4696,51 +5008,151 @@ private struct SuggestionButton: View {
 // MARK: - Page Instrument Preview
 struct PageInstrumentPreview: View {
     let page: PDFPage
-    
+    @Binding var cropOffset: CGSize
+    @Binding var zoom: CGFloat
+    @State private var dragStartOffset: CGSize?
+    @State private var pageImage: NSImage?
+    @State private var renderedPageID: ObjectIdentifier?
+
     var body: some View {
-        if let image = renderInstrumentNameArea(from: page) {
-            // Use .fill so the crop fills its parent frame completely.
-            // The instrument name sits at the left of the crop, so any overflow
-            // clipped on the right is just whitespace.
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .clipped()
-        } else {
-            Rectangle()
-                .fill(Color.gray.opacity(0.2))
+        GeometryReader { geometry in
+            let cropSize = cropSize(for: geometry.size)
+            let cropRect = cropRect(for: cropSize)
+
+            ZStack(alignment: .bottomTrailing) {
+                if let image = pageImage {
+                    CroppedPDFPageImage(
+                        image: image,
+                        displayBounds: displayBounds,
+                        cropRect: cropRect,
+                        containerSize: geometry.size
+                    )
+                } else {
+                    Rectangle()
+                        .fill(Color.gray.opacity(0.2))
+                }
+
+                VStack {
+                    HStack {
+                        PageCropOverview(
+                            pageImage: pageImage,
+                            cropRect: cropRect,
+                            displayBounds: displayBounds
+                        )
+                        Spacer()
+                    }
+                    Spacer()
+                }
+                .padding(6)
+
+                Image(systemName: "arrow.up.left.and.down.right")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .padding(7)
+                    .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 5))
+                    .padding(6)
+            }
+            .contentShape(Rectangle())
+            .gesture(dragGesture(containerSize: geometry.size, cropSize: cropSize))
+            .onTapGesture(count: 2) {
+                cropOffset = .zero
+            }
+            .help("Drag to move every instrument preview. Double-click to reset.")
+            .onAppear {
+                ensurePageImage()
+            }
         }
     }
 
-    // Render just the top-left portion where instrument names typically appear
-    private func renderInstrumentNameArea(from page: PDFPage) -> NSImage? {
+    private func dragGesture(containerSize: CGSize, cropSize: CGSize) -> some Gesture {
+        DragGesture(minimumDistance: 2)
+            .onChanged { value in
+                if dragStartOffset == nil {
+                    dragStartOffset = cropOffset
+                }
+
+                let start = dragStartOffset ?? cropOffset
+                let xScale = cropSize.width / max(containerSize.width, 1)
+                let yScale = cropSize.height / max(containerSize.height, 1)
+                let proposed = CGSize(
+                    width: start.width - value.translation.width * xScale,
+                    height: start.height - value.translation.height * yScale
+                )
+
+                cropOffset = boundedCropOffset(proposed, cropSize: cropSize)
+            }
+            .onEnded { value in
+                let start = dragStartOffset ?? cropOffset
+                let xScale = cropSize.width / max(containerSize.width, 1)
+                let yScale = cropSize.height / max(containerSize.height, 1)
+                let proposed = CGSize(
+                    width: start.width - value.translation.width * xScale,
+                    height: start.height - value.translation.height * yScale
+                )
+
+                cropOffset = boundedCropOffset(proposed, cropSize: cropSize)
+                dragStartOffset = nil
+            }
+    }
+
+    private func cropSize(for containerSize: CGSize) -> CGSize {
+        let bounds = displayBounds
+        let clampedZoom = min(max(zoom, 0.25), 3)
+        let baseCropHeight = min(bounds.height, 100)
+        let baseCropWidth = min(bounds.width * 0.4, 200)
+        let cropHeight = min(bounds.height, baseCropHeight / clampedZoom)
+        let cropWidth = min(bounds.width, baseCropWidth / clampedZoom)
+        return CGSize(width: cropWidth, height: cropHeight)
+    }
+
+    private var displayBounds: CGRect {
         let pageBounds = page.bounds(for: .mediaBox)
-        
-        // Calculate the crop area.
-        // Start at the very top of the page (instrument names sit right at the top)
-        // and capture ~1.4 inches (100 pt) of height — enough to show the name box.
-        let cropHeight: CGFloat = 100    // ~1.4 inches
-        let cropWidth: CGFloat = min(pageBounds.width * 0.4, 200) // Left 40%, max 200 pt
-
-        // Account for page rotation
         let rotation = page.rotation
-        var actualBounds = pageBounds
         if rotation == 90 || rotation == 270 {
-            actualBounds = CGRect(x: pageBounds.origin.x, y: pageBounds.origin.y,
-                                width: pageBounds.height, height: pageBounds.width)
+            return CGRect(
+                x: pageBounds.origin.x,
+                y: pageBounds.origin.y,
+                width: pageBounds.height,
+                height: pageBounds.width
+            )
         }
+        return pageBounds
+    }
 
-        // In PDF coords Y grows upward; the top of the page is at origin.y + height.
-        let cropRect = CGRect(
-            x: actualBounds.origin.x,
-            y: actualBounds.origin.y + actualBounds.height - cropHeight,
-            width: cropWidth,
-            height: cropHeight
+    private func boundedCropOffset(_ offset: CGSize, cropSize: CGSize) -> CGSize {
+        let bounds = displayBounds
+        let maxX = max(0, bounds.width - cropSize.width)
+        let maxY = max(0, bounds.height - cropSize.height)
+        return CGSize(
+            width: min(max(offset.width, 0), maxX),
+            height: min(max(offset.height, 0), maxY)
         )
-        
-        // Create image
-        let scale: CGFloat = 2.0 // Retina resolution
-        let imageSize = NSSize(width: cropRect.width * scale, height: cropRect.height * scale)
+    }
+
+    private func cropRect(for cropSize: CGSize) -> CGRect {
+        let actualBounds = displayBounds
+        let offset = boundedCropOffset(cropOffset, cropSize: cropSize)
+
+        return CGRect(
+            x: actualBounds.origin.x + offset.width,
+            y: actualBounds.origin.y + actualBounds.height - cropSize.height - offset.height,
+            width: cropSize.width,
+            height: cropSize.height
+        )
+    }
+
+    private func ensurePageImage() {
+        let pageID = ObjectIdentifier(page)
+        guard pageImage == nil || renderedPageID != pageID else { return }
+        pageImage = renderFullPage(from: page)
+        renderedPageID = pageID
+    }
+
+    private func renderFullPage(from page: PDFPage) -> NSImage? {
+        let pageBounds = page.bounds(for: .mediaBox)
+        let imageBounds = displayBounds
+        let scale: CGFloat = 2.0
+        let imageSize = NSSize(width: imageBounds.width * scale, height: imageBounds.height * scale)
         
         guard let bitmapRep = NSBitmapImageRep(
             bitmapDataPlanes: nil,
@@ -4769,18 +5181,117 @@ struct PageInstrumentPreview: View {
         cgContext.setFillColor(NSColor.white.cgColor)
         cgContext.fill(CGRect(origin: .zero, size: imageSize))
         
-        // Set up transform for cropped area
+        // Set up transform for the full page. Crop movement is handled by SwiftUI.
         cgContext.scaleBy(x: scale, y: scale)
-        cgContext.translateBy(x: -cropRect.origin.x, y: -cropRect.origin.y)
+        cgContext.translateBy(x: -pageBounds.origin.x, y: -pageBounds.origin.y)
         
         // Draw the page
         page.draw(with: .mediaBox, to: cgContext)
         
         NSGraphicsContext.restoreGraphicsState()
         
-        let image = NSImage(size: cropRect.size)
+        let image = NSImage(size: imageBounds.size)
         image.addRepresentation(bitmapRep)
         return image
+    }
+}
+
+private struct CroppedPDFPageImage: View {
+    let image: NSImage
+    let displayBounds: CGRect
+    let cropRect: CGRect
+    let containerSize: CGSize
+
+    private var pageScale: CGFloat {
+        max(
+            containerSize.width / max(cropRect.width, 1),
+            containerSize.height / max(cropRect.height, 1)
+        )
+    }
+
+    private var frameSize: CGSize {
+        CGSize(
+            width: displayBounds.width * pageScale,
+            height: displayBounds.height * pageScale
+        )
+    }
+
+    private var imageOffset: CGSize {
+        let scaledCropWidth = cropRect.width * pageScale
+        let scaledCropHeight = cropRect.height * pageScale
+        let leftInPage = cropRect.minX - displayBounds.minX
+        let topInPage = displayBounds.maxY - cropRect.maxY
+
+        return CGSize(
+            width: (containerSize.width - scaledCropWidth) / 2 - leftInPage * pageScale,
+            height: (containerSize.height - scaledCropHeight) / 2 - topInPage * pageScale
+        )
+    }
+
+    var body: some View {
+        Image(nsImage: image)
+            .resizable()
+            .frame(width: frameSize.width, height: frameSize.height)
+            .offset(x: imageOffset.width, y: imageOffset.height)
+            .frame(width: containerSize.width, height: containerSize.height, alignment: .topLeading)
+            .clipped()
+    }
+}
+
+private struct PageCropOverview: View {
+    let pageImage: NSImage?
+    let cropRect: CGRect
+    let displayBounds: CGRect
+
+    private var thumbnailSize: CGSize {
+        let maxSize = CGSize(width: 74, height: 94)
+        let widthScale = maxSize.width / max(displayBounds.width, 1)
+        let heightScale = maxSize.height / max(displayBounds.height, 1)
+        let scale = min(widthScale, heightScale)
+        return CGSize(
+            width: displayBounds.width * scale,
+            height: displayBounds.height * scale
+        )
+    }
+
+    private var cropIndicatorFrame: CGRect {
+        let size = thumbnailSize
+        let x = (cropRect.minX - displayBounds.minX) / max(displayBounds.width, 1) * size.width
+        let y = (displayBounds.maxY - cropRect.maxY) / max(displayBounds.height, 1) * size.height
+        let width = cropRect.width / max(displayBounds.width, 1) * size.width
+        let height = cropRect.height / max(displayBounds.height, 1) * size.height
+        return CGRect(x: x, y: y, width: width, height: height)
+    }
+
+    var body: some View {
+        let size = thumbnailSize
+        let indicator = cropIndicatorFrame
+
+        ZStack(alignment: .topLeading) {
+            if let pageImage {
+                Image(nsImage: pageImage)
+                    .resizable()
+                    .frame(width: size.width, height: size.height)
+                    .background(Color.white)
+            } else {
+                Rectangle()
+                    .fill(Color.white)
+                    .frame(width: size.width, height: size.height)
+            }
+
+            Rectangle()
+                .stroke(Color.accentColor, lineWidth: 1.5)
+                .background(Color.accentColor.opacity(0.16))
+                .frame(width: max(indicator.width, 3), height: max(indicator.height, 3))
+                .offset(x: indicator.minX, y: indicator.minY)
+        }
+        .frame(width: size.width, height: size.height)
+        .padding(4)
+        .background(.thinMaterial, in: RoundedRectangle(cornerRadius: 5))
+        .overlay(
+            RoundedRectangle(cornerRadius: 5)
+                .stroke(Color.black.opacity(0.18), lineWidth: 1)
+        )
     }
 }
 

@@ -4,34 +4,27 @@
 <dict>
 	<key>files</key>
 	<dict>
+		<key>Resources/.gitignore</key>
+		<data>
+		5R/NLK1eFQpvyhkIcmmZJcG6n1I=
+		</data>
 		<key>Resources/AppIcon.icns</key>
 		<data>
 		oMUes80kwCamSbfoRqfAtH5S6Dw=
 		</data>
 		<key>Resources/Assets.car</key>
 		<data>
-		JTdYTEPOpW7KmQS9BAWpc1aKq0A=
+		crMNQf/hmYSV6rvZH1F4ub2wBHk=
 		</data>
 	</dict>
 	<key>files2</key>
 	<dict>
-		<key>MacOS/Music PDF Manager.debug.dylib</key>
+		<key>Resources/.gitignore</key>
 		<dict>
-			<key>cdhash</key>
+			<key>hash2</key>
 			<data>
-			e+S93a9hYJVo1ypP1fffyBET4Es=
+			kbcmqvqmODM66Kc4vPlMwPtG3VBFMYwUDRD3n043aeE=
 			</data>
-			<key>requirement</key>
-			<string>cdhash H"7be4bdddaf61609568d72a4fd5f7dfc81113e04b"</string>
-		</dict>
-		<key>MacOS/__preview.dylib</key>
-		<dict>
-			<key>cdhash</key>
-			<data>
-			HlvGI2mAkwNPbj21sBnswEyWqWM=
-			</data>
-			<key>requirement</key>
-			<string>cdhash H"1e5bc623698093034f6e3db5b019ecc04c96a963"</string>
 		</dict>
 		<key>Resources/AppIcon.icns</key>
 		<dict>
@@ -44,7 +37,7 @@
 		<dict>
 			<key>hash2</key>
 			<data>
-			KU1z44/9Cg34SPw8dVwUSMdXDtXUyKFf4Y37z+2lk8o=
+			vD9z5LpP0W94KOBRLZ85pA/yMJwXbJGIkaMKuJE9RHY=
 			</data>
 		</dict>
 	</dict>
