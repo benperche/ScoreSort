@@ -27,6 +27,7 @@ class CombineMenuState: ObservableObject {
     @Published var canRemove   = false
     @Published var canMoveUp   = false
     @Published var canMoveDown = false
+    @Published var canGroup    = false
     @Published var hasFiles    = false
     @Published var isPanelOpen = false  // disables menu shortcuts while a file panel is open
 
@@ -34,6 +35,7 @@ class CombineMenuState: ObservableObject {
     var moveUp:                  () -> Void = {}
     var moveDown:                () -> Void = {}
     var selectAll:               () -> Void = {}
+    var group:                   () -> Void = {}
     var selectPrevious:          () -> Void = {}
     var selectNext:              () -> Void = {}
     var selectPreviousExtending: () -> Void = {}
@@ -95,6 +97,12 @@ struct CombinerCommands: Commands {
             Button("Remove Selected Files") { state.removeSelected() }
                 .keyboardShortcut(.delete, modifiers: [])
                 .disabled(state.isPanelOpen || !state.canRemove)
+
+            Divider()
+
+            Button("Group Selected Files") { state.group() }
+                .keyboardShortcut("c", modifiers: [])
+                .disabled(state.isPanelOpen || !state.canGroup)
 
             Divider()
 
@@ -345,10 +353,20 @@ struct CombineView: View {
                         }
                         .buttonStyle(.bordered)
                         .disabled(!canMoveDown)
-                        
+
                         Divider()
                             .frame(height: 20)
-                        
+
+                        Button(action: groupSelected) {
+                            Label("Collate", systemImage: "rectangle.stack")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!canGroup)
+                        .help("Group selected files into a collate set — copies of the whole set are printed interleaved (C)")
+
+                        Divider()
+                            .frame(height: 20)
+
                         Button(action: selectAll) {
                             Text("Select All")
                         }
@@ -390,11 +408,31 @@ struct CombineView: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(combineManager.files) { file in
+                                // If this file is the first member of a collate group,
+                                // emit a group header row before it.
+                                if let gid = file.collateGroupId,
+                                   let group = combineManager.collateGroups[gid],
+                                   combineManager.files.first(where: { $0.collateGroupId == gid })?.id == file.id {
+                                    let groupFiles = combineManager.files.filter { $0.collateGroupId == gid }
+                                    CollateGroupHeaderRow(
+                                        group: group,
+                                        fileCount: groupFiles.count,
+                                        totalPages: groupFiles.reduce(0) { $0 + $1.pageCount },
+                                        onCopiesChanged: { newValue in
+                                            combineManager.updateGroupCopies(id: gid, copies: newValue, undoManager: undoManager)
+                                        },
+                                        onUngroup: {
+                                            combineManager.dissolveGroup(id: gid, undoManager: undoManager)
+                                        }
+                                    )
+                                    Divider()
+                                }
                                 CombineFileRow(
                                     file: file,
                                     isSelected: selectedFiles.contains(file.id),
                                     isFocused: focusedFileId == file.id,
                                     isUnmatched: unmatchedFileIds.contains(file.id),
+                                    isGrouped: file.collateGroupId != nil,
                                     onToggleSelect: { toggleSelection(file.id) },
                                     onCopiesChanged: { newValue in
                                         combineManager.updateCopies(for: file.id, copies: newValue, undoManager: undoManager)
@@ -425,6 +463,9 @@ struct CombineView: View {
                         case KeyEquivalent("a") where press.modifiers == .command:
                             selectAll()
                             return .handled
+                        case KeyEquivalent("c") where press.modifiers == []:
+                            if canGroup { groupSelected(); return .handled }
+                            return .ignored
                         default:
                             return .ignored
                         }
@@ -522,24 +563,44 @@ struct CombineView: View {
         )
     }
     
+    // Expand the selection to include all group-mates of any selected grouped file,
+    // so that move-up/down always treats a collate group as an indivisible block.
+    private func expandForGroups(_ ids: Set<UUID>) -> Set<UUID> {
+        var expanded = ids
+        for id in ids {
+            if let gid = combineManager.files.first(where: { $0.id == id })?.collateGroupId {
+                combineManager.files.filter { $0.collateGroupId == gid }.forEach { expanded.insert($0.id) }
+            }
+        }
+        return expanded
+    }
+
     private var canMoveUp: Bool {
         guard !selectedFiles.isEmpty else { return false }
-        // Enabled if at least one selected item can actually shift up —
-        // i.e. it's not at index 0, and the item above it is not also selected
-        // (which would make them a pinned block).
+        let effective = expandForGroups(selectedFiles)
+        // Enabled if at least one item in the effective set can actually shift up.
         return combineManager.files.indices.contains { index in
-            guard selectedFiles.contains(combineManager.files[index].id) else { return false }
+            guard effective.contains(combineManager.files[index].id) else { return false }
             guard index > 0 else { return false }
-            return !selectedFiles.contains(combineManager.files[index - 1].id)
+            return !effective.contains(combineManager.files[index - 1].id)
         }
     }
 
     private var canMoveDown: Bool {
         guard !selectedFiles.isEmpty else { return false }
+        let effective = expandForGroups(selectedFiles)
         return combineManager.files.indices.contains { index in
-            guard selectedFiles.contains(combineManager.files[index].id) else { return false }
+            guard effective.contains(combineManager.files[index].id) else { return false }
             guard index < combineManager.files.count - 1 else { return false }
-            return !selectedFiles.contains(combineManager.files[index + 1].id)
+            return !effective.contains(combineManager.files[index + 1].id)
+        }
+    }
+
+    /// True when 2+ selected files are all ungrouped — they can be collated together.
+    private var canGroup: Bool {
+        guard selectedFiles.count >= 2 else { return false }
+        return selectedFiles.allSatisfy { id in
+            combineManager.files.first(where: { $0.id == id })?.collateGroupId == nil
         }
     }
     
@@ -655,11 +716,20 @@ struct CombineView: View {
     }
 
     private func moveUp() {
-        combineManager.moveUp(ids: selectedFiles, undoManager: undoManager)
+        // Expand so entire collate groups always move as one block
+        combineManager.moveUp(ids: expandForGroups(selectedFiles), undoManager: undoManager)
     }
 
     private func moveDown() {
-        combineManager.moveDown(ids: selectedFiles, undoManager: undoManager)
+        combineManager.moveDown(ids: expandForGroups(selectedFiles), undoManager: undoManager)
+    }
+
+    private func groupSelected() {
+        guard canGroup else { return }
+        combineManager.createCollateGroup(fileIds: selectedFiles, undoManager: undoManager)
+        selectedFiles = []
+        focusedFileId = nil
+        anchorFileId = nil
     }
 
     private func showRemovalNotice(count: Int = 1, undoManager: UndoManager?) {
@@ -713,6 +783,7 @@ struct CombineView: View {
         menuState.moveUp                  = moveUp
         menuState.moveDown                = moveDown
         menuState.selectAll               = selectAll
+        menuState.group                   = groupSelected
         menuState.selectPrevious          = { navigateSelection(direction: -1, extending: false) }
         menuState.selectNext              = { navigateSelection(direction:  1, extending: false) }
         menuState.selectPreviousExtending = { navigateSelection(direction: -1, extending: true)  }
@@ -721,10 +792,11 @@ struct CombineView: View {
     }
 
     private func syncMenuFlags() {
-        menuState.canRemove  = !selectedFiles.isEmpty
-        menuState.canMoveUp  = canMoveUp
+        menuState.canRemove   = !selectedFiles.isEmpty
+        menuState.canMoveUp   = canMoveUp
         menuState.canMoveDown = canMoveDown
-        menuState.hasFiles   = !combineManager.files.isEmpty
+        menuState.canGroup    = canGroup
+        menuState.hasFiles    = !combineManager.files.isEmpty
     }
 
     // MARK: - Apply Preset
@@ -800,6 +872,8 @@ struct CombineFileRow: View {
     let isSelected: Bool
     let isFocused: Bool
     let isUnmatched: Bool
+    /// True when this file belongs to a collate group (indents row, hides copies stepper).
+    var isGrouped: Bool = false
     let onToggleSelect: () -> Void
     let onCopiesChanged: (Int) -> Void
     let onRemove: () -> Void
@@ -817,51 +891,52 @@ struct CombineFileRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                // Indent grouped files so they visually sit under the group header
+                .padding(.leading, isGrouped ? 14 : 0)
 
             Text("\(file.pageCount)")
                 .frame(width: 80, alignment: .center)
                 .foregroundColor(.secondary)
 
-            HStack(spacing: 4) {
-                Button(action: {
-                    if file.copies > 1 {
-                        onCopiesChanged(file.copies - 1)
-                    } else {
-                        onRemove()
+            // Grouped files don't have their own copy count — the group header owns it
+            if isGrouped {
+                Spacer().frame(width: 100)
+            } else {
+                HStack(spacing: 4) {
+                    Button(action: {
+                        if file.copies > 1 { onCopiesChanged(file.copies - 1) } else { onRemove() }
+                    }) {
+                        Image(systemName: "minus.circle")
                     }
-                }) {
-                    Image(systemName: "minus.circle")
-                }
-                .buttonStyle(.plain)
+                    .buttonStyle(.plain)
 
-                if isEditingCopies {
-                    TextField("", text: $copiesText)
-                        .frame(width: 40)
-                        .multilineTextAlignment(.center)
-                        .font(.system(.body, design: .monospaced))
-                        .focused($copiesFieldFocused)
-                        .onSubmit { commitCopiesEdit() }
-                        .onExitCommand { isEditingCopies = false }
-                        .onTapGesture {}   // prevent tap propagating to row selection
-                } else {
-                    Text("\(file.copies)")
-                        .frame(width: 40, alignment: .center)
-                        .font(.system(.body, design: .monospaced))
-                        .onTapGesture(count: 2) {
-                            copiesText = "\(file.copies)"
-                            isEditingCopies = true
-                            copiesFieldFocused = true
-                        }
-                }
+                    if isEditingCopies {
+                        TextField("", text: $copiesText)
+                            .frame(width: 40)
+                            .multilineTextAlignment(.center)
+                            .font(.system(.body, design: .monospaced))
+                            .focused($copiesFieldFocused)
+                            .onSubmit { commitCopiesEdit() }
+                            .onExitCommand { isEditingCopies = false }
+                            .onTapGesture {}
+                    } else {
+                        Text("\(file.copies)")
+                            .frame(width: 40, alignment: .center)
+                            .font(.system(.body, design: .monospaced))
+                            .onTapGesture(count: 2) {
+                                copiesText = "\(file.copies)"
+                                isEditingCopies = true
+                                copiesFieldFocused = true
+                            }
+                    }
 
-                Button(action: {
-                    onCopiesChanged(file.copies + 1)
-                }) {
-                    Image(systemName: "plus.circle")
+                    Button(action: { onCopiesChanged(file.copies + 1) }) {
+                        Image(systemName: "plus.circle")
+                    }
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+                .frame(width: 100, alignment: .center)
             }
-            .frame(width: 100, alignment: .center)
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -871,18 +946,101 @@ struct CombineFileRow: View {
                 : isUnmatched ? Color.orange.opacity(0.12) : Color.clear
         )
         .contentShape(Rectangle())
-        .onTapGesture {
-            onToggleSelect()
-        }
+        .onTapGesture { onToggleSelect() }
         .onChange(of: copiesFieldFocused) { focused in
             if !focused && isEditingCopies { commitCopiesEdit() }
         }
     }
 
     private func commitCopiesEdit() {
-        if let value = Int(copiesText), value >= 1 {
-            onCopiesChanged(value)
+        if let value = Int(copiesText), value >= 1 { onCopiesChanged(value) }
+        isEditingCopies = false
+    }
+}
+
+// MARK: - Collate Group Header Row
+/// The header row displayed above the files in a collate group.
+/// Shows the group's total-pages-per-set and the group-level copy count.
+struct CollateGroupHeaderRow: View {
+    let group: CollateGroup
+    let fileCount: Int
+    let totalPages: Int
+    var onCopiesChanged: (Int) -> Void
+    var onUngroup: () -> Void
+
+    @State private var isEditingCopies = false
+    @State private var copiesText = ""
+    @FocusState private var copiesFocused: Bool
+
+    var body: some View {
+        HStack {
+            // Name column ─ icon + label + ungroup button
+            HStack(spacing: 6) {
+                Image(systemName: "rectangle.stack.fill")
+                    .foregroundColor(.accentColor)
+                Text("Collate Group")
+                    .fontWeight(.semibold)
+                Text("(\(fileCount) file\(fileCount == 1 ? "" : "s"))")
+                    .foregroundColor(.secondary)
+                    .font(.callout)
+                Spacer()
+                Button(action: onUngroup) {
+                    Image(systemName: "arrow.up.left.and.arrow.down.right")
+                        .imageScale(.small)
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .help("Dissolve group — restore files individually")
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // Pages column ─ total pages for one complete set
+            Text("\(totalPages)")
+                .frame(width: 80, alignment: .center)
+                .foregroundColor(.secondary)
+
+            // Copies column ─ group-level stepper (double-click to type)
+            HStack(spacing: 4) {
+                Button { if group.copies > 1 { onCopiesChanged(group.copies - 1) } } label: {
+                    Image(systemName: "minus.circle")
+                }.buttonStyle(.plain)
+
+                if isEditingCopies {
+                    TextField("", text: $copiesText)
+                        .frame(width: 40)
+                        .multilineTextAlignment(.center)
+                        .font(.system(.body, design: .monospaced))
+                        .focused($copiesFocused)
+                        .onSubmit { commitEdit() }
+                        .onExitCommand { isEditingCopies = false }
+                        .onTapGesture {}
+                } else {
+                    Text("\(group.copies)")
+                        .frame(width: 40, alignment: .center)
+                        .font(.system(.body, design: .monospaced))
+                        .onTapGesture(count: 2) {
+                            copiesText = "\(group.copies)"
+                            isEditingCopies = true
+                            copiesFocused = true
+                        }
+                }
+
+                Button { onCopiesChanged(group.copies + 1) } label: {
+                    Image(systemName: "plus.circle")
+                }.buttonStyle(.plain)
+            }
+            .frame(width: 100, alignment: .center)
         }
+        .padding(.horizontal)
+        .padding(.vertical, 6)
+        .background(Color.accentColor.opacity(0.07))
+        .onChange(of: copiesFocused) { focused in
+            if !focused && isEditingCopies { commitEdit() }
+        }
+    }
+
+    private func commitEdit() {
+        if let value = Int(copiesText), value >= 1 { onCopiesChanged(value) }
         isEditingCopies = false
     }
 }
@@ -1544,173 +1702,269 @@ class EnsemblePresetStore: ObservableObject {
 }
 
 // MARK: - Combine File Model
+
+/// A named group of files whose pages are interleaved (collated) when combining.
+/// e.g. 4 copies of [Perc1, Perc2, Timpani] → Perc1, Perc2, Timp, Perc1, Perc2, Timp, …
+struct CollateGroup: Identifiable, Equatable {
+    let id: UUID
+    var copies: Int
+}
+
 struct CombineFile: Identifiable, Equatable {
     let id = UUID()
     let url: URL
     let name: String
     let pageCount: Int
     var copies: Int
+    /// Non-nil when this file is part of a collate group.
+    var collateGroupId: UUID? = nil
 }
 
 // MARK: - Combine Manager
 class CombineManager: ObservableObject {
     @Published var files: [CombineFile] = []
+    @Published var collateGroups: [UUID: CollateGroup] = [:]
 
-    var totalFiles: Int { files.reduce(0) { $0 + $1.copies } }
-    var totalPages: Int { files.reduce(0) { $0 + ($1.pageCount * $1.copies) } }
+    // ── Totals ────────────────────────────────────────────────────────────────
+    // Collate groups: N copies of the whole set  (fileCount × copies pages).
+    // Standalone files: copies × their own page count.
+    var totalFiles: Int {
+        var count = 0
+        var i = 0
+        while i < files.count {
+            if let gid = files[i].collateGroupId, let g = collateGroups[gid] {
+                var n = 0
+                while i < files.count && files[i].collateGroupId == gid { n += 1; i += 1 }
+                count += n * g.copies
+            } else {
+                count += files[i].copies; i += 1
+            }
+        }
+        return count
+    }
 
-    // Snapshot-based undo: captures the post-action state so the undo handler
-    // can register a redo by snapshotting back the other way.
-    private func registerUndo(undoManager: UndoManager?, actionName: String, restoring snapshot: [CombineFile]) {
-        let postActionState = files
+    var totalPages: Int {
+        var count = 0
+        var i = 0
+        while i < files.count {
+            if let gid = files[i].collateGroupId, let g = collateGroups[gid] {
+                var p = 0
+                while i < files.count && files[i].collateGroupId == gid { p += files[i].pageCount; i += 1 }
+                count += p * g.copies
+            } else {
+                count += files[i].pageCount * files[i].copies; i += 1
+            }
+        }
+        return count
+    }
+
+    // ── Undo ──────────────────────────────────────────────────────────────────
+    // Snapshots both files and collateGroups so undo/redo always restores a
+    // consistent pair.
+    private func registerUndo(undoManager: UndoManager?, actionName: String,
+                              restoringFiles beforeFiles: [CombineFile],
+                              restoringGroups beforeGroups: [UUID: CollateGroup]) {
+        let postFiles  = files
+        let postGroups = collateGroups
         undoManager?.setActionName(actionName)
         undoManager?.registerUndo(withTarget: self) { manager in
-            manager.files = snapshot
-            manager.registerUndo(undoManager: undoManager, actionName: actionName, restoring: postActionState)
+            manager.files         = beforeFiles
+            manager.collateGroups = beforeGroups
+            manager.registerUndo(undoManager: undoManager, actionName: actionName,
+                                 restoringFiles: postFiles, restoringGroups: postGroups)
         }
     }
 
+    // ── File management ───────────────────────────────────────────────────────
     func addFiles(urls: [URL], undoManager: UndoManager?) {
-        let before = files
+        let bf = files; let bg = collateGroups
         for url in urls {
             guard let document = PDFDocument(url: url) else { continue }
             files.append(CombineFile(url: url, name: url.lastPathComponent, pageCount: document.pageCount, copies: 1))
         }
-        if files.count != before.count {
-            registerUndo(undoManager: undoManager, actionName: "Add Files", restoring: before)
+        if files.count != bf.count {
+            registerUndo(undoManager: undoManager, actionName: "Add Files",
+                         restoringFiles: bf, restoringGroups: bg)
         }
     }
 
     func removeFiles(ids: Set<UUID>, undoManager: UndoManager?) {
-        let before = files
+        let bf = files; let bg = collateGroups
         files.removeAll { ids.contains($0.id) }
-        registerUndo(undoManager: undoManager, actionName: "Remove File", restoring: before)
+        // Dissolve any group that now has fewer than 2 members
+        var toDissolve: [UUID] = []
+        for gid in collateGroups.keys {
+            if files.filter({ $0.collateGroupId == gid }).count < 2 { toDissolve.append(gid) }
+        }
+        for gid in toDissolve {
+            for i in files.indices where files[i].collateGroupId == gid { files[i].collateGroupId = nil }
+            collateGroups.removeValue(forKey: gid)
+        }
+        registerUndo(undoManager: undoManager, actionName: "Remove File",
+                     restoringFiles: bf, restoringGroups: bg)
     }
 
     func clearAll(undoManager: UndoManager?) {
-        let before = files
+        let bf = files; let bg = collateGroups
         files.removeAll()
-        registerUndo(undoManager: undoManager, actionName: "Clear All", restoring: before)
+        collateGroups.removeAll()
+        registerUndo(undoManager: undoManager, actionName: "Clear All",
+                     restoringFiles: bf, restoringGroups: bg)
     }
 
     func updateCopies(for id: UUID, copies: Int, undoManager: UndoManager?) {
-        let before = files
+        let bf = files; let bg = collateGroups
         if let index = files.firstIndex(where: { $0.id == id }) {
             files[index].copies = max(1, copies)
         }
-        registerUndo(undoManager: undoManager, actionName: "Change Copies", restoring: before)
+        registerUndo(undoManager: undoManager, actionName: "Change Copies",
+                     restoringFiles: bf, restoringGroups: bg)
     }
 
+    // ── Reordering ────────────────────────────────────────────────────────────
     func moveUp(ids: Set<UUID>, undoManager: UndoManager?) {
-        let before = files
-        // Process ascending (lowest index first) so adjacent selected items
-        // move as a block rather than passing through each other.
-        let selectedIndices = files.indices
-            .filter { ids.contains(files[$0].id) }
-            .sorted()
+        let bf = files; let bg = collateGroups
+        // Process ascending so adjacent items move as a block.
+        let selectedIndices = files.indices.filter { ids.contains(files[$0].id) }.sorted()
         for index in selectedIndices {
             guard index > 0 else { continue }
             guard !ids.contains(files[index - 1].id) else { continue }
             files.swapAt(index, index - 1)
         }
-        if files.map(\.id) != before.map(\.id) {
-            registerUndo(undoManager: undoManager, actionName: "Move Up", restoring: before)
+        if files.map(\.id) != bf.map(\.id) {
+            registerUndo(undoManager: undoManager, actionName: "Move Up",
+                         restoringFiles: bf, restoringGroups: bg)
         }
     }
 
     func moveDown(ids: Set<UUID>, undoManager: UndoManager?) {
-        let before = files
-        // Process descending (highest index first) for the same block-preservation reason.
-        let selectedIndices = files.indices
-            .filter { ids.contains(files[$0].id) }
-            .sorted()
-            .reversed()
+        let bf = files; let bg = collateGroups
+        // Process descending for the same block-preservation reason.
+        let selectedIndices = files.indices.filter { ids.contains(files[$0].id) }.sorted().reversed()
         for index in selectedIndices {
             guard index < files.count - 1 else { continue }
             guard !ids.contains(files[index + 1].id) else { continue }
             files.swapAt(index, index + 1)
         }
-        if files.map(\.id) != before.map(\.id) {
-            registerUndo(undoManager: undoManager, actionName: "Move Down", restoring: before)
+        if files.map(\.id) != bf.map(\.id) {
+            registerUndo(undoManager: undoManager, actionName: "Move Down",
+                         restoringFiles: bf, restoringGroups: bg)
         }
     }
-    
+
+    // ── Collate groups ────────────────────────────────────────────────────────
+    /// Groups the given files into a collate set, pulling them together
+    /// contiguously at the position of the first selected file.
+    func createCollateGroup(fileIds: Set<UUID>, undoManager: UndoManager?) {
+        let bf = files; let bg = collateGroups
+        let orderedIndices = files.indices.filter { fileIds.contains(files[$0].id) }
+        guard orderedIndices.count >= 2 else { return }
+
+        let insertionIndex = orderedIndices.first!
+        let groupFilesInOrder = orderedIndices.map { files[$0] }
+
+        // Remove in reverse order so lower indices stay stable
+        for idx in orderedIndices.reversed() { files.remove(at: idx) }
+
+        // All removed files had index >= insertionIndex, so insertionIndex is unchanged
+        let newGroupId = UUID()
+        for (offset, var file) in groupFilesInOrder.enumerated() {
+            file.collateGroupId = newGroupId
+            files.insert(file, at: insertionIndex + offset)
+        }
+        collateGroups[newGroupId] = CollateGroup(id: newGroupId, copies: 1)
+
+        registerUndo(undoManager: undoManager, actionName: "Group Files",
+                     restoringFiles: bf, restoringGroups: bg)
+    }
+
+    /// Dissolves a collate group, restoring its files as independent entries.
+    func dissolveGroup(id: UUID, undoManager: UndoManager?) {
+        let bf = files; let bg = collateGroups
+        for i in files.indices where files[i].collateGroupId == id { files[i].collateGroupId = nil }
+        collateGroups.removeValue(forKey: id)
+        registerUndo(undoManager: undoManager, actionName: "Ungroup Files",
+                     restoringFiles: bf, restoringGroups: bg)
+    }
+
+    func updateGroupCopies(id: UUID, copies: Int, undoManager: UndoManager?) {
+        let bf = files; let bg = collateGroups
+        collateGroups[id]?.copies = max(1, copies)
+        registerUndo(undoManager: undoManager, actionName: "Change Copies",
+                     restoringFiles: bf, restoringGroups: bg)
+    }
+
+    // ── PDF output ────────────────────────────────────────────────────────────
+    // Standalone files: all copies of that file together (existing behaviour).
+    // Collate groups: the set of files repeats N times interleaved —
+    //   [file1, file2, file3] × 4 → f1,f2,f3, f1,f2,f3, f1,f2,f3, f1,f2,f3
     func createCombinedPDF(to url: URL, addBlankPages: Bool, completion: PDFAlertHandler) {
-        let combinedDocument = PDFDocument()
-        var currentPageIndex = 0
+        let doc = PDFDocument()
+        var idx = 0
 
-        for file in files {
-            guard let sourceDocument = PDFDocument(url: file.url) else { continue }
-
-            for _ in 0..<file.copies {
-                // Add all pages from this document
-                for pageIndex in 0..<sourceDocument.pageCount {
-                    if let page = sourceDocument.page(at: pageIndex) {
-                        combinedDocument.insert(page, at: currentPageIndex)
-                        currentPageIndex += 1
-                    }
-                }
-
-                // Add blank page if needed (odd page count and blank pages enabled)
-                if addBlankPages && sourceDocument.pageCount % 2 == 1 {
-                    if let blankPage = createBlankPage() {
-                        combinedDocument.insert(blankPage, at: currentPageIndex)
-                        currentPageIndex += 1
-                    }
-                }
+        func addPages(from file: CombineFile) {
+            guard let src = PDFDocument(url: file.url) else { return }
+            for p in 0..<src.pageCount {
+                if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
+            }
+            if addBlankPages && src.pageCount % 2 == 1 {
+                if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
             }
         }
 
-        if combinedDocument.write(to: url) {
+        var i = 0
+        while i < files.count {
+            if let gid = files[i].collateGroupId, let group = collateGroups[gid] {
+                var groupFiles: [CombineFile] = []
+                while i < files.count && files[i].collateGroupId == gid { groupFiles.append(files[i]); i += 1 }
+                for _ in 0..<group.copies { for f in groupFiles { addPages(from: f) } }
+            } else {
+                let file = files[i]; i += 1
+                for _ in 0..<file.copies { addPages(from: file) }
+            }
+        }
+
+        if doc.write(to: url) {
             completion("PDF Created Successfully",
-                       "Combined PDF with \(currentPageIndex) pages saved to:\n\(url.path)",
-                       false)
+                       "Combined PDF with \(idx) pages saved to:\n\(url.path)", false)
         } else {
             completion("Error", "Failed to create PDF", true)
         }
     }
-    
+
     func openInPreview(addBlankPages: Bool, onError: PDFAlertHandler) {
-        let combinedDocument = PDFDocument()
-        var currentPageIndex = 0
+        let doc = PDFDocument()
+        var idx = 0
 
-        for file in files {
-            guard let sourceDocument = PDFDocument(url: file.url) else { continue }
-
-            for _ in 0..<file.copies {
-                // Add all pages from this document
-                for pageIndex in 0..<sourceDocument.pageCount {
-                    if let page = sourceDocument.page(at: pageIndex) {
-                        combinedDocument.insert(page, at: currentPageIndex)
-                        currentPageIndex += 1
-                    }
-                }
-
-                // Add blank page if needed
-                if addBlankPages && sourceDocument.pageCount % 2 == 1 {
-                    if let blankPage = createBlankPage() {
-                        combinedDocument.insert(blankPage, at: currentPageIndex)
-                        currentPageIndex += 1
-                    }
-                }
+        func addPages(from file: CombineFile) {
+            guard let src = PDFDocument(url: file.url) else { return }
+            for p in 0..<src.pageCount {
+                if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
+            }
+            if addBlankPages && src.pageCount % 2 == 1 {
+                if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
             }
         }
 
-        // Save to temporary file
-        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedForPrint.pdf")
-
-        guard combinedDocument.write(to: tempURL) else {
-            onError("Error", "Failed to create temporary PDF", true)
-            return
+        var i = 0
+        while i < files.count {
+            if let gid = files[i].collateGroupId, let group = collateGroups[gid] {
+                var groupFiles: [CombineFile] = []
+                while i < files.count && files[i].collateGroupId == gid { groupFiles.append(files[i]); i += 1 }
+                for _ in 0..<group.copies { for f in groupFiles { addPages(from: f) } }
+            } else {
+                let file = files[i]; i += 1
+                for _ in 0..<file.copies { addPages(from: file) }
+            }
         }
 
-        // Open in Preview
+        let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedForPrint.pdf")
+        guard doc.write(to: tempURL) else { onError("Error", "Failed to create temporary PDF", true); return }
         NSWorkspace.shared.open(tempURL)
     }
-    
+
     private func createBlankPage() -> PDFPage? {
-        // Create a blank Letter-size page
-        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792) // 8.5" x 11" at 72 DPI
+        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)
         let blankPage = PDFPage()
         blankPage.setBounds(pageRect, for: .mediaBox)
         return blankPage
