@@ -1,5 +1,5 @@
 # Music PDF Manager — Code Reference
-> Single file: `ScanReorienterApp_complete.swift` (~3926 lines)
+> Single file: `ScanReorienterApp_complete.swift` (~4 500 lines)
 > Xcode project: "Music PDF Wrangler"
 
 ---
@@ -9,75 +9,288 @@
 ```
 MusicPDFManagerApp (@main)
   └── AppDelegate  — quits on window close
-  └── ContentView  — TabView (tags 0–3)
-        ├── 0: CombineView
-        ├── 1: RenamerView
-        ├── 2: SplitView
-        └── 3: RotateView
-  └── Window("about")  — AboutView (custom About panel, version 0.2)
+  └── WindowGroup  — ContentView
+        └── ContentView  — TabView (tags 0–3)
+              ├── 0: CombineView
+              ├── 1: RenamerView
+              ├── 2: SplitView
+              └── 3: RotateView
+  └── Settings  — AppPreferencesView (⌘,)
+        ├── Tab "Combine Presets"  — CombinerPreferencesView
+        └── Tab "Renamer"          — RenamerPreferencesView (placeholder)
+  └── Window("about")  — AboutView (custom About panel)
 ```
 
 Window min size: 900×700.
+
+**App-level shared state** (held as `@StateObject` on `MusicPDFManagerApp`, injected via `.environmentObject()`):
+- `AppState` — `selectedTab`, `showingKeyboardHelp`, `combineMenuState`
+- `RenamerManager` — used by both `RenamerView` and `AppPreferencesView`
+- `EnsemblePresetStore` — used by `CombineView`, `PresetSidebarView`, `CombinerPreferencesView`
 
 ### Menu Bar Commands
 
 | Struct | Menu | Purpose |
 |--------|------|---------|
 | `NavigateCommands` | Navigate | Tab switching (⌘1–⌘4) |
-| `CombinerCommands` | Combiner | File list shortcuts (arrow keys, ⌘↑/↓, ⌫, ⌘A) |
+| `CombinerCommands` | Combiner | File list shortcuts (arrow keys, ⌘↑/↓, ⌫, ⌘A, C) |
 | `HelpCommands` | Help | Opens `ShortcutsHelpView` sheet |
 
 `CommandGroup(replacing: .appInfo)` replaces the system About panel with a button that calls `openWindow(id: "about")`, opening `AboutView` as a separate `Window` scene.
 
-**`CombineCommands`** (plain struct, not `Commands`) — passed via `FocusedValues` (key: `CombineCommandsKey`) using `.focusedSceneValue(\.combineCommands, …)` on `CombineView`. `CombinerCommands` reads it with `@FocusedSceneValue`. All `can*` flags are gated on `appState.selectedTab == 0` so shortcuts are inert on other tabs.
+**`CombineMenuState`** — `ObservableObject` shared between `CombineView` (writes) and `CombinerCommands` (reads). Carries `canRemove`, `canMoveUp`, `canMoveDown`, `canGroup`, `hasFiles`, `isPanelOpen` flags plus action closures (`removeSelected`, `moveUp`, `moveDown`, `group`, `selectAll`, navigation closures). `CombineView.syncMenuFlags()` + `syncMenuClosures()` keep it in sync via `.onAppear` and `.onChange`.
 
-**`AppState`** gains `showingKeyboardHelp: Bool` — toggled by `HelpCommands` and the ⌨ toolbar button in `CombineView`. `ContentView` presents `ShortcutsHelpView` as `.sheet(isPresented:)` off this flag.
-
-**`ShortcutsHelpView`** — modal sheet listing all shortcuts grouped into Navigation, File Management, Tabs, and Renamer sections.
+**`ShortcutsHelpView`** — modal sheet listing all shortcuts grouped by Combine navigation, Combine file management, Combine collate groups, Combine presets, Tabs, Split/Rotate, and Renamer.
 
 ---
 
 ## Tab 0 — Combine PDFs
 
-**View:** `CombineView`
-**ViewModel:** `CombineManager: ObservableObject`
-**Model:** `CombineFile: Identifiable` (id, url, name, pageCount, copies: Int)
-**Row:** `CombineFileRow` (gains `isFocused: Bool` for stronger highlight on keyboard cursor row)
+**View:** `CombineView`  
+**ViewModel:** `CombineManager: ObservableObject`  
+**Models:** `CombineFile`, `CollateGroup`  
+**Rows:** `CombineFileRow`, `CollateGroupHeaderRow`  
+**Sidebar:** `PresetSidebarView` (toggled by the Presets toolbar button)
 
-### CombineManager key methods
-| Method | Purpose |
-|--------|---------|
-| `addFiles(urls:undoManager:)` | Reads PDFs via PDFKit, appends CombineFile |
-| `removeFiles(ids:undoManager:)` | Removes by UUID set |
-| `updateCopies(for:copies:undoManager:)` | Clamps to min 1 |
-| `moveUp/Down(ids:undoManager:)` | Multi-select block move via `swapAt` |
-| `clearAll(undoManager:)` | Removes all files |
-| `createCombinedPDF(to:addBlankPages:completion:)` | Writes to URL, calls `completion` with result |
-| `openInPreview(addBlankPages:onError:)` | Writes temp file → NSWorkspace.open; calls `onError` on failure only |
+### Data models
 
-All mutating methods take an `undoManager: UndoManager?` and use snapshot-based undo (captures pre-action state; registers undo handler that also registers redo).
+```swift
+struct CombineFile: Identifiable, Equatable {
+    let id: UUID          // auto-generated
+    let url: URL
+    let name: String      // url.lastPathComponent (includes .pdf extension)
+    let pageCount: Int
+    var copies: Int       // ignored when collateGroupId is set
+    var collateGroupId: UUID?   // non-nil → file belongs to a collate group
+}
 
-`createCombinedPDF` and `openInPreview` take a `PDFAlertHandler` callback — they never show UI directly. The caller (the view) is responsible for presenting any alert. See `PDFAlertHandler` in Shared Infrastructure.
+/// A named set of files whose pages are interleaved when combining.
+/// e.g. 4 copies of [Perc 1, Perc 2, Timpani] →
+///      P1,P2,T, P1,P2,T, P1,P2,T, P1,P2,T
+struct CollateGroup: Identifiable, Equatable {
+    let id: UUID
+    var copies: Int
+}
+```
 
-**Computed:** `totalFiles` = sum of copies; `totalPages` = sum of pageCount×copies.
+### CombineManager
 
-**Blank page logic:** If `addBlankPages` and file has odd pageCount, insert a blank PDFPage after its last copy's pages.
+```swift
+@Published var files: [CombineFile] = []
+@Published var collateGroups: [UUID: CollateGroup] = [:]
+```
 
-### CombineView keyboard navigation state
+**Undo:** `registerUndo(undoManager:actionName:restoringFiles:restoringGroups:)` snapshots **both** arrays together so undo/redo always restores a consistent state. All mutating methods capture `let bf = files; let bg = collateGroups` before mutation.
+
+#### File management methods
+| Method | Notes |
+|--------|-------|
+| `addFiles(urls:undoManager:)` | Reads PDFs via PDFKit, appends `CombineFile` with `copies=1`, no group |
+| `removeFiles(ids:undoManager:)` | Removes files; auto-dissolves any group that drops below 2 members |
+| `updateCopies(for:copies:undoManager:)` | Clamps to min 1; applies to standalone file only |
+| `clearAll(undoManager:)` | Clears both `files` and `collateGroups` |
+
+#### Reordering
+`moveUp/Down(ids:undoManager:)` — same `swapAt` block-move logic as before, but `CombineView` always expands the passed set via `expandForGroups()` first so collate groups move as an indivisible unit.
+
+#### Collate group methods
+| Method | Notes |
+|--------|-------|
+| `createCollateGroup(fileIds:undoManager:)` | Pulls selected files together contiguously at the position of the first selected file, assigns them a shared `UUID`, stores a new `CollateGroup(copies:1)` |
+| `dissolveGroup(id:undoManager:)` | Clears `collateGroupId` on all member files; removes group from dictionary |
+| `updateGroupCopies(id:copies:undoManager:)` | Clamps to min 1; applies to the group's copy count |
+
+#### Computed properties
+`totalFiles` and `totalPages` iterate `files` in a single pass, detecting group boundaries by watching for `collateGroupId` changes:
+- **Standalone file:** contributes `file.copies` / `file.pageCount × file.copies`
+- **Group:** contributes `memberCount × group.copies` / `sumOfMemberPages × group.copies`
+
+#### PDF output
+`createCombinedPDF(to:addBlankPages:completion:)` and `openInPreview(addBlankPages:onError:)` both use a nested `addPages(from:)` helper and a single `while i < files.count` loop that detects groups:
+- **Standalone:** `for _ in 0..<file.copies { addPages(from: file) }`
+- **Group:** collect all consecutive files with the same `collateGroupId`, then `for _ in 0..<group.copies { for f in groupFiles { addPages(from: f) } }`
+
+Blank-page logic is unchanged: if `addBlankPages` and a file has an odd `pageCount`, a blank `PDFPage` is inserted after its pages.
+
+### CombineView
+
+#### Key state
 | Property | Type | Purpose |
 |----------|------|---------|
-| `selectedFiles` | `Set<UUID>` | Currently selected (checked) files |
-| `focusedFileId` | `UUID?` | Keyboard cursor (highlighted row) |
+| `selectedFiles` | `Set<UUID>` | Currently selected file IDs |
+| `focusedFileId` | `UUID?` | Keyboard cursor row |
 | `anchorFileId` | `UUID?` | Shift-range selection anchor |
 | `listFocused` | `Bool` (@FocusState) | Whether ScrollView has key focus |
-| `removalNoticeVisible` | `Bool` | Undo banner visibility |
-| `removalNoticeCount` | `Int` | File count for banner text (singular/plural) |
+| `showPresetSidebar` | `Bool` | Controls sidebar slide-in |
+| `unmatchedFileIds` | `Set<UUID>` | Files not matched by last preset apply (orange tint) |
 
-**`navigateSelection(direction:extending:)`** — moves `focusedFileId` by ±1; if `extending` is true, expands `selectedFiles` between `anchorFileId` and new cursor; otherwise replaces selection with just the new item and resets anchor.
+#### Collate group helpers
+**`expandForGroups(_ ids: Set<UUID>) -> Set<UUID>`** — for each ID that belongs to a group, adds all group-mates to the set. Used by `moveUp()`, `moveDown()`, `canMoveUp`, `canMoveDown` so groups always move as a block.
 
-**Keyboard shortcuts (in-view):** The `ScrollView` carries `.focusable()` + `.focused($listFocused)` + `.onKeyPress` for ↑/↓ (plain and ⇧). Cmd+↑/↓ and ⌫ are handled exclusively via `CombinerCommands` menu shortcuts (which take priority over `onKeyPress`). `listFocused` is set to `true` on any row tap so navigation is immediately available after a click.
+**`canGroup: Bool`** — `selectedFiles.count >= 2` and no selected file already has a `collateGroupId`.
 
-**Removal notice:** shown by `showRemovalNotice(count:undoManager:)` — called from both the per-row minus button (count=1) and `removeSelected()` (count = selection size). Auto-dismisses after 5 s; Undo button dismisses immediately and invokes `undoManager.undo()`.
+**`groupSelected()`** — calls `combineManager.createCollateGroup(fileIds:selectedFiles)`, then clears selection/focus.
+
+#### List rendering
+The `ForEach(combineManager.files)` body uses a `@ViewBuilder` to optionally emit a `CollateGroupHeaderRow` + `Divider` before each file that is the **first** member of its group, then a `CombineFileRow` (with `isGrouped: file.collateGroupId != nil`).
+
+"First member" is detected by: `combineManager.files.first(where: { $0.collateGroupId == gid })?.id == file.id`.
+
+#### Navigation
+**`navigateSelection(direction:extending:)`** — navigates the flat `combineManager.files` array (group headers are virtual and not part of navigation). Selecting a grouped file and pressing ⌘↑/↓ triggers `moveUp/Down` via `expandForGroups`, moving the whole group.
+
+**Keyboard shortcuts (in-view `.onKeyPress`):** ↑/↓ (navigate), ⇧↑/⇧↓ (extend), ⌘A (select all), `c` (group — only `.handled` if `canGroup`). ⌘↑/↓ and ⌫ come from `CombinerCommands`.
+
+#### Removal notice
+`showRemovalNotice(count:undoManager:)` — auto-dismisses after 5 s; Undo button invokes `undoManager.undo()`.
+
+### CombineFileRow
+
+```swift
+struct CombineFileRow: View {
+    let file: CombineFile
+    let isSelected: Bool
+    let isFocused: Bool
+    let isUnmatched: Bool       // orange tint when preset apply left this unmatched
+    var isGrouped: Bool = false // hides copies stepper, adds 14pt leading indent
+    let onToggleSelect: () -> Void
+    let onCopiesChanged: (Int) -> Void
+    let onRemove: () -> Void
+}
+```
+
+When `isGrouped`: copies area is replaced with `Spacer().frame(width: 100)`. Minus at `copies==1` still calls `onRemove` (which will dissolve the group if it drops below 2 members).
+
+### CollateGroupHeaderRow
+
+Shown before the first file of each collate group. Columns mirror `CombineFileRow`:
+- **Name area:** stack icon + "Collate Group (N files)" label + ↗ ungroup button
+- **Pages (80pt):** sum of member file page counts (= pages for one complete set)
+- **Copies (100pt):** `CollateGroup.copies` stepper with double-click-to-type inline editing
+
+`onUngroup` calls `combineManager.dissolveGroup(id:undoManager:)`.
+
+---
+
+## Tab 0 — Ensemble Presets subsystem
+
+### Data model
+
+```swift
+struct PresetPart: Identifiable, Codable, Equatable {
+    let id: UUID
+    var name: String
+    var copies: Int
+}
+
+struct EnsemblePreset: Identifiable, Codable, Equatable {
+    let id: UUID
+    var name: String
+    var parts: [PresetPart]
+}
+```
+
+### EnsemblePresetStore
+
+`ObservableObject` held at app level, injected as `@EnvironmentObject`.
+
+```swift
+@Published var presets: [EnsemblePreset] = []
+```
+
+**Persistence:** JSON at `~/Library/Application Support/Music PDF Manager/ensemble-presets.json`. Loaded on `init`; saved by `save()` (called from all mutating methods).
+
+**Key methods:**
+| Method | Notes |
+|--------|-------|
+| `addPreset(name:parts:)` | Appends a new preset with an explicit parts array |
+| `updatePreset(_:)` | Replaces by ID |
+| `deletePreset(id:)` | Removes by ID |
+| `movePresets(from:to:)` | `IndexSet`-based reorder for drag support in `List` |
+
+**No auto-seed.** On first launch the store is empty; `CombinerPreferencesView` and `PresetSidebarView` both show an empty-state prompt directing the user to create a preset.
+
+**Built-in templates** (static computed vars, not stored):
+- `EnsemblePresetStore.windBandTemplate` — score + wind/brass/perc/strings
+- `EnsemblePresetStore.jazzTemplate` — score + saxes + brass + rhythm
+- `EnsemblePresetStore.orchestraTemplate` — score + woodwinds + brass + perc + strings
+
+### PresetSidebarView
+
+Slide-in panel (width 260 pt) on the right of `CombineView`, toggled by the Presets toolbar button with a `.move(edge:.trailing).combined(with:.opacity)` transition.
+
+State:
+- `selectedPresetId: UUID?` — drives dropdown picker
+- `editingParts: [PresetPart]` — local working copy of selected preset's parts
+- `isDirty: Bool` — `editingParts != selectedPreset.parts`
+- `applyResult: (matched, unmatched, unmatchedPartNames)?` — shown as colour-coded summary after apply
+
+**Empty state:** when no presets exist, shows a "Create your first preset" button that presents `NewPresetSheet`.
+
+**Apply button** calls `CombineView.applyPreset(parts:)` via the `onApply` closure. Result summary shows green (matched) and orange (unmatched) counts. Parts that were unmatched are highlighted with `Color.orange.opacity(0.12)` in `PresetPartRow`.
+
+**Revert/Save:** visible when `isDirty`. Revert discards `editingParts`; Save calls `presetStore.updatePreset(_:)`.
+
+### CombinerPreferencesView
+
+Native `Settings` window tab (via SwiftUI `Settings` scene) — `HSplitView` with a left preset list and a right parts editor.
+
+- **Left panel:** `List` with `ForEach` + `.onMove` for drag reorder; Up/Down chevron buttons for keyboard reorder; + and − buttons.
+- **Right panel:** parts list using `PresetPartRow` with explicit `Binding(get:set:)` closures (since `editingPreset` is `@State EnsemblePreset?`). "Reset to Template…" is a `Menu` offering all three templates. "New Preset" uses `NewPresetSheet`.
+- **Sync fix:** `.onChange(of: presetStore.presets)` reloads `editingPreset` when `fresh != editingPreset` to catch saves made in the sidebar — guarded to avoid a loop from self-edits.
+
+### NewPresetSheet
+
+Modal sheet presenting three `TemplateCard` buttons (Wind Band / Jazz Band / Orchestra) and a name text field. Calls `presetStore.addPreset(name:parts:)` with the chosen template's parts array (or empty if the user just typed a name without selecting a template).
+
+### Preset apply logic — `CombineView.applyPreset(parts:)`
+
+```swift
+@discardableResult
+private func applyPreset(parts: [PresetPart])
+    -> (matched: Int, unmatched: Int, unmatchedPartNames: Set<String>)
+```
+
+Two-phase algorithm:
+
+**Phase 1 — direct match with roman-numeral normalisation**
+Parts sorted longest-name-first (so "Bass Clarinet" wins over "Clarinet"). For each `CombineFile`:
+- Normalise both `file.name.lowercased()` and each `part.name.lowercased()` through `normalizeRomanNumerals(_:)`.
+- Match = the first part whose normalised name is a substring of the normalised filename.
+- On match: `updateCopies(for:copies:)`.
+- On no match: add to `newUnmatched`.
+
+**Phase 2 — single-file consolidation**
+For each base name whose **all** numbered siblings went unmatched (e.g. "Flute 1" and "Flute 2" both unmatched) and exactly **one** unmatched file contains the base name (e.g. one "Flute.pdf"):
+- Sum the siblings' copy counts.
+- Apply to that file, remove from `newUnmatched`, mark siblings matched.
+- More complex mismatches (e.g. 3 preset parts, 2 files) remain orange.
+
+**Supporting free functions:**
+
+```swift
+func normalizeRomanNumerals(_ s: String) -> String
+// Converts trailing " i"→" 1", " ii"→" 2", " iii"→" 3", " iv"→" 4"
+// Checked longest-first to prevent "iv" being partially replaced by "i".
+// Requires a space before the roman numeral (word-boundary guard).
+
+func numberedBase(of name: String) -> String?
+// Returns the base name if the last word (after roman-numeral normalisation) is an integer.
+// e.g. "Violin I" → "violin", "Flute 2" → "flute", "Oboe" → nil
+
+func renumberAfterDeletion(_ parts: [PresetPart]) -> [PresetPart]
+// After deleting a numbered part, if a base name has only one survivor,
+// strips the trailing number from that survivor's name
+// ("Horn 1" sole survivor → "Horn").
+```
+
+### PresetPartRow
+
+Used in both `PresetSidebarView` and `CombinerPreferencesView`. Features:
+- Double-click **name** → inline `TextField` rename (`@FocusState nameFocused`)
+- Double-click **copies count** → inline `TextField` edit (`@FocusState copiesFocused`)
+- Minus at `copies == 1` → calls `onDelete` (which invokes `renumberAfterDeletion` after removal)
+- `isUnmatched: Bool` → `Color.orange.opacity(0.12)` background when last apply left this part without a file match
 
 ---
 
@@ -86,7 +299,7 @@ All mutating methods take an `undoManager: UndoManager?` and use snapshot-based 
 **View:** `RenamerView`  
 **ViewModel:** `RenamerManager: ObservableObject`  
 **Model:** `RenameOperation: Identifiable`  
-**Sheets:** `ManualAssignmentView` (uses `.sheet(item:)`), `PreferencesView` (⌘,)  
+**Sheets:** `ManualAssignmentView` (uses `.sheet(item:)`), `AppPreferencesView` (⌘,)  
 **Row:** `FileRowView` — double-click triggers manual override sheet
 
 ### RenamerManager state
@@ -168,11 +381,6 @@ Written from built-in defaults on first launch (via `InstrumentOrders.setup()` c
 
 The split state is stored as an **ordered array of page counts**, one entry per output file. For example `[2, 2, 1, 3]` means four files containing 2, 2, 1, and 3 pages respectively.
 
-This replaces the old `splitMarkers: Set<Int>` approach. Benefits:
-- Adding a split at position P inside file i partitions that entry: `fileSizes[i]` splits into two entries.
-- Removing a split (clicking the first page of file i) merges `fileSizes[i-1]` and `fileSizes[i]`.
-- All subsequent file indices adjust automatically — no stale markers possible.
-
 `splitMarkers: Set<Int>` is now a **derived computed property** (for rendering the page strip) — the set of page indices that start a new file (excluding page 0).
 
 `pageToFileMapping: [Int: Int]` maps each page index to its output file index.
@@ -187,8 +395,6 @@ This replaces the old `splitMarkers: Set<Int>` approach. Benefits:
 @State private var customFileNames: [Int: String] = [:]  // fileIndex → suffix
 ```
 
-`body` switches between `splitStageBody` (Step 1) and `SplitNamingStageView` (Step 2) based on `showingNamingStage`.
-
 ### Pure split functions (top-level, above `SplitView`)
 
 | Function | Purpose |
@@ -196,115 +402,42 @@ This replaces the old `splitMarkers: Set<Int>` approach. Benefits:
 | `toggleSplit(in sizes: [Int], at page: Int) -> [Int]` | Returns new sizes array with split toggled at `page`. Splits mid-file or merges at a boundary. |
 | `splitSizes(totalPages: Int, stride: Int) -> [Int]` | Returns sizes array dividing `totalPages` into `stride`-sized chunks (last chunk takes remainder). |
 
-These are pure functions with no side effects — extracted from `SplitView` for testability. The private view methods `toggleSplitAt(page:)` and `applyStride()` are now one-line wrappers that call these and assign the result to `fileSizes`.
-
-### Step 1 UI
-
-Two-column layout:
-- **Left:** page strip + large current-page preview
-- **Right:** stride/auto-split controls, output file cards, base filename field, "Name Files →" button
-
-Keyboard shortcuts (focus must be on preview area):
-- `Space` — toggle split on current page
-- `←` / `→` — previous / next page
-- `⌘←` / `⌘→` — jump to first / last page
-
 ### Step 2 — `SplitNamingStageView`
 
 Full-window scrollable list of `SplitFileNamingRow` views, one per output file.
 
-Key properties:
-```swift
-let pdfDocument: PDFDocument
-let fileSizes: [Int]
-@Binding var baseFileName: String
-@Binding var customFileNames: [Int: String]
-let onBack: () -> Void
-let onSave: () -> Void
-@FocusState private var focusedField: Int?   // drives auto-scroll
-```
-
 - **`instrumentNames: [String]`** — ordered, deduplicated union of orchestra + band + jazz lists from `InstrumentOrders`, each entry `.capitalized`. Used as autocomplete source across all rows.
-- **`filenameError(for:)`** — returns an error string if text contains `/`, `:`, or `\`.
-- **`canSave`** — requires `numberOfFiles >= 2`, no base name error, no suffix error.
 - Auto-scrolls to the focused row via `.onChange(of: focusedField)` + `ScrollViewReader.scrollTo(_:anchor:.center)`.
 
-Bottom bar: "← Back" button + "Split and Save" button (disabled when `!canSave`).
+#### `SplitFileNamingRow` autocomplete
 
-### `SplitFileNamingRow`
+**`nextExpectedIndex: Int`** — scans rows above (nearest first) to find the last recognised instrument name, then returns `index + 1` in `instrumentNames`. Rotates suggestion list so the most likely next instrument appears first.
 
-One row per output file. Key properties:
+**`numberedSuggestion: String?`** — if the nearest previous suffix ends with a space + integer (e.g. "Flute 1"), returns the incremented version ("Flute 2").
 
-```swift
-let fileIndex: Int
-let fileSizes: [Int]
-let firstPageIndex: Int
-let pdfDocument: PDFDocument
-let baseFileName: String
-@Binding var suffix: String
-var fieldFocus: FocusState<Int?>.Binding   // passed from parent — no local copy
-let instrumentNames: [String]
-let allSuffixes: [Int: String]             // snapshot of all rows' current suffixes
-@State private var selectedSuggestionIndex: Int? = nil
-```
-
-**Important:** `fieldFocus` is a `FocusState<Int?>.Binding` passed directly from the parent, not a local `@FocusState`. This ensures Tab navigation and click both update the parent's scroll logic. A local `@FocusState` copy caused a macOS bug where the initial click on the TextField was silently swallowed.
-
-**`PageInstrumentPreview`** — renders a cropped 2× Retina image of the top-left corner of the page (100 pt tall, left 40% up to 200 pt wide) where instrument names typically appear. Uses `.allowsHitTesting(false)` to prevent the fill-mode image's hit-test area from blocking the TextField below.
-
-#### Autocomplete
-
-**`nextExpectedIndex: Int`** — scans rows above (nearest first) to find the last recognised instrument name, then returns `index + 1` in `instrumentNames`. This rotates the suggestion list so the most likely next instrument appears first.
-
-**`numberedSuggestion: String?`** — checks if the nearest previous non-empty suffix ends with a space and a positive integer (e.g. "Flute 1"). If so, returns the incremented version ("Flute 2") to inject as the top suggestion.
-
-**`suggestions: [String]`** — builds a rotated list from `nextExpectedIndex`, filters to prefix-matches then contains-matches when text is non-empty, then prepends `numberedSuggestion` if applicable. Always ≤ 8 entries.
-
-#### Keyboard interaction on TextField
+**`suggestions: [String]`** — rotated list filtered to prefix-matches then contains-matches; prepends `numberedSuggestion` if applicable. Always ≤ 8 entries.
 
 | Key | Behaviour |
 |-----|-----------|
 | `↓` | Move `selectedSuggestionIndex` down (starts at 0 if nil) |
 | `↑` | Move up; set nil when above index 0 |
-| `Return` | If index set: accept suggestion, clear index. Else: advance `fieldFocus` to next row |
+| `Return` | If index set: accept suggestion. Else: advance focus to next row |
 | `Escape` | Clear `selectedSuggestionIndex` |
 | Any typing | Reset `selectedSuggestionIndex` to nil |
-
-#### `SuggestionButton`
-
-```swift
-private struct SuggestionButton: View {
-    let label: String
-    var isSelected: Bool = false   // arrow-key highlight
-    let action: () -> Void
-    @State private var isHovered = false
-    // background: selected → opacity 0.20, hover → 0.10, default → clear
-}
-```
-
-### `PageInstrumentPreview`
-
-Renders via `renderInstrumentNameArea(from:)`:
-- Crop rect: top of page (`y = origin.y + height - cropHeight`), left 40% (max 200 pt), 100 pt tall
-- Rendered at 2× scale into an `NSImage` via `NSGraphicsContext` / `PDFPage.draw(with:to:)`
-- Handles 90°/270° rotated pages by swapping width/height before cropping
 
 ---
 
 ## Tab 3 — Rotate Pages
 
-**View:** `RotateView`
+**View:** `RotateView`  
 **ViewModel:** `PDFManager`
 
 Controls: `baseRotation: RotationAngle` (all pages) + `additionalRotationMode: RotationMode` (odd/even/none) + `additionalRotationAngle`.
 
 Preview: `PDFPageView: NSViewRepresentable` wrapping `PDFView`. Renders page to `NSImage` first (via `renderFullImage`) to avoid mutating shared page state, then sets `clonedPage.rotation`.
 
-Save: `PDFManager.saveRotatedPDF(to:baseRotation:additionalRotationMode:additionalRotationAngle:)` — iterates pages, mutates `page.rotation` on copy, writes new document.
+Keyboard navigation: `←` / `→` (previous/next); `⌘←` / `⌘→` (first/last). Shared with Split tab Step 1.
 
-Keyboard navigation: `←` / `→` (previous/next page); `⌘←` / `⌘→` (first/last page). Shared with the Split tab's Step 1 preview.
-
-### Supporting enums
 ```swift
 enum RotationAngle: Int { case none=0, rotate90=90, rotate180=180, rotate270=270 }
 enum RotationMode { case odd, even, none }
@@ -314,16 +447,13 @@ enum RotationMode { case odd, even, none }
 
 ## Shared Infrastructure
 
-**`PDFAlertHandler`** — `typealias PDFAlertHandler = (_ title: String, _ message: String, _ isError: Bool) -> Void`. Passed to all PDF save/export methods so managers never show UI directly. `showNSAlert(title:message:isError:)` is a private free function used at view call sites to avoid repeating the NSAlert boilerplate.
+**`PDFAlertHandler`** — `typealias PDFAlertHandler = (_ title: String, _ message: String, _ isError: Bool) -> Void`. All PDF save/export methods take this callback; they never show UI directly.
 
 **`PDFManager: ObservableObject`** — used by both SplitView and RotateView (separate instances).
-- `loadPDF(from:)`, `clearPDF()`
-- `saveRotatedPDF(to:baseRotation:additionalRotationMode:additionalRotationAngle:completion:)` — copies each page before rotating (source document is never mutated); calls `completion` on finish
-- `saveSplitPDF(to:splitMarkers:baseFileName:customFileNames:pageToFileMapping:completion:)` — calls `completion` with success or partial-success result
 
-**`pdfFilenameError(for:) -> String?`** — top-level free function; returns an error string if the input contains `/`, `:`, `\`, or a null character. Used by both `SplitNamingStageView` and `SplitFileNamingRow`.
+**`pdfFilenameError(for:) -> String?`** — returns an error string if input contains `/`, `:`, `\`, or null.
 
-**`PDFPageView: NSViewRepresentable`** — safe preview clone via `renderFullImage(from:) -> NSImage?` using `NSGraphicsContext` / `CGContext`.
+**`PDFPageView: NSViewRepresentable`** — safe preview clone via `renderFullImage(from:)`.
 
 ---
 
@@ -331,24 +461,28 @@ enum RotationMode { case odd, even, none }
 
 - **`.sheet(item:)` not `.sheet(isPresented:)`** — used for ManualAssignmentView to avoid blank sheet bug.
 - **Instrument detection is leftmost-match**, not longest-match or order-match, to handle compound names.
-- **`bass clarinet` before `clarinet`** in lists — length-sort in detectInstrument handles this, but the order in the static arrays also matters as a tie-break (same position → lower original index wins).
+- **`bass clarinet` before `clarinet`** in lists — length-sort in detectInstrument handles this, but the order in the static arrays also matters as a tie-break.
 - **`canCreateDirectories = true`** set on NSOpenPanel for folder selection.
 - **Print automation not possible** — NSPrintOperation / AppleScript all fail reliably; "Open in Preview" + ⌘P is the documented workflow.
-- **App quits on window close** via `NSApplicationDelegateAdaptor(AppDelegate.self)` returning `true` from `applicationShouldTerminateAfterLastWindowClosed`.
-- **`.clipped()` does not restrict hit testing** — in SwiftUI, `.clipped()` clips rendering but the view's hit-test area remains its full layout frame. Use `.allowsHitTesting(false)` when an image with `.fill` content mode would otherwise absorb clicks meant for views below it. (Affected `PageInstrumentPreview` inside `SplitFileNamingRow`.)
-- **`FocusState` must not be duplicated across parent/child boundaries** — passing `FocusState<T>.Binding` from parent to child and using `.focused(binding, equals:)` in the child is the correct pattern. Adding a local `@FocusState` in the child creates a second responder that intercepts the first click on a TextField on macOS (the click is consumed to transfer focus to the local state rather than starting editing).
-- **`fileSizes` array vs `splitMarkers` set** — the array model is the source of truth; `splitMarkers` is only derived for rendering. This prevents the stale-marker problem that arose when pages were removed or re-ordered.
-- **Instrument orders versioning** — `instrument-orders.json` in Application Support contains a `"version"` sentinel. On launch, `InstrumentOrders.setup()` compares the file's version to the built-in default; if the file is older it is regenerated, so new aliases/entries in the code automatically propagate to existing installs.
+- **App quits on window close** via `NSApplicationDelegateAdaptor(AppDelegate.self)`.
+- **`.clipped()` does not restrict hit testing** — use `.allowsHitTesting(false)` when an image with `.fill` content mode would absorb clicks meant for views below it. (Affected `PageInstrumentPreview` inside `SplitFileNamingRow`.)
+- **`FocusState` must not be duplicated across parent/child** — pass `FocusState<T>.Binding` from parent to child; a local copy intercepts the first click on a TextField.
+- **`fileSizes` array vs `splitMarkers` set** — array is the source of truth; `splitMarkers` is derived for rendering only.
+- **Instrument orders versioning** — `instrument-orders.json` carries a `"version"` sentinel; `InstrumentOrders.setup()` regenerates the file on launch if it's older than the built-in default.
+- **`EnsemblePresetStore` is separate from the Renamer's `InstrumentOrders`** — presets (name + per-part copy counts) live in `ensemble-presets.json`; instrument orders (name strings only) live in `instrument-orders.json`. They are independent systems.
+- **Preset apply does not interact with collate groups** — `applyPreset` sets `copies` on individual `CombineFile` entries; it ignores `collateGroupId` entirely. A grouped file can have its copies set by a preset apply, but the value is unused by the PDF output loop (which uses `group.copies` instead). Consider whether this is the desired behaviour if mixing groups and presets.
+- **Roman-numeral normalisation requires a space prefix** — `normalizeRomanNumerals` only converts ` i`/` ii`/` iii`/` iv` (word-boundary guard). This prevents false matches like "celli" → "cell1". IV is checked before I to prevent "violin iv" → "violin 1v".
+- **Collate group contiguity is maintained by `createCollateGroup`** — files are pulled together at the position of the first selected file. Nothing in the code subsequently enforces contiguity, but nothing currently breaks it either (move operations use `expandForGroups` which moves all group files together).
 
 ---
 
 ## Test Suite
 
-**Target:** `MusicPDFManagerTests` (Swift Testing framework — `@Suite` / `@Test` / `#expect`)
-**File:** `Music PDF ManagerTests/Music_PDF_ManagerTests.swift`
+**Target:** `MusicPDFManagerTests` (Swift Testing framework — `@Suite` / `@Test` / `#expect`)  
+**File:** `Music PDF ManagerTests/Music_PDF_ManagerTests.swift`  
 **Import:** `@testable import Music_PDF_Manager`
 
-**Shared helper:** `writePDF(pages: Int, to: URL)` — creates a real blank-page PDF using PDFKit; used wherever a test needs `PDFDocument(url:)` to succeed with a non-zero page count.
+**Shared helper:** `writePDF(pages: Int, to: URL)` — creates a real blank-page PDF using PDFKit.
 
 | Suite | What it covers |
 |-------|----------------|
@@ -360,5 +494,8 @@ enum RotationMode { case odd, even, none }
 | `SplitSizesTests` | `splitSizes(totalPages:stride:)` — even division, remainder, stride > total, zero pages |
 | `CombineManagerTests` | Computed properties, `addFiles`, `removeFiles`, `clearAll`, `updateCopies`, `moveUp/Down` block behaviour, `createCombinedPDF` (page count, blank insertion, copies) |
 | `PDFManagerTests` | `saveRotatedPDF` (rotation values, source-not-mutated regression guard, odd/even additional rotation); `saveSplitPDF` (file count, page counts, custom filenames, auto-numbering) |
+| `RomanNumeralTests` | `normalizeRomanNumerals` — no-op on plain text, I/II/III/IV conversion, IV matched before I |
+| `NumberedBaseTests` | `numberedBase(of:)` — arabic suffix, roman suffix, unnumbered returns nil |
+| `RenumberAfterDeletionTests` | `renumberAfterDeletion` — arabic survivor, roman survivor, pair untouched, capitalisation preserved |
 
-**Not covered:** rescan mode stripping (planned but deferred); `performRename()` filesystem operation; UI/integration tests.
+**Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; UI/integration tests.

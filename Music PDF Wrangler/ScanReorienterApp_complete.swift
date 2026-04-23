@@ -1512,18 +1512,27 @@ struct ShortcutsHelpView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            shortcutSection("File List Navigation") {
+            shortcutSection("Combine — File List Navigation") {
                 shortcutRow("↑ / ↓", "Select previous / next file")
                 shortcutRow("⇧↑ / ⇧↓", "Extend selection up / down")
                 shortcutRow("⌘A", "Select all files")
             }
 
-            shortcutSection("File Management") {
+            shortcutSection("Combine — File Management") {
                 shortcutRow("⌫", "Remove selected files")
-                shortcutRow("⌘↑", "Move selected files up")
-                shortcutRow("⌘↓", "Move selected files down")
-                shortcutRow("⌘Z", "Undo")
-                shortcutRow("⌘⇧Z", "Redo")
+                shortcutRow("⌘↑ / ⌘↓", "Move selected files up / down")
+                shortcutRow("C", "Group selected files into a collate set")
+                shortcutRow("⌘Z / ⌘⇧Z", "Undo / Redo")
+            }
+
+            shortcutSection("Combine — Collate Groups") {
+                shortcutRow("C", "Create group from selected files")
+                shortcutRow("↗ button", "Dissolve group (restore files individually)")
+            }
+
+            shortcutSection("Combine — Ensemble Presets") {
+                shortcutRow("Presets button", "Toggle preset sidebar (top-right of toolbar)")
+                shortcutRow("⌘,", "Open Preferences — create & edit presets")
             }
 
             shortcutSection("Tabs") {
@@ -1553,7 +1562,7 @@ struct ShortcutsHelpView: View {
             }
         }
         .padding(36)
-        .frame(width: 460, height: 660)
+        .frame(width: 460, height: 720)
     }
 
     private func shortcutSection(_ title: String, @ViewBuilder content: () -> some View) -> some View {
