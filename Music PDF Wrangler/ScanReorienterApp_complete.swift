@@ -4544,8 +4544,10 @@ struct SplitFileNamingRow: View {
     let allSuffixes: [Int: String]  // snapshot of all rows' current suffixes
     @Binding var previewOffset: CGPoint
 
-    /// Step sizes in PDF points matching SplitNamingStageView's constants.
-    private let stepV: CGFloat = 50
+    /// Step sizes in PDF points.
+    /// cropH = 100 pt; stepV = 25 pt → 75 % overlap between consecutive positions.
+    /// cropW ≈ 200 pt; stepH = 100 pt → 50 % overlap horizontally.
+    private let stepV: CGFloat = 25
     private let stepH: CGFloat = 100
 
     private var isFieldFocused: Bool { fieldFocus.wrappedValue == fileIndex }
