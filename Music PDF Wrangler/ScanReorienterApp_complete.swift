@@ -209,36 +209,53 @@ struct ContentView: View {
     @EnvironmentObject private var appState: AppState
     
     var body: some View {
-        TabView(selection: $appState.selectedTab) {
-            CombineView(showingKeyboardHelp: $appState.showingKeyboardHelp,
-                        menuState: appState.combineMenuState)
-                .tabItem {
-                    Label("Combine PDFs", systemImage: "doc.on.doc")
-                }
-                .tag(0)
-            
-            RenamerView()
-                .tabItem {
-                    Label("Rename Files", systemImage: "folder.badge.gearshape")
-                }
-                .tag(1)
-            
-            SplitView()
-                .tabItem {
-                    Label("Split PDF", systemImage: "scissors")
-                }
-                .tag(2)
-            
-            RotateView()
-                .tabItem {
-                    Label("Rotate Pages", systemImage: "rotate.right")
-                }
-                .tag(3)
+        ZStack {
+            TabView(selection: $appState.selectedTab) {
+                CombineView(showingKeyboardHelp: $appState.showingKeyboardHelp,
+                            menuState: appState.combineMenuState)
+                    .tabItem {
+                        Label("Combine PDFs", systemImage: "doc.on.doc")
+                    }
+                    .tag(0)
+
+                RenamerView()
+                    .tabItem {
+                        Label("Rename Files", systemImage: "folder.badge.gearshape")
+                    }
+                    .tag(1)
+
+                SplitView()
+                    .tabItem {
+                        Label("Split PDF", systemImage: "scissors")
+                    }
+                    .tag(2)
+
+                RotateView()
+                    .tabItem {
+                        Label("Rotate Pages", systemImage: "rotate.right")
+                    }
+                    .tag(3)
+            }
+            .frame(minWidth: 900, minHeight: 700)
+
+            // Keyboard shortcuts overlay — tap the backdrop or press Escape/⏎ to close
+            if appState.showingKeyboardHelp {
+                Color.black.opacity(0.28)
+                    .ignoresSafeArea()
+                    .onTapGesture { appState.showingKeyboardHelp = false }
+                    .transition(.opacity)
+
+                ShortcutsHelpView(onDismiss: { appState.showingKeyboardHelp = false })
+                    .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .center)))
+
+                // Invisible button so Escape dismisses the overlay
+                Button("") { appState.showingKeyboardHelp = false }
+                    .keyboardShortcut(.cancelAction)
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+            }
         }
-        .frame(minWidth: 900, minHeight: 700)
-        .sheet(isPresented: $appState.showingKeyboardHelp) {
-            ShortcutsHelpView()
-        }
+        .animation(.easeInOut(duration: 0.15), value: appState.showingKeyboardHelp)
     }
 }
 
@@ -1504,65 +1521,70 @@ struct PresetSidebarView: View {
 
 // MARK: - Keyboard Shortcuts Help
 struct ShortcutsHelpView: View {
-    @Environment(\.dismiss) private var dismiss
+    var onDismiss: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 20) {
-            Text("Keyboard Shortcuts")
-                .font(.title2)
-                .fontWeight(.semibold)
+        ScrollView {
+            VStack(alignment: .leading, spacing: 20) {
+                Text("Keyboard Shortcuts")
+                    .font(.title2)
+                    .fontWeight(.semibold)
 
-            shortcutSection("Combine — File List Navigation") {
-                shortcutRow("↑ / ↓", "Select previous / next file")
-                shortcutRow("⇧↑ / ⇧↓", "Extend selection up / down")
-                shortcutRow("⌘A", "Select all files")
+                shortcutSection("Combine — File List Navigation") {
+                    shortcutRow("↑ / ↓", "Select previous / next file")
+                    shortcutRow("⇧↑ / ⇧↓", "Extend selection up / down")
+                    shortcutRow("⌘A", "Select all files")
+                }
+
+                shortcutSection("Combine — File Management") {
+                    shortcutRow("⌫", "Remove selected files")
+                    shortcutRow("⌘↑ / ⌘↓", "Move selected files up / down")
+                    shortcutRow("C", "Group selected files into a collate set")
+                    shortcutRow("⌘Z / ⌘⇧Z", "Undo / Redo")
+                }
+
+                shortcutSection("Combine — Collate Groups") {
+                    shortcutRow("C", "Create group from selected files")
+                    shortcutRow("↗ button", "Dissolve group (restore files individually)")
+                }
+
+                shortcutSection("Combine — Ensemble Presets") {
+                    shortcutRow("Presets button", "Toggle preset sidebar (top-right of toolbar)")
+                    shortcutRow("⌘,", "Open Preferences — create & edit presets")
+                }
+
+                shortcutSection("Tabs") {
+                    shortcutRow("⌘1", "Combine PDFs")
+                    shortcutRow("⌘2", "Rename Files")
+                    shortcutRow("⌘3", "Split PDF")
+                    shortcutRow("⌘4", "Rotate Pages")
+                }
+
+                shortcutSection("Split PDF & Rotate Pages") {
+                    shortcutRow("← / →", "Previous / next page")
+                    shortcutRow("⌘← / ⌘→", "First / last page")
+                    shortcutRow("Space", "Toggle split marker (Split tab)")
+                }
+
+                shortcutSection("Renamer") {
+                    shortcutRow("⌘,", "Open Preferences")
+                }
+
+                HStack {
+                    Spacer()
+                    Button("Done") { onDismiss() }
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                }
+                .padding(.top, 4)
             }
-
-            shortcutSection("Combine — File Management") {
-                shortcutRow("⌫", "Remove selected files")
-                shortcutRow("⌘↑ / ⌘↓", "Move selected files up / down")
-                shortcutRow("C", "Group selected files into a collate set")
-                shortcutRow("⌘Z / ⌘⇧Z", "Undo / Redo")
-            }
-
-            shortcutSection("Combine — Collate Groups") {
-                shortcutRow("C", "Create group from selected files")
-                shortcutRow("↗ button", "Dissolve group (restore files individually)")
-            }
-
-            shortcutSection("Combine — Ensemble Presets") {
-                shortcutRow("Presets button", "Toggle preset sidebar (top-right of toolbar)")
-                shortcutRow("⌘,", "Open Preferences — create & edit presets")
-            }
-
-            shortcutSection("Tabs") {
-                shortcutRow("⌘1", "Combine PDFs")
-                shortcutRow("⌘2", "Rename Files")
-                shortcutRow("⌘3", "Split PDF")
-                shortcutRow("⌘4", "Rotate Pages")
-            }
-
-            shortcutSection("Split PDF & Rotate Pages") {
-                shortcutRow("← / →", "Previous / next page")
-                shortcutRow("⌘← / ⌘→", "First / last page")
-                shortcutRow("Space", "Toggle split marker (Split tab)")
-            }
-
-            shortcutSection("Renamer") {
-                shortcutRow("⌘,", "Open Preferences")
-            }
-
-            Spacer()
-
-            HStack {
-                Spacer()
-                Button("Done") { dismiss() }
-                    .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
-            }
+            .padding(36)
         }
-        .padding(36)
-        .frame(width: 460, height: 720)
+        .frame(width: 460)
+        .frame(maxHeight: 580)
+        .background(Color(NSColor.windowBackgroundColor))
+        .cornerRadius(12)
+        .shadow(color: .black.opacity(0.25), radius: 20, x: 0, y: 8)
     }
 
     private func shortcutSection(_ title: String, @ViewBuilder content: () -> some View) -> some View {
