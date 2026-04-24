@@ -4388,11 +4388,6 @@ struct SplitNamingStageView: View {
     let onBack: () -> Void
     let onSave: () -> Void
 
-    /// Step sizes in PDF points. Vertical = half of the 100 pt crop height;
-    /// horizontal = half of the 200 pt max crop width → 50% overlap each step.
-    private let stepV: CGFloat = 50
-    private let stepH: CGFloat = 100
-
     @FocusState private var focusedField: Int?
 
     var numberOfFiles: Int { fileSizes.count }
@@ -4434,42 +4429,11 @@ struct SplitNamingStageView: View {
         VStack(spacing: 0) {
             // ── Top bar ──────────────────────────────────────────────────
             HStack {
+                Spacer()
                 Text("Step 2: Name Files")
                     .font(.title2)
                     .fontWeight(.semibold)
-
                 Spacer()
-
-                // Pan controls — move the crop window on ALL preview strips simultaneously
-                HStack(spacing: 2) {
-                    Text("Preview:")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Button { previewOffset.y += stepV } label: {
-                        Image(systemName: "arrow.up")
-                    }
-                    .help("Shift previews up")
-                    Button { previewOffset.y -= stepV } label: {
-                        Image(systemName: "arrow.down")
-                    }
-                    .help("Shift previews down")
-                    Button { previewOffset.x -= stepH } label: {
-                        Image(systemName: "arrow.left")
-                    }
-                    .help("Shift previews left")
-                    Button { previewOffset.x += stepH } label: {
-                        Image(systemName: "arrow.right")
-                    }
-                    .help("Shift previews right")
-                    if previewOffset != .zero {
-                        Button { previewOffset = .zero } label: {
-                            Image(systemName: "arrow.uturn.backward")
-                        }
-                        .help("Reset preview position")
-                    }
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
@@ -4524,7 +4488,7 @@ struct SplitNamingStageView: View {
                                 fieldFocus: $focusedField,
                                 instrumentNames: instrumentNames,
                                 allSuffixes: customFileNames,
-                                previewOffset: previewOffset
+                                previewOffset: $previewOffset
                             )
                             .id(fileIndex)
                             if fileIndex < numberOfFiles - 1 { Divider() }
@@ -4578,7 +4542,11 @@ struct SplitFileNamingRow: View {
     var fieldFocus: FocusState<Int?>.Binding
     let instrumentNames: [String]   // ordered, deduplicated, capitalised
     let allSuffixes: [Int: String]  // snapshot of all rows' current suffixes
-    var previewOffset: CGPoint = .zero
+    @Binding var previewOffset: CGPoint
+
+    /// Step sizes in PDF points matching SplitNamingStageView's constants.
+    private let stepV: CGFloat = 50
+    private let stepH: CGFloat = 100
 
     private var isFieldFocused: Bool { fieldFocus.wrappedValue == fileIndex }
 
@@ -4599,6 +4567,47 @@ struct SplitFileNamingRow: View {
         suffix.isEmpty
             ? "\(baseFileName)_\(fileIndex + 1).pdf"
             : "\(baseFileName)\(suffix).pdf"
+    }
+
+    // ── Pan overlay ─────────────────────────────────────────────────────────
+    /// Arrow buttons overlaid on each preview strip; all rows share the same
+    /// previewOffset binding so pressing any arrow moves every strip at once.
+    private var panOverlay: some View {
+        ZStack {
+            VStack {
+                panButton("chevron.up")   { previewOffset.y += stepV }
+                Spacer()
+                panButton("chevron.down") { previewOffset.y -= stepV }
+            }
+            HStack {
+                panButton("chevron.left")  { previewOffset.x -= stepH }
+                Spacer()
+                panButton("chevron.right") { previewOffset.x += stepH }
+            }
+            // Reset button — top-right, only visible when panned away from default
+            if previewOffset != .zero {
+                VStack {
+                    HStack {
+                        Spacer()
+                        panButton("arrow.uturn.backward") { previewOffset = .zero }
+                    }
+                    Spacer()
+                }
+            }
+        }
+        .padding(6)
+    }
+
+    private func panButton(_ icon: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .frame(width: 26, height: 26)
+                .background(.ultraThinMaterial)
+                .foregroundColor(.secondary)
+                .clipShape(Circle())
+        }
+        .buttonStyle(.plain)
     }
 
     // ── Validation ──────────────────────────────────────────────────────────
@@ -4684,25 +4693,27 @@ struct SplitFileNamingRow: View {
                 Spacer()
             }
 
-            // ── Instrument name crop (full-width, zoomed in) ─────────
-            // Shows the top-left corner of the page where instrument names live.
-            // .allowsHitTesting(false) is essential: with .fill content mode the
-            // image's hit-test area can grow beyond its visible frame and silently
-            // absorb clicks meant for the text field below.
+            // ── Instrument name crop with pan overlay ────────────────
             if let page = pdfDocument.page(at: firstPageIndex) {
-                PageInstrumentPreview(page: page, offset: previewOffset)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 150)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
-                    .allowsHitTesting(false)
+                ZStack {
+                    // The preview image itself — hit-testing off so it doesn't
+                    // swallow clicks meant for controls below the strip.
+                    PageInstrumentPreview(page: page, offset: previewOffset)
+                        .allowsHitTesting(false)
+
+                    // Arrow buttons overlaid on top of the image.
+                    panOverlay
+                }
+                .frame(maxWidth: .infinity)
+                .frame(height: 150)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 4))
+                .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
             } else {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.gray.opacity(0.12))
                     .frame(maxWidth: .infinity)
                     .frame(height: 150)
-                    .allowsHitTesting(false)
             }
 
             // ── Name field ────────────────────────────────────────────
@@ -4841,101 +4852,86 @@ private struct SuggestionButton: View {
 struct PageInstrumentPreview: View {
     let page: PDFPage
     /// Pan offset in PDF points from the default top-left position.
-    /// Positive y = shifted up; negative y = shifted down.
-    /// Positive x = shifted right; negative x = shifted left.
+    /// Positive y = up the page; negative y = down; positive x = right; negative x = left.
     var offset: CGPoint = .zero
 
+    // Two-phase rendering for performance:
+    //   1. Full page rendered ONCE async on appear (expensive PDF draw, background thread).
+    //   2. Panning crops from the cached image instantly — no re-render needed.
+    @State private var cachedPageImage: NSImage?
+    @State private var displayImage: NSImage?
+
     var body: some View {
-        if let image = renderInstrumentNameArea(from: page, offset: offset) {
-            // Use .fill so the crop fills its parent frame completely.
-            // The instrument name sits at the left of the crop, so any overflow
-            // clipped on the right is just whitespace.
-            Image(nsImage: image)
-                .resizable()
-                .aspectRatio(contentMode: .fill)
-                .clipped()
-        } else {
-            Rectangle()
-                .fill(Color.gray.opacity(0.2))
+        Group {
+            if let img = displayImage {
+                Image(nsImage: img)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .clipped()
+            } else {
+                Color.gray.opacity(0.08)
+            }
+        }
+        .task {
+            // Render the full page once on a background thread, then extract initial crop.
+            let full = await Self.renderFullPageAsync(page: page)
+            cachedPageImage = full
+            displayImage = Self.cropToStrip(from: full, page: page, offset: .zero)
+        }
+        .onChange(of: offset) { newOffset in
+            // Fast path: crop from the cached image — no PDF re-render required.
+            displayImage = Self.cropToStrip(from: cachedPageImage, page: page, offset: newOffset)
         }
     }
 
-    // Render the crop window defined by the current pan offset.
-    // Default position: top-left corner (instrument name area).
-    // Clamped so the crop never extends outside the page.
-    private func renderInstrumentNameArea(from page: PDFPage, offset: CGPoint) -> NSImage? {
-        let pageBounds = page.bounds(for: .mediaBox)
-
-        // Crop dimensions stay constant; only the position changes.
-        let cropHeight: CGFloat = 100    // ~1.4 inches
-        let cropWidth: CGFloat = min(pageBounds.width * 0.4, 200) // Left 40%, max 200 pt
-
-        // Account for page rotation (swap axes for 90°/270°)
-        let rotation = page.rotation
-        var actualBounds = pageBounds
-        if rotation == 90 || rotation == 270 {
-            actualBounds = CGRect(x: pageBounds.origin.x, y: pageBounds.origin.y,
-                                width: pageBounds.height, height: pageBounds.width)
+    // Render the full page at 2× resolution on a background thread.
+    // Using thumbnail(of:for:) which correctly respects page rotation.
+    private static func renderFullPageAsync(page: PDFPage) async -> NSImage? {
+        await withCheckedContinuation { continuation in
+            let p = page
+            DispatchQueue.global(qos: .userInitiated).async {
+                let mediaBox = p.bounds(for: .mediaBox)
+                let rotation = ((p.rotation % 360) + 360) % 360
+                let scale: CGFloat = 2.0
+                let size: NSSize = rotation == 90 || rotation == 270
+                    ? NSSize(width: mediaBox.height * scale, height: mediaBox.width * scale)
+                    : NSSize(width: mediaBox.width  * scale, height: mediaBox.height * scale)
+                continuation.resume(returning: p.thumbnail(of: size, for: .mediaBox))
+            }
         }
+    }
 
-        // Default anchor: top-left of the page in PDF coords (Y grows upward).
-        let defaultX = actualBounds.origin.x
-        let defaultY = actualBounds.origin.y + actualBounds.height - cropHeight
+    // Crop a strip from the cached full-page image.
+    // CGImage origin is top-left; PDF origin is bottom-left — Y axis flipped in conversion.
+    private static func cropToStrip(from pageImage: NSImage?, page: PDFPage, offset: CGPoint) -> NSImage? {
+        guard let pageImage,
+              let cg = pageImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
 
-        // Apply pan offset, then clamp so the crop stays within the page.
-        let minX = actualBounds.origin.x
-        let maxX = actualBounds.origin.x + actualBounds.width - cropWidth
-        let minY = actualBounds.origin.y
-        let maxY = defaultY   // can only move down from the top
+        let mediaBox = page.bounds(for: .mediaBox)
+        let rotation  = ((page.rotation % 360) + 360) % 360
+        let pageW = rotation == 90 || rotation == 270 ? mediaBox.height : mediaBox.width
+        let pageH = rotation == 90 || rotation == 270 ? mediaBox.width  : mediaBox.height
 
-        let cropX = min(max(defaultX + offset.x, minX), maxX)
-        let cropY = min(max(defaultY + offset.y, minY), maxY)
+        let cropH: CGFloat = 100
+        let cropW = min(pageW * 0.4, 200)
 
-        let cropRect = CGRect(x: cropX, y: cropY, width: cropWidth, height: cropHeight)
-        
-        // Create image
-        let scale: CGFloat = 2.0 // Retina resolution
-        let imageSize = NSSize(width: cropRect.width * scale, height: cropRect.height * scale)
-        
-        guard let bitmapRep = NSBitmapImageRep(
-            bitmapDataPlanes: nil,
-            pixelsWide: Int(imageSize.width),
-            pixelsHigh: Int(imageSize.height),
-            bitsPerSample: 8,
-            samplesPerPixel: 4,
-            hasAlpha: true,
-            isPlanar: false,
-            colorSpaceName: .deviceRGB,
-            bytesPerRow: 0,
-            bitsPerPixel: 0
-        ) else {
-            return nil
-        }
-        
-        NSGraphicsContext.saveGraphicsState()
-        guard let context = NSGraphicsContext(bitmapImageRep: bitmapRep) else {
-            return nil
-        }
-        NSGraphicsContext.current = context
-        
-        let cgContext = context.cgContext
-        
-        // Fill white background
-        cgContext.setFillColor(NSColor.white.cgColor)
-        cgContext.fill(CGRect(origin: .zero, size: imageSize))
-        
-        // Set up transform for cropped area
-        cgContext.scaleBy(x: scale, y: scale)
-        cgContext.translateBy(x: -cropRect.origin.x, y: -cropRect.origin.y)
-        
-        // Draw the page
-        page.draw(with: .mediaBox, to: cgContext)
-        
-        NSGraphicsContext.restoreGraphicsState()
-        
-        let image = NSImage(size: cropRect.size)
-        image.addRepresentation(bitmapRep)
-        return image
+        // Default anchor: top-left of the page (PDF y = pageH - cropH from the bottom edge).
+        let defaultY = pageH - cropH
+        let clampedX = min(max(offset.x, 0), pageW - cropW)
+        let clampedY = min(max(defaultY + offset.y, 0), defaultY)
+
+        // Convert PDF rect → CGImage pixel rect (flip Y: CGImage y=0 is top of page).
+        let sX = CGFloat(cg.width)  / pageW
+        let sY = CGFloat(cg.height) / pageH
+        let pixRect = CGRect(
+            x: (clampedX * sX).rounded(),
+            y: ((pageH - clampedY - cropH) * sY).rounded(),
+            width:  (cropW * sX).rounded(),
+            height: (cropH * sY).rounded()
+        )
+
+        guard let cropped = cg.cropping(to: pixRect) else { return nil }
+        return NSImage(cgImage: cropped, size: CGSize(width: cropW, height: cropH))
     }
 }
 
