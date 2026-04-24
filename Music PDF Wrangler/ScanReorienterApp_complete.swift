@@ -4087,6 +4087,7 @@ struct SplitView: View {
                                             totalPages: totalPages,
                                             baseFileName: baseFileName,
                                             customFileNames: customFileNames,
+                                            currentPage: currentPage,
                                             onNavigate: { pageIndex in
                                                 currentPage = pageIndex
                                             }
@@ -4305,12 +4306,19 @@ struct FilePreviewCard: View {
     let totalPages: Int
     let baseFileName: String
     let customFileNames: [Int: String]
+    /// The page currently shown in the left preview — used to highlight the active card.
+    let currentPage: Int
     let onNavigate: (Int) -> Void
-    
+
     var pagesInFile: [Int] {
         pageToFileMapping.filter { $0.value == fileIndex }.keys.sorted()
     }
-    
+
+    /// True when the currently-previewed page belongs to this output file.
+    var isActive: Bool {
+        pagesInFile.contains(currentPage)
+    }
+
     var fileName: String {
         if let customSuffix = customFileNames[fileIndex], !customSuffix.isEmpty {
             return "\(baseFileName)\(customSuffix).pdf"
@@ -4318,23 +4326,23 @@ struct FilePreviewCard: View {
             return "\(baseFileName)_\(fileIndex + 1).pdf"
         }
     }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Image(systemName: "doc.fill")
-                    .foregroundColor(.blue)
-                
+                    .foregroundColor(isActive ? .accentColor : .blue)
+
                 Text(fileName)
                     .font(.headline)
-                
+
                 Spacer()
-                
+
                 Text("\(pagesInFile.count) page\(pagesInFile.count == 1 ? "" : "s")")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-            
+
             HStack(spacing: 4) {
                 ForEach(pagesInFile.prefix(10), id: \.self) { pageIndex in
                     Button(action: {
@@ -4350,7 +4358,7 @@ struct FilePreviewCard: View {
                     }
                     .buttonStyle(.plain)
                 }
-                
+
                 if pagesInFile.count > 10 {
                     Text("+ \(pagesInFile.count - 10) more")
                         .font(.caption2)
@@ -4361,8 +4369,26 @@ struct FilePreviewCard: View {
         .padding()
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(Color(NSColor.controlBackgroundColor))
+                .fill(isActive
+                      ? Color.accentColor.opacity(0.08)
+                      : Color(NSColor.controlBackgroundColor))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(isActive ? Color.accentColor.opacity(0.5) : Color.clear,
+                                      lineWidth: 1.5)
+                )
         )
+        // Tapping anywhere on the card (outside the page-number buttons) jumps
+        // the preview to the first page of this output file.
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if let firstPage = pagesInFile.first {
+                onNavigate(firstPage)
+            }
+        }
+        .onHover { inside in
+            if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
+        }
     }
 }
 
