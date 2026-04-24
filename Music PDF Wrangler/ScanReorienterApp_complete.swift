@@ -627,13 +627,17 @@ struct CombineView: View {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.pdf]
         panel.allowsMultipleSelection = true
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
         panel.canCreateDirectories = false
-        panel.title = "Select PDF Files"
+        panel.title = "Select PDF Files or Folders"
+        panel.message = "Select PDF files, or select a folder to add all PDFs inside it"
 
         panel.beginSheetModal(for: window) { response in
-            menuState.isPanelOpen = false
+            self.menuState.isPanelOpen = false
             if response == .OK {
-                combineManager.addFiles(urls: panel.urls, undoManager: undoManager)
+                let expanded = Self.expandToPDFs(panel.urls)
+                self.combineManager.addFiles(urls: expanded, undoManager: self.undoManager)
             }
         }
     }
@@ -641,13 +645,36 @@ struct CombineView: View {
     private func handleDrop(providers: [NSItemProvider]) {
         for provider in providers {
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                if let url = url, url.pathExtension.lowercased() == "pdf" {
-                    DispatchQueue.main.async {
-                        combineManager.addFiles(urls: [url], undoManager: undoManager)
-                    }
+                guard let url = url else { return }
+                let expanded = Self.expandToPDFs([url])
+                guard !expanded.isEmpty else { return }
+                DispatchQueue.main.async {
+                    self.combineManager.addFiles(urls: expanded, undoManager: self.undoManager)
                 }
             }
         }
+    }
+
+    /// Expands a mixed list of file and folder URLs into a flat, sorted list of PDF URLs.
+    /// Folders are enumerated recursively; non-PDF files are ignored.
+    static func expandToPDFs(_ urls: [URL]) -> [URL] {
+        var result: [URL] = []
+        let fm = FileManager.default
+        for url in urls {
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else { continue }
+            if isDir.boolValue {
+                guard let enumerator = fm.enumerator(at: url,
+                                                     includingPropertiesForKeys: [.isRegularFileKey]) else { continue }
+                for case let fileURL as URL in enumerator
+                where fileURL.pathExtension.lowercased() == "pdf" {
+                    result.append(fileURL)
+                }
+            } else if url.pathExtension.lowercased() == "pdf" {
+                result.append(url)
+            }
+        }
+        return result.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
     
     private func toggleSelection(_ id: UUID) {
@@ -2027,7 +2054,7 @@ struct RenamerView: View {
                 
                 Spacer()
                 
-                if renamerManager.folderURL != nil {
+                if renamerManager.hasContent {
                     Button(action: { renamerManager.rescanFolder() }) {
                         Label("Check for Errors", systemImage: "checkmark.circle")
                     }
@@ -2050,7 +2077,7 @@ struct RenamerView: View {
             Divider()
             
             // Main content area
-            if renamerManager.folderURL != nil {
+            if renamerManager.hasContent {
                 VStack(spacing: 0) {
                     // File list
                     fileListView
@@ -2082,33 +2109,33 @@ struct RenamerView: View {
             Image(systemName: "folder.badge.gearshape")
                 .font(.system(size: 64))
                 .foregroundColor(isFolderTargeted ? .accentColor : .secondary)
-            
-            Text("Select a Folder with PDF Files")
+
+            Text("Select Files or Folder")
                 .font(.title2)
                 .fontWeight(.medium)
-            
+
             Text("This tool will add sequential prefixes to your sheet music files\nbased on detected instrument names")
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
-            
-            Text("Drag a folder here")
+
+            Text("Drag a folder or PDF files here")
                 .font(.callout)
                 .foregroundColor(isFolderTargeted ? .accentColor : .secondary)
-            
+
             Text("or")
                 .foregroundColor(.secondary)
-            
+
             Button(action: selectFolder) {
-                Label("Choose Folder", systemImage: "folder")
+                Label("Choose Files or Folder", systemImage: "folder")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            
+
             // Ensemble type selector
             VStack(alignment: .leading, spacing: 8) {
                 Text("Ensemble Type:")
                     .font(.headline)
-                
+
                 Picker("Ensemble Type", selection: $renamerManager.ensembleType) {
                     Text("Wind Band").tag(EnsembleType.band)
                     Text("Jazz Band").tag(EnsembleType.jazz)
@@ -2129,20 +2156,28 @@ struct RenamerView: View {
                 .padding()
         )
         .onDrop(of: [.fileURL], isTargeted: $isFolderTargeted) { providers in
-            guard let provider = providers.first else { return false }
-            
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                if let url = url {
-                    var isDirectory: ObjCBool = false
-                    if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory),
-                       isDirectory.boolValue {
-                        DispatchQueue.main.async {
-                            renamerManager.loadFolder(url: url)
-                        }
-                    }
+            // Collect all dropped URLs, then decide: folder → loadFolder, files → loadFiles
+            var collectedURLs: [URL] = []
+            let group = DispatchGroup()
+            for provider in providers {
+                group.enter()
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    if let url = url { collectedURLs.append(url) }
+                    group.leave()
                 }
             }
-            
+            group.notify(queue: .main) {
+                guard !collectedURLs.isEmpty else { return }
+                // If the first URL is a directory, treat it as a folder load
+                var isDirectory: ObjCBool = false
+                if collectedURLs.count == 1,
+                   FileManager.default.fileExists(atPath: collectedURLs[0].path, isDirectory: &isDirectory),
+                   isDirectory.boolValue {
+                    renamerManager.loadFolder(url: collectedURLs[0])
+                } else {
+                    renamerManager.loadFiles(urls: collectedURLs)
+                }
+            }
             return true
         }
     }
@@ -2268,16 +2303,25 @@ struct RenamerView: View {
     
     private func selectFolder() {
         let panel = NSOpenPanel()
-        panel.canChooseFiles = false
+        panel.canChooseFiles = true
         panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-        panel.title = "Select Folder with PDF Files"
-        panel.message = "Choose a folder containing sheet music PDF files to rename"
-        
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.pdf, .folder]
+        panel.canCreateDirectories = false
+        panel.title = "Select PDF Files or Folder"
+        panel.message = "Choose a folder, or select individual PDF files to rename"
+
         panel.begin { response in
-            if response == .OK, let url = panel.url {
-                renamerManager.loadFolder(url: url)
+            guard response == .OK else { return }
+            let urls = panel.urls
+            // If a single directory was chosen, use folder mode
+            var isDirectory: ObjCBool = false
+            if urls.count == 1,
+               FileManager.default.fileExists(atPath: urls[0].path, isDirectory: &isDirectory),
+               isDirectory.boolValue {
+                renamerManager.loadFolder(url: urls[0])
+            } else {
+                renamerManager.loadFiles(urls: urls)
             }
         }
     }
@@ -2830,13 +2874,15 @@ struct CombinerPreferencesView: View {
 // MARK: - Renamer Manager
 class RenamerManager: ObservableObject {
     @Published var folderURL: URL?
+    /// Files loaded directly (when the user drags in individual PDFs rather than a folder).
+    @Published private(set) var directFiles: [URL] = []
     @Published var operations: [RenameOperation] = []
     @Published var ensembleType: EnsembleType = .band {
         didSet {
             if !hasCustomOrder {
                 customInstrumentOrder = InstrumentOrders.getOrder(for: ensembleType)
             }
-            if folderURL != nil {
+            if hasContent {
                 scanFolder()
             }
         }
@@ -2844,12 +2890,15 @@ class RenamerManager: ObservableObject {
     @Published var customInstrumentOrder: [String] = InstrumentOrders.getOrder(for: .band) {
         didSet {
             hasCustomOrder = true
-            if folderURL != nil {
+            if hasContent {
                 scanFolder()
             }
         }
     }
-    
+
+    /// True when there is either a folder loaded or direct files loaded.
+    var hasContent: Bool { folderURL != nil || !directFiles.isEmpty }
+
     private var hasCustomOrder = false
     var manualOverrides: [String: Int] = [:]
     private var isRescanMode = false
@@ -2873,18 +2922,30 @@ class RenamerManager: ObservableObject {
     
     func loadFolder(url: URL) {
         self.folderURL = url
+        self.directFiles = []
         self.manualOverrides = [:]
         self.isRescanMode = false
         scanFolder()
     }
-    
+
+    /// Load individual PDF files directly (no enclosing folder required).
+    func loadFiles(urls: [URL]) {
+        self.folderURL = nil
+        self.directFiles = urls.filter { $0.pathExtension.lowercased() == "pdf" }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+        self.manualOverrides = [:]
+        self.isRescanMode = false
+        scanFolder()
+    }
+
     func clearFolder() {
         self.folderURL = nil
+        self.directFiles = []
         self.operations = []
         self.manualOverrides = [:]
         self.isRescanMode = false
     }
-    
+
     func rescanFolder() {
         let alert = NSAlert()
         alert.messageText = "Check for Errors"
@@ -2957,23 +3018,28 @@ class RenamerManager: ObservableObject {
     }
 
     private func scanFolder() {
-        guard let folderURL = folderURL else { return }
-
         operations = []
-        
-        let fileManager = FileManager.default
-        guard let enumerator = fileManager.enumerator(at: folderURL, includingPropertiesForKeys: [.isRegularFileKey]) else {
-            return
-        }
-        
-        var pdfFiles: [URL] = []
-        for case let fileURL as URL in enumerator {
-            if fileURL.pathExtension.lowercased() == "pdf" {
+
+        // Build the list of PDF files to process: either directly-supplied URLs
+        // or everything enumerated from the chosen folder.
+        var pdfFiles: [URL]
+        if !directFiles.isEmpty {
+            pdfFiles = directFiles
+        } else if let folderURL = folderURL {
+            let fileManager = FileManager.default
+            guard let enumerator = fileManager.enumerator(at: folderURL,
+                                                          includingPropertiesForKeys: [.isRegularFileKey]) else {
+                return
+            }
+            pdfFiles = []
+            for case let fileURL as URL in enumerator
+            where fileURL.pathExtension.lowercased() == "pdf" {
                 pdfFiles.append(fileURL)
             }
+            pdfFiles.sort { $0.lastPathComponent < $1.lastPathComponent }
+        } else {
+            return
         }
-        
-        pdfFiles.sort { $0.lastPathComponent < $1.lastPathComponent }
         
         // Group files
         var detectedFiles: [(order: Int, url: URL, originalName: String, instrument: String)] = []
@@ -3025,14 +3091,16 @@ class RenamerManager: ObservableObject {
         
         // Sort and assign numbers
         detectedFiles.sort { $0.order < $1.order }
-        
+
+        let fileManager = FileManager.default
+
         // Process score files (all get 00)
         for (url, originalName, _) in scoreFiles {
             let prefix = "00"
             let (cleanName, oldPrefix) = stripRescanPrefix(from: originalName)
-            
+
             let newFilename = "\(prefix) - \(cleanName)"
-            let newURL = folderURL.appendingPathComponent(newFilename)
+            let newURL = url.deletingLastPathComponent().appendingPathComponent(newFilename)
             
             if oldPrefix == prefix {
                 let op = RenameOperation(
@@ -3075,8 +3143,8 @@ class RenamerManager: ObservableObject {
             let (cleanName, oldPrefix) = stripRescanPrefix(from: originalName)
             
             let newFilename = "\(prefix) - \(cleanName)"
-            let newURL = folderURL.appendingPathComponent(newFilename)
-            
+            let newURL = url.deletingLastPathComponent().appendingPathComponent(newFilename)
+
             if oldPrefix == prefix {
                 let op = RenameOperation(
                     originalURL: url,
@@ -3115,8 +3183,8 @@ class RenamerManager: ObservableObject {
             let (cleanName, _) = stripRescanPrefix(from: originalName)
             
             let newFilename = "\(prefix) - \(cleanName)"
-            let newURL = folderURL.appendingPathComponent(newFilename)
-            
+            let newURL = url.deletingLastPathComponent().appendingPathComponent(newFilename)
+
             if fileManager.fileExists(atPath: newURL.path) && newURL != url {
                 let op = RenameOperation(
                     originalURL: url,
