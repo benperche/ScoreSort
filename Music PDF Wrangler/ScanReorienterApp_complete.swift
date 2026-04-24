@@ -3958,6 +3958,10 @@ struct SplitView: View {
                 customFileNames: $customFileNames,
                 previewOffset: $previewOffset,
                 onBack: { showingNamingStage = false },
+                onClear: {
+                    showingNamingStage = false
+                    pdfManager.clearPDF()
+                },
                 onSave: { saveSplitPDF() }
             )
         } else {
@@ -4412,6 +4416,7 @@ struct SplitNamingStageView: View {
     @Binding var customFileNames: [Int: String]
     @Binding var previewOffset: CGPoint
     let onBack: () -> Void
+    let onClear: () -> Void
     let onSave: () -> Void
 
     @FocusState private var focusedField: Int?
@@ -4460,6 +4465,11 @@ struct SplitNamingStageView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
+                Button(action: onClear) {
+                    Label("Clear", systemImage: "xmark.circle.fill")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
