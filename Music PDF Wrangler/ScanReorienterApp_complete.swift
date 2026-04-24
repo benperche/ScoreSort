@@ -3912,6 +3912,9 @@ struct SplitView: View {
     @State private var showingNamingStage: Bool = false
     @State private var baseFileName: String = ""
     @State private var customFileNames: [Int: String] = [:]
+    /// Shared pan offset for all naming-stage previews (PDF points from the default top-left position).
+    /// Reset whenever a new PDF is loaded so it always starts at the instrument-name corner.
+    @State private var previewOffset: CGPoint = .zero
     @FocusState private var isViewFocused: Bool
 
     var totalPages: Int {
@@ -3953,6 +3956,7 @@ struct SplitView: View {
                 fileSizes: fileSizes,
                 baseFileName: $baseFileName,
                 customFileNames: $customFileNames,
+                previewOffset: $previewOffset,
                 onBack: { showingNamingStage = false },
                 onSave: { saveSplitPDF() }
             )
@@ -4145,10 +4149,12 @@ struct SplitView: View {
                 baseFileName = pdfManager.currentFileName ?? ""
                 isViewFocused = true
                 applyStride()
+                previewOffset = .zero
             } else {
                 fileSizes = []
                 currentPage = 0
                 customFileNames.removeAll()
+                previewOffset = .zero
             }
         }
     } // end splitStageBody
@@ -4378,8 +4384,14 @@ struct SplitNamingStageView: View {
     let fileSizes: [Int]
     @Binding var baseFileName: String
     @Binding var customFileNames: [Int: String]
+    @Binding var previewOffset: CGPoint
     let onBack: () -> Void
     let onSave: () -> Void
+
+    /// Step sizes in PDF points. Vertical = half of the 100 pt crop height;
+    /// horizontal = half of the 200 pt max crop width → 50% overlap each step.
+    private let stepV: CGFloat = 50
+    private let stepH: CGFloat = 100
 
     @FocusState private var focusedField: Int?
 
@@ -4420,13 +4432,44 @@ struct SplitNamingStageView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // ── Top bar (title only) ─────────────────────────────────────
+            // ── Top bar ──────────────────────────────────────────────────
             HStack {
-                Spacer()
                 Text("Step 2: Name Files")
                     .font(.title2)
                     .fontWeight(.semibold)
+
                 Spacer()
+
+                // Pan controls — move the crop window on ALL preview strips simultaneously
+                HStack(spacing: 2) {
+                    Text("Preview:")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Button { previewOffset.y += stepV } label: {
+                        Image(systemName: "arrow.up")
+                    }
+                    .help("Shift previews up")
+                    Button { previewOffset.y -= stepV } label: {
+                        Image(systemName: "arrow.down")
+                    }
+                    .help("Shift previews down")
+                    Button { previewOffset.x -= stepH } label: {
+                        Image(systemName: "arrow.left")
+                    }
+                    .help("Shift previews left")
+                    Button { previewOffset.x += stepH } label: {
+                        Image(systemName: "arrow.right")
+                    }
+                    .help("Shift previews right")
+                    if previewOffset != .zero {
+                        Button { previewOffset = .zero } label: {
+                            Image(systemName: "arrow.uturn.backward")
+                        }
+                        .help("Reset preview position")
+                    }
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
@@ -4480,7 +4523,8 @@ struct SplitNamingStageView: View {
                                 ),
                                 fieldFocus: $focusedField,
                                 instrumentNames: instrumentNames,
-                                allSuffixes: customFileNames
+                                allSuffixes: customFileNames,
+                                previewOffset: previewOffset
                             )
                             .id(fileIndex)
                             if fileIndex < numberOfFiles - 1 { Divider() }
@@ -4534,6 +4578,7 @@ struct SplitFileNamingRow: View {
     var fieldFocus: FocusState<Int?>.Binding
     let instrumentNames: [String]   // ordered, deduplicated, capitalised
     let allSuffixes: [Int: String]  // snapshot of all rows' current suffixes
+    var previewOffset: CGPoint = .zero
 
     private var isFieldFocused: Bool { fieldFocus.wrappedValue == fileIndex }
 
@@ -4645,7 +4690,7 @@ struct SplitFileNamingRow: View {
             // image's hit-test area can grow beyond its visible frame and silently
             // absorb clicks meant for the text field below.
             if let page = pdfDocument.page(at: firstPageIndex) {
-                PageInstrumentPreview(page: page)
+                PageInstrumentPreview(page: page, offset: previewOffset)
                     .frame(maxWidth: .infinity)
                     .frame(height: 150)
                     .background(Color.white)
@@ -4795,9 +4840,13 @@ private struct SuggestionButton: View {
 // MARK: - Page Instrument Preview
 struct PageInstrumentPreview: View {
     let page: PDFPage
-    
+    /// Pan offset in PDF points from the default top-left position.
+    /// Positive y = shifted up; negative y = shifted down.
+    /// Positive x = shifted right; negative x = shifted left.
+    var offset: CGPoint = .zero
+
     var body: some View {
-        if let image = renderInstrumentNameArea(from: page) {
+        if let image = renderInstrumentNameArea(from: page, offset: offset) {
             // Use .fill so the crop fills its parent frame completely.
             // The instrument name sits at the left of the crop, so any overflow
             // clipped on the right is just whitespace.
@@ -4811,17 +4860,17 @@ struct PageInstrumentPreview: View {
         }
     }
 
-    // Render just the top-left portion where instrument names typically appear
-    private func renderInstrumentNameArea(from page: PDFPage) -> NSImage? {
+    // Render the crop window defined by the current pan offset.
+    // Default position: top-left corner (instrument name area).
+    // Clamped so the crop never extends outside the page.
+    private func renderInstrumentNameArea(from page: PDFPage, offset: CGPoint) -> NSImage? {
         let pageBounds = page.bounds(for: .mediaBox)
-        
-        // Calculate the crop area.
-        // Start at the very top of the page (instrument names sit right at the top)
-        // and capture ~1.4 inches (100 pt) of height — enough to show the name box.
+
+        // Crop dimensions stay constant; only the position changes.
         let cropHeight: CGFloat = 100    // ~1.4 inches
         let cropWidth: CGFloat = min(pageBounds.width * 0.4, 200) // Left 40%, max 200 pt
 
-        // Account for page rotation
+        // Account for page rotation (swap axes for 90°/270°)
         let rotation = page.rotation
         var actualBounds = pageBounds
         if rotation == 90 || rotation == 270 {
@@ -4829,13 +4878,20 @@ struct PageInstrumentPreview: View {
                                 width: pageBounds.height, height: pageBounds.width)
         }
 
-        // In PDF coords Y grows upward; the top of the page is at origin.y + height.
-        let cropRect = CGRect(
-            x: actualBounds.origin.x,
-            y: actualBounds.origin.y + actualBounds.height - cropHeight,
-            width: cropWidth,
-            height: cropHeight
-        )
+        // Default anchor: top-left of the page in PDF coords (Y grows upward).
+        let defaultX = actualBounds.origin.x
+        let defaultY = actualBounds.origin.y + actualBounds.height - cropHeight
+
+        // Apply pan offset, then clamp so the crop stays within the page.
+        let minX = actualBounds.origin.x
+        let maxX = actualBounds.origin.x + actualBounds.width - cropWidth
+        let minY = actualBounds.origin.y
+        let maxY = defaultY   // can only move down from the top
+
+        let cropX = min(max(defaultX + offset.x, minX), maxX)
+        let cropY = min(max(defaultY + offset.y, minY), maxY)
+
+        let cropRect = CGRect(x: cropX, y: cropY, width: cropWidth, height: cropHeight)
         
         // Create image
         let scale: CGFloat = 2.0 // Retina resolution
