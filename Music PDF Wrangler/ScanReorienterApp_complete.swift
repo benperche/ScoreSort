@@ -4574,16 +4574,25 @@ struct SplitFileNamingRow: View {
     /// previewOffset binding so pressing any arrow moves every strip at once.
     private var panOverlay: some View {
         ZStack {
+            // Up/down: VStack needs a concrete height to give the Spacer something to
+            // expand against. The .frame(maxWidth:maxHeight:) ensures the VStack fills
+            // the parent regardless of what the preview image is doing to the layout.
             VStack {
                 panButton("chevron.up")   { previewOffset.y += stepV }
                 Spacer()
                 panButton("chevron.down") { previewOffset.y -= stepV }
             }
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
             HStack {
                 panButton("chevron.left")  { previewOffset.x -= stepH }
                 Spacer()
                 panButton("chevron.right") { previewOffset.x += stepH }
             }
+            .padding(.horizontal, 6)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+
             // Reset button — top-right, only visible when panned away from default
             if previewOffset != .zero {
                 VStack {
@@ -4593,9 +4602,11 @@ struct SplitFileNamingRow: View {
                     }
                     Spacer()
                 }
+                .padding(6)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
-        .padding(6)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func panButton(_ icon: String, action: @escaping () -> Void) -> some View {
