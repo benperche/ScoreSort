@@ -4700,20 +4700,19 @@ struct SplitFileNamingRow: View {
 
             // ── Instrument name crop with pan overlay ────────────────
             if let page = pdfDocument.page(at: firstPageIndex) {
-                ZStack {
-                    // The preview image itself — hit-testing off so it doesn't
-                    // swallow clicks meant for controls below the strip.
-                    PageInstrumentPreview(page: page, offset: previewOffset)
-                        .allowsHitTesting(false)
-
-                    // Arrow buttons overlaid on top of the image.
-                    panOverlay
-                }
-                .frame(maxWidth: .infinity)
-                .frame(height: 150)
-                .background(Color.white)
-                .clipShape(RoundedRectangle(cornerRadius: 4))
-                .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
+                // panOverlay is applied as .overlay on the FRAMED container rather
+                // than as a ZStack sibling of PageInstrumentPreview.  This guarantees
+                // the overlay always receives the container's fixed 150 pt height as
+                // its layout size, completely independent of whatever
+                // PageInstrumentPreview draws (or redraws) inside.
+                PageInstrumentPreview(page: page, offset: previewOffset)
+                    .allowsHitTesting(false)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: 150)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
+                    .overlay { panOverlay }
             } else {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.gray.opacity(0.12))
