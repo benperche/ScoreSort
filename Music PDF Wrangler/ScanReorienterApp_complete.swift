@@ -5114,24 +5114,22 @@ struct PDFPageView: NSViewRepresentable {
         }
     }
     
-    // Render the full PDF page into an NSImage for safe preview cloning
+    // Render the full PDF page into an NSImage for safe preview cloning.
+    // Uses page.thumbnail(of:for:) which correctly accounts for the page's
+    // rotation property — pages stored as landscape+rotation render portrait.
     private func renderFullImage(from page: PDFPage) -> NSImage? {
-        let bounds = page.bounds(for: .mediaBox)
-        let size = NSSize(width: bounds.width, height: bounds.height)
-        let image = NSImage(size: size)
-        image.lockFocus()
-        
-        NSGraphicsContext.current?.imageInterpolation = .high
-        
-        if let context = NSGraphicsContext.current?.cgContext {
-            context.saveGState()
-            // Draw the page directly without flipping - PDFKit handles orientation
-            page.draw(with: .mediaBox, to: context)
-            context.restoreGState()
+        let mediaBox = page.bounds(for: .mediaBox)
+        let rotation = ((page.rotation % 360) + 360) % 360
+
+        // For 90°/270° rotated pages the visual size is the media box transposed
+        let displaySize: NSSize
+        if rotation == 90 || rotation == 270 {
+            displaySize = NSSize(width: mediaBox.height, height: mediaBox.width)
+        } else {
+            displaySize = NSSize(width: mediaBox.width, height: mediaBox.height)
         }
-        
-        image.unlockFocus()
-        return image
+
+        return page.thumbnail(of: displaySize, for: .mediaBox)
     }
 }
 
