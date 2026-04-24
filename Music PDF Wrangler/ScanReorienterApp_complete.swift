@@ -4572,41 +4572,35 @@ struct SplitFileNamingRow: View {
     // ── Pan overlay ─────────────────────────────────────────────────────────
     /// Arrow buttons overlaid on each preview strip; all rows share the same
     /// previewOffset binding so pressing any arrow moves every strip at once.
+    ///
+    /// Uses Color.clear + .overlay(alignment:) rather than VStack/HStack+Spacer
+    /// so button positions are anchored directly — no Spacer needs a concrete
+    /// height proposal, so buttons never collapse when the image finishes loading.
     private var panOverlay: some View {
-        ZStack {
-            // Up/down: VStack needs a concrete height to give the Spacer something to
-            // expand against. The .frame(maxWidth:maxHeight:) ensures the VStack fills
-            // the parent regardless of what the preview image is doing to the layout.
-            VStack {
+        Color.clear
+            .overlay(alignment: .top) {
                 panButton("chevron.up")   { previewOffset.y += stepV }
-                Spacer()
+                    .padding(.top, 6)
+            }
+            .overlay(alignment: .bottom) {
                 panButton("chevron.down") { previewOffset.y -= stepV }
+                    .padding(.bottom, 6)
             }
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-            HStack {
+            .overlay(alignment: .leading) {
                 panButton("chevron.left")  { previewOffset.x -= stepH }
-                Spacer()
+                    .padding(.leading, 6)
+            }
+            .overlay(alignment: .trailing) {
                 panButton("chevron.right") { previewOffset.x += stepH }
+                    .padding(.trailing, 6)
             }
-            .padding(.horizontal, 6)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
-
             // Reset button — top-right, only visible when panned away from default
-            if previewOffset != .zero {
-                VStack {
-                    HStack {
-                        Spacer()
-                        panButton("arrow.uturn.backward") { previewOffset = .zero }
-                    }
-                    Spacer()
+            .overlay(alignment: .topTrailing) {
+                if previewOffset != .zero {
+                    panButton("arrow.uturn.backward") { previewOffset = .zero }
+                        .padding(6)
                 }
-                .padding(6)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private func panButton(_ icon: String, action: @escaping () -> Void) -> some View {
