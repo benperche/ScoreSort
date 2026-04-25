@@ -2514,8 +2514,16 @@ struct BulkRenameView: View {
     // ── Drop zone ────────────────────────────────────────────────────────
     @State private var isTargeted = false
 
+    // ── Prefix step ───────────────────────────────────────────────────────
+    @State private var showingPrefixStage: Bool = false
+    @State private var showingSummary: Bool = false
+    @State private var prefixItems: [PrefixItem] = []
+    @State private var summaryNames: [String] = []
+
     // ── Settings ─────────────────────────────────────────────────────────
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
+    @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
+    @AppStorage("prefixEnsembleType") private var prefixEnsembleType: EnsembleType = .band
 
     // ── Instrument names (same union as the Splitter) ─────────────────────
     private var instrumentNames: [String] {
@@ -2558,30 +2566,50 @@ struct BulkRenameView: View {
 
     // ── Body ──────────────────────────────────────────────────────────────
     var body: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                Text("Bulk Part Rename")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                Spacer()
-                if !loadedFiles.isEmpty {
-                    Button(action: clearFiles) {
-                        Label("Clear", systemImage: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
+        if showingSummary {
+            RenameSummaryView(
+                finalNames: summaryNames,
+                outputFolderURL: nil,
+                onStartOver: {
+                    showingSummary = false
+                    showingPrefixStage = false
+                    clearFiles()
                 }
-            }
-            .padding()
-            .background(Color(NSColor.windowBackgroundColor))
+            )
+        } else if showingPrefixStage {
+            PrefixOrderStepView(
+                stepLabel: "Step 2",
+                initialItems: prefixItems,
+                ensembleType: $prefixEnsembleType,
+                onBack: { showingPrefixStage = false },
+                onApply: { orderedItems in applyPrefixAndRenameBulk(orderedItems: orderedItems) }
+            )
+        } else {
+            VStack(spacing: 0) {
+                // Header
+                HStack {
+                    Text("Bulk Part Rename")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    if !loadedFiles.isEmpty {
+                        Button(action: clearFiles) {
+                            Label("Clear", systemImage: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.secondary)
+                    }
+                }
+                .padding()
+                .background(Color(NSColor.windowBackgroundColor))
 
-            Divider()
+                Divider()
 
-            if loadedFiles.isEmpty {
-                dropZoneView
-            } else {
-                fileListView
+                if loadedFiles.isEmpty {
+                    dropZoneView
+                } else {
+                    fileListView
+                }
             }
         }
     }
@@ -2714,7 +2742,7 @@ struct BulkRenameView: View {
             Divider()
 
             // Bottom bar
-            VStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 6) {
                 // Warning
                 HStack(spacing: 6) {
                     Image(systemName: "exclamationmark.triangle.fill")
@@ -2737,11 +2765,27 @@ struct BulkRenameView: View {
                         Spacer()
                     }
                 }
+                // Prefix option row
+                HStack(spacing: 12) {
+                    Toggle("Prefix score order", isOn: $prefixEnabled)
+                    Picker("", selection: $prefixEnsembleType) {
+                        Text("Wind Band").tag(EnsembleType.band)
+                        Text("Jazz Band").tag(EnsembleType.jazz)
+                        Text("Orchestra").tag(EnsembleType.orchestra)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 280)
+                    .disabled(!prefixEnabled)
+                    .opacity(prefixEnabled ? 1 : 0.5)
+                    Spacer()
+                }
                 HStack {
                     Spacer()
                     Button(action: executeRename) {
-                        Label("Rename \(loadedFiles.count) File\(loadedFiles.count == 1 ? "" : "s")",
-                              systemImage: "pencil")
+                        Label(prefixEnabled
+                              ? "Next: Prefix Order"
+                              : "Rename \(loadedFiles.count) File\(loadedFiles.count == 1 ? "" : "s")",
+                              systemImage: prefixEnabled ? "chevron.right" : "pencil")
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
@@ -2807,30 +2851,78 @@ struct BulkRenameView: View {
     // ── Rename execution ──────────────────────────────────────────────────
     private func executeRename() {
         let sep = filenameSeparator
-        var errors: [String] = []
-        var renamedCount = 0
 
-        for (index, item) in loadedFiles.enumerated() {
-            let sfx = suffixes[index] ?? ""
-            let newName = sfx.isEmpty
-                ? "\(baseFileName)\(sep)\(index + 1).pdf"
-                : "\(baseFileName)\(sep)\(sfx).pdf"
-            let newURL = item.url.deletingLastPathComponent().appendingPathComponent(newName)
+        if prefixEnabled {
+            // Build PrefixItems (don't touch disk yet) and go to prefix step.
+            prefixItems = loadedFiles.enumerated().map { index, item in
+                let sfx = suffixes[index] ?? ""
+                let proposed = sfx.isEmpty
+                    ? "\(baseFileName)\(sep)\(index + 1).pdf"
+                    : "\(baseFileName)\(sep)\(sfx).pdf"
+                return PrefixItem(id: index,
+                                  proposedName: proposed,
+                                  page: item.document.page(at: 0),
+                                  originalURL: item.url)
+            }
+            showingPrefixStage = true
+        } else {
+            // Rename directly to the base name + suffix (no prefix step).
+            var errors: [String] = []
+            var finalNames: [String] = []
+
+            for (index, item) in loadedFiles.enumerated() {
+                let sfx = suffixes[index] ?? ""
+                let newName = sfx.isEmpty
+                    ? "\(baseFileName)\(sep)\(index + 1).pdf"
+                    : "\(baseFileName)\(sep)\(sfx).pdf"
+                let newURL = item.url.deletingLastPathComponent().appendingPathComponent(newName)
+                do {
+                    try FileManager.default.moveItem(at: item.url, to: newURL)
+                    finalNames.append(newName)
+                } catch {
+                    errors.append(item.url.lastPathComponent)
+                }
+            }
+
+            if errors.isEmpty {
+                summaryNames = finalNames
+                showingSummary = true
+            } else {
+                let failed = errors.prefix(5).joined(separator: "\n")
+                showNSAlert(
+                    title: "Some Files Could Not Be Renamed",
+                    message: "Failed to rename \(errors.count) file\(errors.count == 1 ? "" : "s"):\n\(failed)",
+                    isError: true
+                )
+            }
+        }
+    }
+
+    /// Called by PrefixOrderStepView when the user confirms ordering.
+    /// Renames each file from its original URL to the final prefixed name in one pass.
+    private func applyPrefixAndRenameBulk(orderedItems: [PrefixItem]) {
+        let sep = UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - "
+        var errors: [String] = []
+        var finalNames: [String] = []
+
+        for (position, item) in orderedItems.enumerated() {
+            guard let originalURL = item.originalURL else { continue }
+            let prefix = String(format: "%02d", position + 1)
+            let finalName = "\(prefix)\(sep)\(item.proposedName)"
+            let targetURL = originalURL.deletingLastPathComponent()
+                                       .appendingPathComponent(finalName)
             do {
-                try FileManager.default.moveItem(at: item.url, to: newURL)
-                renamedCount += 1
+                try FileManager.default.moveItem(at: originalURL, to: targetURL)
+                finalNames.append(finalName)
             } catch {
-                errors.append(item.url.lastPathComponent)
+                errors.append(item.proposedName)
             }
         }
 
         if errors.isEmpty {
-            showNSAlert(
-                title: "Rename Complete",
-                message: "Renamed \(renamedCount) file\(renamedCount == 1 ? "" : "s") successfully.",
-                isError: false
-            )
-            clearFiles()
+            summaryNames = finalNames
+            showingPrefixStage = false
+            showingSummary = true
         } else {
             let failed = errors.prefix(5).joined(separator: "\n")
             showNSAlert(
@@ -4343,13 +4435,20 @@ struct SplitView: View {
     @State private var stride: Int = 2
     @State private var currentPage: Int = 0
     @State private var showingNamingStage: Bool = false
+    @State private var showingPrefixStage: Bool = false
+    @State private var showingSummary: Bool = false
     @State private var baseFileName: String = ""
     @State private var customFileNames: [Int: String] = [:]
     /// Shared pan offset for all naming-stage previews (PDF points from the default top-left position).
     /// Reset whenever a new PDF is loaded so it always starts at the instrument-name corner.
     @State private var previewOffset: CGPoint = .zero
+    @State private var prefixItems: [PrefixItem] = []
+    @State private var summaryNames: [String] = []
+    @State private var pendingFolderURL: URL? = nil
     @FocusState private var isViewFocused: Bool
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
+    @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
+    @AppStorage("prefixEnsembleType") private var prefixEnsembleType: EnsembleType = .band
 
     var totalPages: Int {
         pdfManager.pdfDocument?.pageCount ?? 0
@@ -4384,7 +4483,36 @@ struct SplitView: View {
     }
     
     var body: some View {
-        if showingNamingStage, let document = pdfManager.pdfDocument {
+        if showingSummary {
+            RenameSummaryView(
+                finalNames: summaryNames,
+                outputFolderURL: pendingFolderURL,
+                onStartOver: {
+                    showingSummary = false
+                    showingPrefixStage = false
+                    showingNamingStage = false
+                    pdfManager.clearPDF()
+                    baseFileName = ""
+                    customFileNames = [:]
+                    fileSizes = []
+                    summaryNames = []
+                    pendingFolderURL = nil
+                }
+            )
+        } else if showingPrefixStage {
+            PrefixOrderStepView(
+                stepLabel: "Step 3",
+                initialItems: prefixItems,
+                ensembleType: $prefixEnsembleType,
+                onBack: {
+                    showingPrefixStage = false
+                    showingNamingStage = true
+                },
+                onApply: { orderedItems in
+                    applyPrefixAndSaveSplit(orderedItems: orderedItems)
+                }
+            )
+        } else if showingNamingStage, let document = pdfManager.pdfDocument {
             SplitNamingStageView(
                 pdfDocument: document,
                 fileSizes: fileSizes,
@@ -4399,7 +4527,7 @@ struct SplitView: View {
                 onSave: { saveSplitPDF() }
             )
         } else {
-        splitStageBody
+            splitStageBody
         }
     }
 
@@ -4613,7 +4741,7 @@ struct SplitView: View {
     }
 
     func saveSplitPDF() {
-        guard let _ = pdfManager.pdfDocument, numberOfFiles >= 2 else { return }
+        guard let document = pdfManager.pdfDocument, numberOfFiles >= 2 else { return }
 
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
@@ -4624,7 +4752,30 @@ struct SplitView: View {
         panel.message = "Choose where to save the split PDF files"
 
         panel.begin { response in
-            if response == .OK, let folderURL = panel.url {
+            guard response == .OK, let folderURL = panel.url else { return }
+
+            if prefixEnabled {
+                // Build in-memory items and go to the prefix step (no disk write yet).
+                var items: [PrefixItem] = []
+                var pagePos = 0
+                for fileIndex in 0..<fileSizes.count {
+                    let suffix = customFileNames[fileIndex] ?? ""
+                    let proposed: String
+                    if suffix.isEmpty {
+                        proposed = "\(baseFileName)\(filenameSeparator)\(fileIndex + 1).pdf"
+                    } else {
+                        proposed = "\(baseFileName)\(filenameSeparator)\(suffix).pdf"
+                    }
+                    let firstPage = document.page(at: pagePos)
+                    items.append(PrefixItem(id: fileIndex, proposedName: proposed, page: firstPage))
+                    pagePos += fileSizes[fileIndex]
+                }
+                pendingFolderURL = folderURL
+                prefixItems = items
+                showingNamingStage = false
+                showingPrefixStage = true
+            } else {
+                // Save directly — no prefix step.
                 pdfManager.saveSplitPDF(
                     to: folderURL,
                     splitMarkers: splitMarkers,
@@ -4633,8 +4784,67 @@ struct SplitView: View {
                     pageToFileMapping: pageToFileMapping,
                     separator: filenameSeparator
                 ) { title, message, isError in
-                    showNSAlert(title: title, message: message, isError: isError)
+                    if isError {
+                        showNSAlert(title: title, message: message, isError: true)
+                    } else {
+                        // Build names for summary
+                        var names: [String] = []
+                        for i in 0..<fileSizes.count {
+                            let sfx = customFileNames[i] ?? ""
+                            if sfx.isEmpty {
+                                names.append("\(baseFileName)\(filenameSeparator)\(i + 1).pdf")
+                            } else {
+                                names.append("\(baseFileName)\(filenameSeparator)\(sfx).pdf")
+                            }
+                        }
+                        pendingFolderURL = folderURL
+                        summaryNames = names
+                        showingNamingStage = false
+                        showingSummary = true
+                    }
                 }
+            }
+        }
+    }
+
+    /// Called by PrefixOrderStepView when the user confirms the prefix ordering.
+    /// Writes all split files to disk with their final prefixed names in one pass.
+    private func applyPrefixAndSaveSplit(orderedItems: [PrefixItem]) {
+        guard let folderURL = pendingFolderURL else { return }
+        let sep = UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - "
+
+        // Build customFileNames keyed by original fileIndex.
+        // saveSplitPDF writes: "\(baseFileName)\(separator)\(suffix).pdf"
+        // We pass baseFileName="" separator="" so the suffix IS the complete filename (without .pdf).
+        var finalCustomNames: [Int: String] = [:]
+        var finalNamesForSummary: [String] = []
+
+        for (position, item) in orderedItems.enumerated() {
+            let prefix = String(format: "%02d", position + 1)
+            let fullName = "\(prefix)\(sep)\(item.proposedName)"  // e.g. "01 - Beethoven - Flute.pdf"
+            let nameWithoutPdf = fullName.hasSuffix(".pdf")
+                ? String(fullName.dropLast(4))
+                : fullName
+            finalCustomNames[item.id] = nameWithoutPdf
+            finalNamesForSummary.append(fullName)
+        }
+
+        pdfManager.saveSplitPDF(
+            to: folderURL,
+            splitMarkers: splitMarkers,
+            baseFileName: "",
+            customFileNames: finalCustomNames,
+            pageToFileMapping: pageToFileMapping,
+            separator: ""
+        ) { _, _, isError in
+            if isError {
+                showNSAlert(title: "Save Failed",
+                            message: "Could not write one or more files to \(folderURL.path).",
+                            isError: true)
+            } else {
+                summaryNames = finalNamesForSummary
+                showingPrefixStage = false
+                showingSummary = true
             }
         }
     }
@@ -4856,6 +5066,8 @@ struct SplitNamingStageView: View {
 
     @FocusState private var focusedField: Int?
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
+    @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
+    @AppStorage("prefixEnsembleType") private var prefixEnsembleType: EnsembleType = .band
 
     var numberOfFiles: Int { fileSizes.count }
 
@@ -4986,20 +5198,38 @@ struct SplitNamingStageView: View {
             Divider()
 
             // ── Bottom bar ───────────────────────────────────────────────
-            HStack {
-                Button(action: onBack) {
-                    Label("Back to Split", systemImage: "chevron.left")
+            VStack(alignment: .leading, spacing: 8) {
+                // Prefix option row
+                HStack(spacing: 12) {
+                    Toggle("Prefix score order", isOn: $prefixEnabled)
+                    Picker("", selection: $prefixEnsembleType) {
+                        Text("Wind Band").tag(EnsembleType.band)
+                        Text("Jazz Band").tag(EnsembleType.jazz)
+                        Text("Orchestra").tag(EnsembleType.orchestra)
+                    }
+                    .pickerStyle(.segmented)
+                    .frame(maxWidth: 280)
+                    .disabled(!prefixEnabled)
+                    .opacity(prefixEnabled ? 1 : 0.5)
+                    Spacer()
                 }
-                .buttonStyle(.bordered)
 
-                Spacer()
+                HStack {
+                    Button(action: onBack) {
+                        Label("Back to Split", systemImage: "chevron.left")
+                    }
+                    .buttonStyle(.bordered)
 
-                Button(action: onSave) {
-                    Label("Save Split Files", systemImage: "arrow.down.doc.fill")
+                    Spacer()
+
+                    Button(action: onSave) {
+                        Label(prefixEnabled ? "Next: Prefix Order" : "Save Split Files",
+                              systemImage: prefixEnabled ? "chevron.right" : "arrow.down.doc.fill")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(!canSave)
                 }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                .disabled(!canSave)
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
@@ -5327,6 +5557,310 @@ private struct SuggestionButton: View {
                 : (isHovered ? Color.accentColor.opacity(0.10) : Color.clear)
         )
         .onHover { isHovered = $0 }
+    }
+}
+
+// MARK: - Prefix Order Step
+
+/// Matches the best instrument name in `filename` against `order`, returning the
+/// order-list index (0-based) or nil.  Mirrors RenamerManager.detectInstrument but
+/// works as a free function so it can be used by PrefixOrderStepView without a manager.
+private func matchInstrumentOrder(in filename: String, order: [String]) -> Int? {
+    let lower = filename.lowercased()
+    let sorted = order.enumerated()
+        .map { ($0.offset, $0.element) }
+        .sorted { $0.1.count > $1.1.count }   // longest first → "bass clarinet" beats "clarinet"
+    var matches: [(index: Int, position: Int)] = []
+    for (idx, instrument) in sorted {
+        if let range = lower.range(of: instrument.lowercased()) {
+            let pos = lower.distance(from: lower.startIndex, to: range.lowerBound)
+            matches.append((idx, pos))
+        }
+    }
+    return matches.min(by: { $0.position < $1.position })?.index
+}
+
+/// A single item flowing through the Prefix Order step.
+/// For the Splitter, `originalURL` is nil (file not on disk yet).
+/// For Bulk Rename, `originalURL` is the current URL of the file to rename.
+struct PrefixItem: Identifiable {
+    let id: Int              // original zero-based index (stable across reordering)
+    let proposedName: String // full filename incl. .pdf, e.g. "Beethoven - Flute.pdf"
+    let page: PDFPage?
+    var originalURL: URL? = nil
+}
+
+/// One row in PrefixOrderStepView — shows position, thumbnail, proposed name → final name.
+private struct PrefixOrderRow: View {
+    let item: PrefixItem
+    let position: Int
+    let finalName: String
+    let onMoveUp: (() -> Void)?
+    let onMoveDown: (() -> Void)?
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Up / down arrows
+            VStack(spacing: 2) {
+                Button { onMoveUp?() } label: {
+                    Image(systemName: "chevron.up").font(.caption)
+                }
+                .buttonStyle(.plain)
+                .disabled(onMoveUp == nil)
+
+                Button { onMoveDown?() } label: {
+                    Image(systemName: "chevron.down").font(.caption)
+                }
+                .buttonStyle(.plain)
+                .disabled(onMoveDown == nil)
+            }
+            .padding(.leading, 8)
+
+            // Position badge
+            Text(String(format: "%02d", position))
+                .font(.system(.body, design: .monospaced))
+                .fontWeight(.semibold)
+                .foregroundColor(.accentColor)
+                .frame(width: 30, alignment: .center)
+
+            // Thumbnail
+            if let page = item.page {
+                PageInstrumentPreview(page: page, offset: .zero)
+                    .allowsHitTesting(false)
+                    .frame(width: 70, height: 90)
+                    .background(Color.white)
+                    .clipShape(RoundedRectangle(cornerRadius: 4))
+                    .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
+            } else {
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color(NSColor.controlBackgroundColor))
+                    .frame(width: 70, height: 90)
+                    .overlay(Image(systemName: "doc").foregroundColor(.secondary))
+            }
+
+            // Filenames
+            VStack(alignment: .leading, spacing: 4) {
+                Text(item.proposedName)
+                    .font(.body)
+                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.right")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    Text(finalName)
+                        .font(.caption)
+                        .fontWeight(.medium)
+                        .foregroundColor(.accentColor)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+    }
+}
+
+/// Full-screen step that lets the user set and reorder prefix numbering.
+/// Used as Step 3 (Splitter) or Step 2 (Bulk Rename).
+struct PrefixOrderStepView: View {
+    let stepLabel: String           // "Step 3" or "Step 2"
+    let initialItems: [PrefixItem]
+    @Binding var ensembleType: EnsembleType
+    let onBack: () -> Void
+    let onApply: ([PrefixItem]) -> Void  // reordered list; caller handles save
+
+    @State private var items: [PrefixItem]
+    @AppStorage("prefixSeparator") private var prefixSeparator: String = " - "
+
+    init(stepLabel: String,
+         initialItems: [PrefixItem],
+         ensembleType: Binding<EnsembleType>,
+         onBack: @escaping () -> Void,
+         onApply: @escaping ([PrefixItem]) -> Void) {
+        self.stepLabel = stepLabel
+        self.initialItems = initialItems
+        self._ensembleType = ensembleType
+        self.onBack = onBack
+        self.onApply = onApply
+        let order = InstrumentOrders.getOrder(for: ensembleType.wrappedValue)
+        self._items = State(initialValue: Self.autoSorted(initialItems, by: order))
+    }
+
+    // MARK: Auto-sort helpers
+
+    static func autoSorted(_ items: [PrefixItem], by order: [String]) -> [PrefixItem] {
+        var matched:   [(rank: Int, item: PrefixItem)] = []
+        var unmatched: [PrefixItem] = []
+        for item in items {
+            if let rank = matchInstrumentOrder(in: item.proposedName, order: order) {
+                matched.append((rank, item))
+            } else {
+                unmatched.append(item)
+            }
+        }
+        return matched.sorted { $0.rank < $1.rank }.map(\.item) + unmatched
+    }
+
+    private func prefixedName(for item: PrefixItem, at position: Int) -> String {
+        "\(String(format: "%02d", position))\(prefixSeparator)\(item.proposedName)"
+    }
+
+    // MARK: Body
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // ── Top bar ──────────────────────────────────────────────────
+            HStack {
+                Spacer()
+                Text("\(stepLabel): Prefix Files")
+                    .font(.title2).fontWeight(.semibold)
+                Spacer()
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
+
+            Divider()
+
+            // ── Ensemble type re-sort bar ─────────────────────────────────
+            HStack(spacing: 12) {
+                Text("Auto-sort by ensemble:")
+                    .font(.headline)
+                Picker("", selection: $ensembleType) {
+                    Text("Wind Band").tag(EnsembleType.band)
+                    Text("Jazz Band").tag(EnsembleType.jazz)
+                    Text("Orchestra").tag(EnsembleType.orchestra)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 280)
+                .onChange(of: ensembleType) { newType in
+                    let order = InstrumentOrders.getOrder(for: newType)
+                    withAnimation { items = Self.autoSorted(items, by: order) }
+                }
+                Button("Re-sort") {
+                    let order = InstrumentOrders.getOrder(for: ensembleType)
+                    withAnimation { items = Self.autoSorted(items, by: order) }
+                }
+                .help("Re-apply instrument order to the current list")
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .background(Color(NSColor.controlBackgroundColor))
+
+            Divider()
+
+            // ── File list ─────────────────────────────────────────────────
+            ScrollView {
+                VStack(spacing: 0) {
+                    ForEach(Array(items.enumerated()), id: \.element.id) { position, item in
+                        PrefixOrderRow(
+                            item: item,
+                            position: position + 1,
+                            finalName: prefixedName(for: item, at: position + 1),
+                            onMoveUp:   position > 0              ? { items.swapAt(position, position - 1) } : nil,
+                            onMoveDown: position < items.count - 1 ? { items.swapAt(position, position + 1) } : nil
+                        )
+                        if position < items.count - 1 { Divider() }
+                    }
+                }
+                .padding(.vertical, 8)
+            }
+
+            Divider()
+
+            // ── Bottom bar ────────────────────────────────────────────────
+            HStack {
+                Button(action: onBack) {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .buttonStyle(.bordered)
+
+                Spacer()
+
+                Button { onApply(items) } label: {
+                    Label("Apply & Save", systemImage: "checkmark.circle.fill")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
+        }
+    }
+}
+
+// MARK: - Rename Summary
+
+/// Final screen shown after files are written to disk.
+struct RenameSummaryView: View {
+    let finalNames: [String]
+    /// Non-nil for the Splitter (lets us offer "Show in Finder"). Nil for Bulk Rename.
+    let outputFolderURL: URL?
+    let onStartOver: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // ── Success header ────────────────────────────────────────────
+            VStack(spacing: 12) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 52))
+                    .foregroundColor(.green)
+                Text("Done!")
+                    .font(.title).fontWeight(.bold)
+                Text("\(finalNames.count) file\(finalNames.count == 1 ? "" : "s") saved successfully.")
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 36)
+            .padding(.bottom, 20)
+
+            Divider()
+
+            // ── File list ─────────────────────────────────────────────────
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(finalNames.indices, id: \.self) { i in
+                        HStack(spacing: 8) {
+                            Image(systemName: "doc.fill")
+                                .foregroundColor(.accentColor)
+                                .font(.caption)
+                            Text(finalNames[i])
+                                .font(.system(.body, design: .monospaced))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 2)
+                    }
+                }
+                .padding()
+            }
+
+            Divider()
+
+            // ── Bottom bar ────────────────────────────────────────────────
+            HStack {
+                if let url = outputFolderURL {
+                    Button {
+                        NSWorkspace.shared.open(url)
+                    } label: {
+                        Label("Show in Finder", systemImage: "folder")
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Spacer()
+
+                Button(action: onStartOver) {
+                    Label("Start Over", systemImage: "arrow.counterclockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
+        }
     }
 }
 
