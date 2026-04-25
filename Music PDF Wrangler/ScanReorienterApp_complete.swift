@@ -3792,7 +3792,7 @@ struct InstrumentOrders {
 
     // Bump this whenever the built-in defaults change so existing JSON files
     // are automatically regenerated on next launch.
-    private static let defaultsVersion = 2
+    private static let defaultsVersion = 3
 
     // MARK: - Loaded state (populated by setup())
     private static var loaded: [String: [String]] = [:]
@@ -3907,6 +3907,12 @@ struct InstrumentOrders {
         "trombone",
         "bass trombone",
         "trombone bass",
+        "euphonium treble clef",
+        "euphonium t.c.",
+        "euphonium tc",
+        "euphonium bass clef",
+        "euphonium b.c.",
+        "euphonium bc",
         "euphonium",
         "eupho",
         "baritone",
@@ -4059,6 +4065,12 @@ struct InstrumentOrders {
         "trombone",
         "bass trombone",
         "trombone bass",
+        "euphonium treble clef",
+        "euphonium t.c.",
+        "euphonium tc",
+        "euphonium bass clef",
+        "euphonium b.c.",
+        "euphonium bc",
         "euphonium",
         "eupho",
         "baritone",
