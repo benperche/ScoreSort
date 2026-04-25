@@ -4696,39 +4696,37 @@ struct SplitView: View {
     func saveSplitPDF() {
         guard let document = pdfManager.pdfDocument, numberOfFiles >= 2 else { return }
 
-        let panel = NSOpenPanel()
-        panel.canChooseFiles = false
-        panel.canChooseDirectories = true
-        panel.allowsMultipleSelection = false
-        panel.canCreateDirectories = true
-        panel.title = "Select Output Folder"
-        panel.message = "Choose where to save the split PDF files"
-
-        panel.begin { response in
-            guard response == .OK, let folderURL = panel.url else { return }
-
-            if prefixEnabled {
-                // Build in-memory items and go to the prefix step (no disk write yet).
-                var items: [PrefixItem] = []
-                var pagePos = 0
-                for fileIndex in 0..<fileSizes.count {
-                    let suffix = customFileNames[fileIndex] ?? ""
-                    let proposed: String
-                    if suffix.isEmpty {
-                        proposed = "\(baseFileName)\(filenameSeparator)\(fileIndex + 1).pdf"
-                    } else {
-                        proposed = "\(baseFileName)\(filenameSeparator)\(suffix).pdf"
-                    }
-                    let firstPage = document.page(at: pagePos)
-                    items.append(PrefixItem(id: fileIndex, proposedName: proposed, page: firstPage))
-                    pagePos += fileSizes[fileIndex]
+        if prefixEnabled {
+            // Go straight to Step 3 — folder picker comes after the user confirms order.
+            var items: [PrefixItem] = []
+            var pagePos = 0
+            for fileIndex in 0..<fileSizes.count {
+                let suffix = customFileNames[fileIndex] ?? ""
+                let proposed: String
+                if suffix.isEmpty {
+                    proposed = "\(baseFileName)\(filenameSeparator)\(fileIndex + 1).pdf"
+                } else {
+                    proposed = "\(baseFileName)\(filenameSeparator)\(suffix).pdf"
                 }
-                pendingFolderURL = folderURL
-                prefixItems = items
-                showingNamingStage = false
-                showingPrefixStage = true
-            } else {
-                // Save directly — no prefix step.
+                let firstPage = document.page(at: pagePos)
+                items.append(PrefixItem(id: fileIndex, proposedName: proposed, page: firstPage))
+                pagePos += fileSizes[fileIndex]
+            }
+            prefixItems = items
+            showingNamingStage = false
+            showingPrefixStage = true
+        } else {
+            // No prefix step — show folder picker now and save directly.
+            let panel = NSOpenPanel()
+            panel.canChooseFiles = false
+            panel.canChooseDirectories = true
+            panel.allowsMultipleSelection = false
+            panel.canCreateDirectories = true
+            panel.title = "Select Output Folder"
+            panel.message = "Choose where to save the split PDF files"
+
+            panel.begin { response in
+                guard response == .OK, let folderURL = panel.url else { return }
                 pdfManager.saveSplitPDF(
                     to: folderURL,
                     splitMarkers: splitMarkers,
@@ -4740,7 +4738,6 @@ struct SplitView: View {
                     if isError {
                         showNSAlert(title: title, message: message, isError: true)
                     } else {
-                        // Build names for summary
                         var names: [String] = []
                         for i in 0..<fileSizes.count {
                             let sfx = customFileNames[i] ?? ""
@@ -4761,9 +4758,23 @@ struct SplitView: View {
     }
 
     /// Called by PrefixOrderStepView when the user confirms the prefix ordering.
-    /// Writes all split files to disk with their final prefixed names in one pass.
+    /// Shows the folder picker, then writes all split files in one pass.
     private func applyPrefixAndSaveSplit(orderedItems: [PrefixItem]) {
-        guard let folderURL = pendingFolderURL else { return }
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.title = "Select Output Folder"
+        panel.message = "Choose where to save the split PDF files"
+
+        panel.begin { response in
+            guard response == .OK, let folderURL = panel.url else { return }
+            applyPrefixToFolder(folderURL, orderedItems: orderedItems)
+        }
+    }
+
+    private func applyPrefixToFolder(_ folderURL: URL, orderedItems: [PrefixItem]) {
         let sep = UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - "
 
         // Build customFileNames keyed by original fileIndex.
@@ -4795,6 +4806,7 @@ struct SplitView: View {
                             message: "Could not write one or more files to \(folderURL.path).",
                             isError: true)
             } else {
+                pendingFolderURL = folderURL   // stored here so summary can offer "Show in Finder"
                 summaryNames = finalNamesForSummary
                 showingPrefixStage = false
                 showingSummary = true
