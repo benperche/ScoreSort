@@ -2059,35 +2059,23 @@ struct ScoreOrderSortView: View {
     @Environment(\.openSettings) private var openSettings
     @State private var selectedFileForAssignment: RenameOperation?
     @State private var isFolderTargeted = false
-    @State private var sortColumn: SortColumn = .newName
-    @State private var sortAscending = true
-    
-    enum SortColumn {
-        case originalName
-        case newName
-        case status
-    }
-    
+
     var body: some View {
         VStack(spacing: 0) {
-            // Top toolbar
+            // ── Top toolbar ───────────────────────────────────────────────
             HStack {
                 Text("Score Order Sorter")
                     .font(.title2)
                     .fontWeight(.semibold)
-                
                 Spacer()
-                
                 if renamerManager.hasContent {
                     Button(action: { renamerManager.rescanFolder() }) {
                         Label("Check for Errors", systemImage: "checkmark.circle")
                     }
                     .help("Rescan all files and suggest corrections")
-                    
                     Button(action: { openSettings() }) {
                         Label("Preferences", systemImage: "gearshape")
                     }
-                    
                     Button(action: { renamerManager.clearFolder() }) {
                         Label("Clear", systemImage: "xmark.circle.fill")
                     }
@@ -2097,22 +2085,14 @@ struct ScoreOrderSortView: View {
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
-            
+
             Divider()
-            
-            // Main content area
+
             if renamerManager.hasContent {
-                VStack(spacing: 0) {
-                    // File list
-                    fileListView
-                    
-                    Divider()
-                    
-                    // Bottom controls
-                    bottomControlsView
-                }
+                fileListView
+                Divider()
+                bottomControlsView
             } else {
-                // Folder selection
                 folderSelectionView
             }
         }
@@ -2127,48 +2107,29 @@ struct ScoreOrderSortView: View {
             )
         }
     }
-    
+
+    // ── Drop zone (shown when no files loaded) ────────────────────────────
     private var folderSelectionView: some View {
         VStack(spacing: 20) {
             Image(systemName: "folder.badge.gearshape")
                 .font(.system(size: 64))
                 .foregroundColor(isFolderTargeted ? .accentColor : .secondary)
-
             Text("Select Files or Folder")
                 .font(.title2)
                 .fontWeight(.medium)
-
-            Text("This tool will add sequential prefixes to your sheet music files\nbased on detected instrument names")
+            Text("Adds sequential prefixes based on detected instrument names")
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
-
             Text("Drag a folder or PDF files here")
                 .font(.callout)
                 .foregroundColor(isFolderTargeted ? .accentColor : .secondary)
-
             Text("or")
                 .foregroundColor(.secondary)
-
             Button(action: selectFolder) {
                 Label("Choose Files or Folder", systemImage: "folder")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-
-            // Ensemble type selector
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Ensemble Type:")
-                    .font(.headline)
-
-                Picker("Ensemble Type", selection: $renamerManager.ensembleType) {
-                    Text("Wind Band").tag(EnsembleType.band)
-                    Text("Jazz Band").tag(EnsembleType.jazz)
-                    Text("Orchestra").tag(EnsembleType.orchestra)
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 400)
-            }
-            .padding(.top, 20)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
@@ -2180,7 +2141,6 @@ struct ScoreOrderSortView: View {
                 .padding()
         )
         .onDrop(of: [.fileURL], isTargeted: $isFolderTargeted) { providers in
-            // Collect all dropped URLs, then decide: folder → loadFolder, files → loadFiles
             var collectedURLs: [URL] = []
             let group = DispatchGroup()
             for provider in providers {
@@ -2192,7 +2152,6 @@ struct ScoreOrderSortView: View {
             }
             group.notify(queue: .main) {
                 guard !collectedURLs.isEmpty else { return }
-                // If the first URL is a directory, treat it as a folder load
                 var isDirectory: ObjCBool = false
                 if collectedURLs.count == 1,
                    FileManager.default.fileExists(atPath: collectedURLs[0].path, isDirectory: &isDirectory),
@@ -2205,114 +2164,41 @@ struct ScoreOrderSortView: View {
             return true
         }
     }
-    
+
+    // ── File list ─────────────────────────────────────────────────────────
     private var fileListView: some View {
-        VStack(spacing: 0) {
-            // Header
-            HStack {
-                Button(action: { sortBy(.originalName) }) {
-                    HStack(spacing: 4) {
-                        Text("Original Filename")
-                            .font(.headline)
-                        if sortColumn == .originalName {
-                            Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
-                                .font(.caption)
-                        }
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(renamerManager.operations) { operation in
+                    ScoreOrderFileRow(operation: operation) {
+                        selectedFileForAssignment = operation
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                
-                Button(action: { sortBy(.newName) }) {
-                    HStack(spacing: 4) {
-                        Text("New Filename")
-                            .font(.headline)
-                        if sortColumn == .newName {
-                            Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
-                                .font(.caption)
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-                
-                Button(action: { sortBy(.status) }) {
-                    HStack(spacing: 4) {
-                        Text("Status")
-                            .font(.headline)
-                        if sortColumn == .status {
-                            Image(systemName: sortAscending ? "chevron.up" : "chevron.down")
-                                .font(.caption)
-                        }
-                    }
-                    .frame(width: 200, alignment: .leading)
-                }
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-            .background(Color(NSColor.controlBackgroundColor))
-            
-            Divider()
-            
-            // File list
-            ScrollView {
-                LazyVStack(spacing: 0) {
-                    ForEach(sortedOperations) { operation in
-                        FileRowView(operation: operation) {
-                            selectedFileForAssignment = operation
-                        }
-                        Divider()
-                    }
+                    Divider()
                 }
             }
         }
     }
-    
-    private var sortedOperations: [RenameOperation] {
-        renamerManager.operations.sorted { op1, op2 in
-            let result: Bool
-            switch sortColumn {
-            case .originalName:
-                result = op1.originalName.localizedCaseInsensitiveCompare(op2.originalName) == .orderedAscending
-            case .newName:
-                // Empty new names go to the end
-                if op1.newName.isEmpty && !op2.newName.isEmpty {
-                    result = false
-                } else if !op1.newName.isEmpty && op2.newName.isEmpty {
-                    result = true
-                } else if op1.newName.isEmpty && op2.newName.isEmpty {
-                    result = op1.originalName.localizedCaseInsensitiveCompare(op2.originalName) == .orderedAscending
-                } else {
-                    result = op1.newName.localizedCaseInsensitiveCompare(op2.newName) == .orderedAscending
-                }
-            case .status:
-                result = op1.statusText.localizedCaseInsensitiveCompare(op2.statusText) == .orderedAscending
-            }
-            return sortAscending ? result : !result
-        }
-    }
-    
-    private func sortBy(_ column: SortColumn) {
-        if sortColumn == column {
-            sortAscending.toggle()
-        } else {
-            sortColumn = column
-            sortAscending = true
-        }
-    }
-    
+
+    // ── Bottom controls ───────────────────────────────────────────────────
     private var bottomControlsView: some View {
-        VStack(spacing: 12) {
-            // Status text
-            Text(renamerManager.statusText)
-                .font(.callout)
-                .foregroundColor(.secondary)
-            
-            // Action button
-            HStack {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Text("Ensemble:")
+                    .font(.headline)
+                Picker("", selection: $renamerManager.ensembleType) {
+                    Text("Wind Band").tag(EnsembleType.band)
+                    Text("Jazz Band").tag(EnsembleType.jazz)
+                    Text("Orchestra").tag(EnsembleType.orchestra)
+                }
+                .pickerStyle(.segmented)
+                .frame(maxWidth: 280)
                 Spacer()
-                
+            }
+            HStack {
+                Text(renamerManager.statusText)
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+                Spacer()
                 Button(action: { renamerManager.executeRename() }) {
                     Label("Rename Files", systemImage: "checkmark.circle.fill")
                 }
@@ -2324,7 +2210,8 @@ struct ScoreOrderSortView: View {
         .padding()
         .background(Color(NSColor.controlBackgroundColor))
     }
-    
+
+    // ── Folder picker ─────────────────────────────────────────────────────
     private func selectFolder() {
         let panel = NSOpenPanel()
         panel.canChooseFiles = true
@@ -2334,11 +2221,9 @@ struct ScoreOrderSortView: View {
         panel.canCreateDirectories = false
         panel.title = "Select PDF Files or Folder"
         panel.message = "Choose a folder, or select individual PDF files to rename"
-
         panel.begin { response in
             guard response == .OK else { return }
             let urls = panel.urls
-            // If a single directory was chosen, use folder mode
             var isDirectory: ObjCBool = false
             if urls.count == 1,
                FileManager.default.fileExists(atPath: urls[0].path, isDirectory: &isDirectory),
@@ -2351,32 +2236,100 @@ struct ScoreOrderSortView: View {
     }
 }
 
-// MARK: - File Row View
-struct FileRowView: View {
+// MARK: - Score Order File Row
+/// One row in the Score Order Sorter list — matches the visual style of PrefixOrderRow.
+private struct ScoreOrderFileRow: View {
     let operation: RenameOperation
     let onDoubleClick: () -> Void
-    
+    @State private var isHovered = false
+
     var body: some View {
-        HStack {
-            Text(operation.originalName)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .foregroundColor(operation.color)
-            
-            Text(operation.newName)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .foregroundColor(operation.color)
-            
-            Text(operation.statusText)
-                .frame(width: 200, alignment: .leading)
-                .foregroundColor(operation.color)
+        HStack(spacing: 12) {
+            // Position badge (or status icon for skip/undetected)
+            Group {
+                switch operation.type {
+                case .alreadyPrefixed, .skip:
+                    Image(systemName: "checkmark.circle")
+                        .foregroundColor(.secondary)
+                case .undetected:
+                    Image(systemName: "questionmark.circle.fill")
+                        .foregroundColor(.orange)
+                default:
+                    let prefix = String(operation.newName.prefix(2))
+                    Text(prefix.isEmpty ? "??" : prefix)
+                        .font(.system(.body, design: .monospaced))
+                        .fontWeight(.semibold)
+                        .foregroundColor(.accentColor)
+                }
+            }
+            .frame(width: 30, alignment: .center)
+
+            // Filenames
+            VStack(alignment: .leading, spacing: 3) {
+                Text(operation.originalName)
+                    .lineLimit(1)
+                    .foregroundColor(
+                        (operation.type == .alreadyPrefixed || operation.type == .skip)
+                        ? .secondary : .primary
+                    )
+                switch operation.type {
+                case .undetected:
+                    HStack(spacing: 4) {
+                        Image(systemName: "exclamationmark.triangle")
+                            .font(.caption2)
+                            .foregroundColor(.orange)
+                        Text("No instrument detected — double-click to assign")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                    }
+                case .alreadyPrefixed:
+                    Text("Already prefixed — will skip")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                default:
+                    if !operation.newName.isEmpty {
+                        HStack(spacing: 4) {
+                            Image(systemName: "arrow.right")
+                                .font(.caption2)
+                                .foregroundColor(.secondary)
+                            Text(operation.newName)
+                                .font(.caption)
+                                .fontWeight(.medium)
+                                .foregroundColor(operation.color)
+                                .lineLimit(1)
+                        }
+                    }
+                }
+            }
+
+            Spacer()
+
+            // Status tag
+            switch operation.type {
+            case .manual:
+                statusTag("Manual", color: .blue)
+            case .correct:
+                statusTag("Correction", color: .orange)
+            default:
+                EmptyView()
+            }
         }
-        .padding(.horizontal)
+        .padding(.horizontal, 16)
         .padding(.vertical, 8)
+        .background(isHovered ? Color.accentColor.opacity(0.05) : Color.clear)
         .contentShape(Rectangle())
-        .onTapGesture(count: 2) {
-            // Allow manual override on any file
-            onDoubleClick()
-        }
+        .onTapGesture(count: 2) { onDoubleClick() }
+        .onHover { isHovered = $0 }
+    }
+
+    private func statusTag(_ label: String, color: Color) -> some View {
+        Text(label)
+            .font(.caption2)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(color.opacity(0.12))
+            .foregroundColor(color)
+            .clipShape(Capsule())
     }
 }
 
@@ -5622,21 +5575,6 @@ private struct PrefixOrderRow: View {
                 .fontWeight(.semibold)
                 .foregroundColor(.accentColor)
                 .frame(width: 30, alignment: .center)
-
-            // Thumbnail
-            if let page = item.page {
-                PageInstrumentPreview(page: page, offset: .zero)
-                    .allowsHitTesting(false)
-                    .frame(width: 70, height: 90)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
-            } else {
-                RoundedRectangle(cornerRadius: 4)
-                    .fill(Color(NSColor.controlBackgroundColor))
-                    .frame(width: 70, height: 90)
-                    .overlay(Image(systemName: "doc").foregroundColor(.secondary))
-            }
 
             // Filenames
             VStack(alignment: .leading, spacing: 4) {
