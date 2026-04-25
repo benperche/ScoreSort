@@ -2036,20 +2036,17 @@ struct RenamerView: View {
     @State private var bulkHasFiles: Bool = false
 
     var body: some View {
-        let scoreActive = renamerManager.hasContent
-        let bulkActive  = bulkHasFiles
-
-        if scoreActive && !bulkActive {
-            // Score Order Sorter has files — take over the full width
-            ScoreOrderSortView()
-        } else if bulkActive && !scoreActive {
-            // Bulk Rename has files — take over the full width
-            BulkRenameView(hasFiles: $bulkHasFiles)
-        } else {
-            // Neither (or both) loaded — show two equal columns
-            HStack(spacing: 0) {
+        HStack(spacing: 0) {
+            // Hide the Score Order Sorter (and divider) when Bulk Rename is
+            // active — but keep BulkRenameView permanently in the tree so its
+            // @State (loadedFiles etc.) survives the layout switch.
+            if !bulkHasFiles {
                 ScoreOrderSortView()
-                Divider()
+                if !renamerManager.hasContent {
+                    Divider()
+                }
+            }
+            if !renamerManager.hasContent {
                 BulkRenameView(hasFiles: $bulkHasFiles)
             }
         }
