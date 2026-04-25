@@ -2032,11 +2032,26 @@ class CombineManager: ObservableObject {
 // MARK: - Rename Tab (wrapper)
 /// Hosts both panels side-by-side inside the "Rename Files" tab.
 struct RenamerView: View {
+    @EnvironmentObject private var renamerManager: RenamerManager
+    @State private var bulkHasFiles: Bool = false
+
     var body: some View {
-        HStack(spacing: 0) {
+        let scoreActive = renamerManager.hasContent
+        let bulkActive  = bulkHasFiles
+
+        if scoreActive && !bulkActive {
+            // Score Order Sorter has files — take over the full width
             ScoreOrderSortView()
-            Divider()
-            BulkRenameView()
+        } else if bulkActive && !scoreActive {
+            // Bulk Rename has files — take over the full width
+            BulkRenameView(hasFiles: $bulkHasFiles)
+        } else {
+            // Neither (or both) loaded — show two equal columns
+            HStack(spacing: 0) {
+                ScoreOrderSortView()
+                Divider()
+                BulkRenameView(hasFiles: $bulkHasFiles)
+            }
         }
     }
 }
@@ -2060,7 +2075,7 @@ struct ScoreOrderSortView: View {
         VStack(spacing: 0) {
             // Top toolbar
             HStack {
-                Text("Sheet Music Renamer")
+                Text("Score Order Sorter")
                     .font(.title2)
                     .fontWeight(.semibold)
                 
@@ -2487,6 +2502,9 @@ struct ManualAssignmentView: View {
 /// then renames all files in place.
 struct BulkRenameView: View {
 
+    // ── Parent binding so RenamerView can react to file load/clear ────────
+    @Binding var hasFiles: Bool
+
     // ── Loaded files ──────────────────────────────────────────────────────
     @State private var loadedFiles: [(url: URL, document: PDFDocument)] = []
 
@@ -2778,6 +2796,7 @@ struct BulkRenameView: View {
         }
         suffixes = [:]
         previewOffset = .zero
+        hasFiles = !loadedFiles.isEmpty
     }
 
     private func clearFiles() {
@@ -2785,6 +2804,7 @@ struct BulkRenameView: View {
         baseFileName = ""
         suffixes = [:]
         previewOffset = .zero
+        hasFiles = false
     }
 
     // ── Rename execution ──────────────────────────────────────────────────
@@ -2829,15 +2849,19 @@ struct BulkRenameView: View {
 struct PreferencesView: View {
     @Binding var ensembleType: EnsembleType
     @Binding var instrumentOrder: [String]
+    /// Separator between the numeric prefix and filename in the Score Order Sorter,
+    /// e.g. " - " → "01 - Flute.pdf".
+    @Binding var prefixSeparator: String
 
     @State private var editableOrder: [String]
     @State private var newInstrument: String = ""
     @Environment(\.dismiss) private var dismiss
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
 
-    init(ensembleType: Binding<EnsembleType>, instrumentOrder: Binding<[String]>) {
+    init(ensembleType: Binding<EnsembleType>, instrumentOrder: Binding<[String]>, prefixSeparator: Binding<String>) {
         self._ensembleType = ensembleType
         self._instrumentOrder = instrumentOrder
+        self._prefixSeparator = prefixSeparator
         self._editableOrder = State(initialValue: instrumentOrder.wrappedValue)
     }
 
@@ -2847,9 +2871,9 @@ struct PreferencesView: View {
                 .font(.title2)
                 .fontWeight(.semibold)
 
-            // ── Filename separator ────────────────────────────────────────
+            // ── Suffix separator (Splitter & Bulk Rename) ─────────────────
             VStack(alignment: .leading, spacing: 8) {
-                Text("Filename Separator:")
+                Text("Suffix Separator:")
                     .font(.headline)
                 HStack(spacing: 10) {
                     TextField("e.g.  - ", text: $filenameSeparator)
@@ -2864,6 +2888,27 @@ struct PreferencesView: View {
                         .font(.caption)
                 }
                 Text("Leave blank to join base name and suffix with no separator. Used by both the Splitter and Bulk Part Rename.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            // ── Prefix separator (Score Order Sorter) ─────────────────────
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Prefix Separator:")
+                    .font(.headline)
+                HStack(spacing: 10) {
+                    TextField("e.g.  - ", text: $prefixSeparator)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                        .font(.system(.body, design: .monospaced))
+                    Text("Inserted between the number prefix and filename, e.g.  01\(prefixSeparator)Flute.pdf")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button("Reset") { prefixSeparator = " - " }
+                        .font(.caption)
+                }
+                Text("Leave blank to join number and filename with no separator. Used by the Score Order Sorter.")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
@@ -3015,7 +3060,8 @@ struct AppPreferencesView: View {
         TabView {
             PreferencesView(
                 ensembleType: $renamerManager.ensembleType,
-                instrumentOrder: $renamerManager.customInstrumentOrder
+                instrumentOrder: $renamerManager.customInstrumentOrder,
+                prefixSeparator: $renamerManager.prefixSeparator
             )
             .tabItem { Label("Renamer", systemImage: "folder.badge.gearshape") }
 
@@ -3277,6 +3323,15 @@ class RenamerManager: ObservableObject {
         }
     }
 
+    /// Separator inserted between the numeric prefix and the filename,
+    /// e.g. " - " gives "01 - Flute.pdf".  Persisted in UserDefaults.
+    @Published var prefixSeparator: String = UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - " {
+        didSet {
+            UserDefaults.standard.set(prefixSeparator, forKey: "prefixSeparator")
+            if hasContent { scanFolder() }
+        }
+    }
+
     /// True when there is either a folder loaded or direct files loaded.
     var hasContent: Bool { folderURL != nil || !directFiles.isEmpty }
 
@@ -3480,7 +3535,7 @@ class RenamerManager: ObservableObject {
             let prefix = "00"
             let (cleanName, oldPrefix) = stripRescanPrefix(from: originalName)
 
-            let newFilename = "\(prefix) - \(cleanName)"
+            let newFilename = "\(prefix)\(prefixSeparator)\(cleanName)"
             let newURL = url.deletingLastPathComponent().appendingPathComponent(newFilename)
             
             if oldPrefix == prefix {
@@ -3523,7 +3578,7 @@ class RenamerManager: ObservableObject {
             nextNumber += 1
             let (cleanName, oldPrefix) = stripRescanPrefix(from: originalName)
             
-            let newFilename = "\(prefix) - \(cleanName)"
+            let newFilename = "\(prefix)\(prefixSeparator)\(cleanName)"
             let newURL = url.deletingLastPathComponent().appendingPathComponent(newFilename)
 
             if oldPrefix == prefix {
@@ -3563,7 +3618,7 @@ class RenamerManager: ObservableObject {
             let prefix = String(format: "%02d", number)
             let (cleanName, _) = stripRescanPrefix(from: originalName)
             
-            let newFilename = "\(prefix) - \(cleanName)"
+            let newFilename = "\(prefix)\(prefixSeparator)\(cleanName)"
             let newURL = url.deletingLastPathComponent().appendingPathComponent(newFilename)
 
             if fileManager.fileExists(atPath: newURL.path) && newURL != url {
