@@ -4586,16 +4586,8 @@ struct SplitView: View {
                             )
 
                             // ── Output files list ─────────────────────────────
-                            HStack {
-                                Text("Output Files (\(numberOfFiles))")
-                                    .font(.headline)
-                                Spacer()
-                                if !baseFileName.isEmpty {
-                                    Text("Base: \(baseFileName)")
-                                        .font(.caption)
-                                        .foregroundColor(.secondary)
-                                }
-                            }
+                            Text("Output Files (\(numberOfFiles))")
+                                .font(.headline)
 
                             ScrollView {
                                 VStack(alignment: .leading, spacing: 8) {
@@ -4643,6 +4635,20 @@ struct SplitView: View {
                                 currentPage = totalPages - 1
                             } else if currentPage < totalPages - 1 {
                                 currentPage += 1
+                            }
+                            return .handled
+                        case .downArrow:
+                            // Jump to the first page of the next output file
+                            let fileStarts = ([0] + splitMarkers.sorted())
+                            if let next = fileStarts.first(where: { $0 > currentPage }) {
+                                currentPage = next
+                            }
+                            return .handled
+                        case .upArrow:
+                            // Jump to the first page of the previous output file
+                            let fileStarts = ([0] + splitMarkers.sorted())
+                            if let prev = fileStarts.last(where: { $0 < currentPage }) {
+                                currentPage = prev
                             }
                             return .handled
                         case .space:
