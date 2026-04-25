@@ -2069,10 +2069,14 @@ struct ScoreOrderSortView: View {
                     .fontWeight(.semibold)
                 Spacer()
                 if renamerManager.hasContent {
-                    Button(action: { renamerManager.rescanFolder() }) {
-                        Label("Check for Errors", systemImage: "checkmark.circle")
+                    Toggle(isOn: Binding(
+                        get: { renamerManager.isRescanMode },
+                        set: { renamerManager.setRescanMode($0) }
+                    )) {
+                        Text("Renumber prefixed files")
                     }
-                    .help("Rescan all files and suggest corrections")
+                    .toggleStyle(.checkbox)
+                    .help("When on, files that already have a numeric prefix are renumbered along with the rest")
                     Button(action: { openSettings() }) {
                         Label("Preferences", systemImage: "gearshape")
                     }
@@ -3379,7 +3383,7 @@ class RenamerManager: ObservableObject {
 
     private var hasCustomOrder = false
     var manualOverrides: [String: Int] = [:]
-    private var isRescanMode = false
+    @Published private(set) var isRescanMode = false
     
     var statusText: String {
         let total = operations.count
@@ -3424,19 +3428,10 @@ class RenamerManager: ObservableObject {
         self.isRescanMode = false
     }
 
-    func rescanFolder() {
-        let alert = NSAlert()
-        alert.messageText = "Check for Errors"
-        alert.informativeText = "This will check all files (including already numbered ones) and suggest corrections.\n\nFiles will be renumbered sequentially based on instrument detection.\n\nContinue?"
-        alert.alertStyle = .informational
-        alert.addButton(withTitle: "Continue")
-        alert.addButton(withTitle: "Cancel")
-        
-        if alert.runModal() == .alertFirstButtonReturn {
-            isRescanMode = true
-            manualOverrides = [:]
-            scanFolder()
-        }
+    func setRescanMode(_ enabled: Bool) {
+        isRescanMode = enabled
+        if enabled { manualOverrides = [:] }
+        if hasContent { scanFolder() }
     }
     
     func setManualOverride(for filename: String, number: Int) {
