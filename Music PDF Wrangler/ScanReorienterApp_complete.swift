@@ -2029,8 +2029,20 @@ class CombineManager: ObservableObject {
     }
 }
 
-// MARK: - Renamer View
+// MARK: - Rename Tab (wrapper)
+/// Hosts both panels side-by-side inside the "Rename Files" tab.
 struct RenamerView: View {
+    var body: some View {
+        HStack(spacing: 0) {
+            ScoreOrderSortView()
+            Divider()
+            BulkRenameView()
+        }
+    }
+}
+
+// MARK: - Score Order Sort View
+struct ScoreOrderSortView: View {
     @EnvironmentObject private var renamerManager: RenamerManager
     @Environment(\.openSettings) private var openSettings
     @State private var selectedFileForAssignment: RenameOperation?
@@ -2468,27 +2480,396 @@ struct ManualAssignmentView: View {
     }
 }
 
+// MARK: - Bulk Rename View
+/// Right panel of the Rename Files tab.
+/// Accepts a folder or individual PDFs, lets the user assign a shared base name
+/// plus per-file instrument suffixes (with the same autocomplete as the Splitter),
+/// then renames all files in place.
+struct BulkRenameView: View {
+
+    // ── Loaded files ──────────────────────────────────────────────────────
+    @State private var loadedFiles: [(url: URL, document: PDFDocument)] = []
+
+    // ── Naming state ──────────────────────────────────────────────────────
+    @State private var baseFileName: String = ""
+    @State private var suffixes: [Int: String] = [:]
+    @State private var previewOffset: CGPoint = .zero
+    @FocusState private var focusedField: Int?
+
+    // ── Drop zone ────────────────────────────────────────────────────────
+    @State private var isTargeted = false
+
+    // ── Settings ─────────────────────────────────────────────────────────
+    @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
+
+    // ── Instrument names (same union as the Splitter) ─────────────────────
+    private var instrumentNames: [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for name in InstrumentOrders.orchestra + InstrumentOrders.band + InstrumentOrders.jazz {
+            let key = name.lowercased()
+            if seen.insert(key).inserted { result.append(name.capitalized) }
+        }
+        return result
+    }
+
+    // ── Validation ────────────────────────────────────────────────────────
+    private var baseNameError: String? { pdfFilenameError(for: baseFileName) }
+
+    private var anySuffixError: Bool {
+        suffixes.values.contains { pdfFilenameError(for: $0) != nil }
+    }
+
+    /// True when two or more output filenames would collide.
+    private var hasDuplicateNames: Bool {
+        var seen = Set<String>()
+        for index in loadedFiles.indices {
+            let sfx = suffixes[index] ?? ""
+            let name = sfx.isEmpty
+                ? "\(baseFileName)\(filenameSeparator)\(index + 1).pdf"
+                : "\(baseFileName)\(filenameSeparator)\(sfx).pdf"
+            if !seen.insert(name).inserted { return true }
+        }
+        return false
+    }
+
+    private var canRename: Bool {
+        !loadedFiles.isEmpty
+            && !baseFileName.isEmpty
+            && baseNameError == nil
+            && !anySuffixError
+            && !hasDuplicateNames
+    }
+
+    // ── Body ──────────────────────────────────────────────────────────────
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header
+            HStack {
+                Text("Bulk Part Rename")
+                    .font(.title2)
+                    .fontWeight(.semibold)
+                Spacer()
+                if !loadedFiles.isEmpty {
+                    Button(action: clearFiles) {
+                        Label("Clear", systemImage: "xmark.circle.fill")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                }
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
+
+            Divider()
+
+            if loadedFiles.isEmpty {
+                dropZoneView
+            } else {
+                fileListView
+            }
+        }
+    }
+
+    // ── Drop zone ─────────────────────────────────────────────────────────
+    private var dropZoneView: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "doc.badge.plus")
+                .font(.system(size: 56))
+                .foregroundColor(isTargeted ? .accentColor : .secondary)
+
+            Text("Bulk Part Rename")
+                .font(.title3)
+                .fontWeight(.medium)
+
+            Text("Rename a set of separate PDF part files with a\nshared base name and instrument suffixes")
+                .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
+
+            Text("Drag a folder or individual PDF files here")
+                .font(.callout)
+                .foregroundColor(isTargeted ? .accentColor : .secondary)
+
+            Text("or")
+                .foregroundColor(.secondary)
+
+            Button(action: selectFiles) {
+                Label("Choose Files or Folder", systemImage: "folder")
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .strokeBorder(
+                    isTargeted ? Color.accentColor : Color.gray.opacity(0.3),
+                    style: StrokeStyle(lineWidth: 2, dash: [10])
+                )
+                .padding()
+        )
+        .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
+            var collected: [URL] = []
+            let group = DispatchGroup()
+            for provider in providers {
+                group.enter()
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    if let url = url { collected.append(url) }
+                    group.leave()
+                }
+            }
+            group.notify(queue: .main) {
+                guard !collected.isEmpty else { return }
+                var isDir: ObjCBool = false
+                if collected.count == 1,
+                   FileManager.default.fileExists(atPath: collected[0].path, isDirectory: &isDir),
+                   isDir.boolValue {
+                    loadFromFolder(collected[0])
+                } else {
+                    loadFiles(collected.filter { $0.pathExtension.lowercased() == "pdf" })
+                }
+            }
+            return true
+        }
+    }
+
+    // ── File list (once loaded) ───────────────────────────────────────────
+    private var fileListView: some View {
+        VStack(spacing: 0) {
+            // Base filename bar
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(alignment: .firstTextBaseline, spacing: 12) {
+                    Text("Base Filename:")
+                        .font(.headline)
+                        .fixedSize()
+
+                    TextField("e.g. Beethoven Symphony 5", text: $baseFileName)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(maxWidth: 360)
+
+                    Text("Files will be renamed: \(baseFileName.isEmpty ? "basename" : baseFileName)\(filenameSeparator)Flute.pdf")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+
+                    Spacer()
+                }
+                if let err = baseNameError {
+                    Label(err, systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption).foregroundColor(.red)
+                }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 10)
+            .background(Color(NSColor.controlBackgroundColor))
+
+            Divider()
+
+            // Per-file naming rows — reuse SplitFileNamingRow directly
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(loadedFiles.indices, id: \.self) { index in
+                            SplitFileNamingRow(
+                                fileIndex: index,
+                                page: loadedFiles[index].document.page(at: 0),
+                                subtitle: loadedFiles[index].url.lastPathComponent,
+                                baseFileName: baseFileName,
+                                suffix: Binding(
+                                    get: { suffixes[index] ?? "" },
+                                    set: { suffixes[index] = $0.isEmpty ? nil : $0 }
+                                ),
+                                fieldFocus: $focusedField,
+                                instrumentNames: instrumentNames,
+                                allSuffixes: suffixes.mapValues { $0 },
+                                previewOffset: $previewOffset
+                            )
+                            .id(index)
+                            if index < loadedFiles.count - 1 { Divider() }
+                        }
+                    }
+                    .padding(.vertical, 8)
+                }
+                .onChange(of: focusedField) { newValue in
+                    if let field = newValue {
+                        withAnimation { proxy.scrollTo(field, anchor: .center) }
+                    }
+                }
+            }
+
+            Divider()
+
+            // Bottom bar
+            VStack(spacing: 6) {
+                // Warning
+                HStack(spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                        .font(.caption)
+                    Text("This will rename the files in Finder. This cannot be undone.")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                    Spacer()
+                }
+                // Duplicate name error
+                if hasDuplicateNames {
+                    HStack(spacing: 6) {
+                        Image(systemName: "xmark.octagon.fill")
+                            .foregroundColor(.red)
+                            .font(.caption)
+                        Text("Two or more files would get the same name — check your suffixes.")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                        Spacer()
+                    }
+                }
+                HStack {
+                    Spacer()
+                    Button(action: executeRename) {
+                        Label("Rename \(loadedFiles.count) File\(loadedFiles.count == 1 ? "" : "s")",
+                              systemImage: "pencil")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+                    .disabled(!canRename)
+                }
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
+        }
+    }
+
+    // ── File loading ──────────────────────────────────────────────────────
+    private func selectFiles() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.allowedContentTypes = [.pdf]
+        panel.title = "Select PDF Files or Folder"
+        panel.message = "Choose a folder containing PDFs, or select individual PDF files"
+        panel.begin { response in
+            guard response == .OK else { return }
+            var isDir: ObjCBool = false
+            if panel.urls.count == 1,
+               FileManager.default.fileExists(atPath: panel.urls[0].path, isDirectory: &isDir),
+               isDir.boolValue {
+                loadFromFolder(panel.urls[0])
+            } else {
+                loadFiles(panel.urls.filter { $0.pathExtension.lowercased() == "pdf" })
+            }
+        }
+    }
+
+    private func loadFromFolder(_ url: URL) {
+        let pdfs = (try? FileManager.default.contentsOfDirectory(
+            at: url,
+            includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
+        ))?.filter { $0.pathExtension.lowercased() == "pdf" }
+          .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+        ?? []
+        loadFiles(pdfs)
+    }
+
+    private func loadFiles(_ urls: [URL]) {
+        loadedFiles = urls.compactMap { url in
+            guard let doc = PDFDocument(url: url) else { return nil }
+            return (url: url, document: doc)
+        }
+        suffixes = [:]
+        previewOffset = .zero
+    }
+
+    private func clearFiles() {
+        loadedFiles = []
+        baseFileName = ""
+        suffixes = [:]
+        previewOffset = .zero
+    }
+
+    // ── Rename execution ──────────────────────────────────────────────────
+    private func executeRename() {
+        let sep = filenameSeparator
+        var errors: [String] = []
+        var renamedCount = 0
+
+        for (index, item) in loadedFiles.enumerated() {
+            let sfx = suffixes[index] ?? ""
+            let newName = sfx.isEmpty
+                ? "\(baseFileName)\(sep)\(index + 1).pdf"
+                : "\(baseFileName)\(sep)\(sfx).pdf"
+            let newURL = item.url.deletingLastPathComponent().appendingPathComponent(newName)
+            do {
+                try FileManager.default.moveItem(at: item.url, to: newURL)
+                renamedCount += 1
+            } catch {
+                errors.append(item.url.lastPathComponent)
+            }
+        }
+
+        if errors.isEmpty {
+            showNSAlert(
+                title: "Rename Complete",
+                message: "Renamed \(renamedCount) file\(renamedCount == 1 ? "" : "s") successfully.",
+                isError: false
+            )
+            clearFiles()
+        } else {
+            let failed = errors.prefix(5).joined(separator: "\n")
+            showNSAlert(
+                title: "Some Files Could Not Be Renamed",
+                message: "Failed to rename \(errors.count) file\(errors.count == 1 ? "" : "s"):\n\(failed)",
+                isError: true
+            )
+        }
+    }
+}
+
 // MARK: - Preferences View
 struct PreferencesView: View {
     @Binding var ensembleType: EnsembleType
     @Binding var instrumentOrder: [String]
-    
+
     @State private var editableOrder: [String]
     @State private var newInstrument: String = ""
     @Environment(\.dismiss) private var dismiss
-    
+    @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
+
     init(ensembleType: Binding<EnsembleType>, instrumentOrder: Binding<[String]>) {
         self._ensembleType = ensembleType
         self._instrumentOrder = instrumentOrder
         self._editableOrder = State(initialValue: instrumentOrder.wrappedValue)
     }
-    
+
     var body: some View {
         VStack(spacing: 20) {
             Text("Instrument Order Preferences")
                 .font(.title2)
                 .fontWeight(.semibold)
-            
+
+            // ── Filename separator ────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Filename Separator:")
+                    .font(.headline)
+                HStack(spacing: 10) {
+                    TextField("e.g.  - ", text: $filenameSeparator)
+                        .textFieldStyle(.roundedBorder)
+                        .frame(width: 80)
+                        .font(.system(.body, design: .monospaced))
+                    Text("Inserted between base name and suffix, e.g.  Beethoven\(filenameSeparator)Flute.pdf")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                    Spacer()
+                    Button("Reset") { filenameSeparator = " - " }
+                        .font(.caption)
+                }
+                Text("Leave blank to join base name and suffix with no separator. Used by both the Splitter and Bulk Part Rename.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Divider()
+
             // Ensemble type selector
             VStack(alignment: .leading, spacing: 8) {
                 Text("Ensemble Type:")
@@ -3916,6 +4297,7 @@ struct SplitView: View {
     /// Reset whenever a new PDF is loaded so it always starts at the instrument-name corner.
     @State private var previewOffset: CGPoint = .zero
     @FocusState private var isViewFocused: Bool
+    @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
 
     var totalPages: Int {
         pdfManager.pdfDocument?.pageCount ?? 0
@@ -4196,7 +4578,8 @@ struct SplitView: View {
                     splitMarkers: splitMarkers,
                     baseFileName: baseFileName,
                     customFileNames: customFileNames,
-                    pageToFileMapping: pageToFileMapping
+                    pageToFileMapping: pageToFileMapping,
+                    separator: filenameSeparator
                 ) { title, message, isError in
                     showNSAlert(title: title, message: message, isError: isError)
                 }
@@ -4420,12 +4803,22 @@ struct SplitNamingStageView: View {
     let onSave: () -> Void
 
     @FocusState private var focusedField: Int?
+    @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
 
     var numberOfFiles: Int { fileSizes.count }
 
     /// Page index of the first page in a given file.
     private func firstPageIndex(for fileIndex: Int) -> Int {
         fileSizes.prefix(fileIndex).reduce(0, +)
+    }
+
+    /// Row subtitle: page range + page count, e.g. "Pages 3–5 · 3 pages".
+    private func subtitle(for fileIndex: Int) -> String {
+        let start = firstPageIndex(for: fileIndex)
+        let size  = fileSizes[fileIndex]
+        let end   = start + size - 1
+        let range = (start == end) ? "Page \(start + 1)" : "Pages \(start + 1)–\(end + 1)"
+        return "\(range) · \(size) \(size == 1 ? "page" : "pages")"
     }
 
     /// Ordered, deduplicated instrument name list built from InstrumentOrders
@@ -4487,7 +4880,7 @@ struct SplitNamingStageView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 380)
 
-                    Text("Suffixes appended directly: \(baseFileName.isEmpty ? "basename" : baseFileName)Flute.pdf  ·  Leave blank for auto-numbering: \(baseFileName.isEmpty ? "basename" : baseFileName)_1.pdf")
+                    Text("Example: \(baseFileName.isEmpty ? "basename" : baseFileName)\(filenameSeparator)Flute.pdf  ·  Leave blank for auto-numbering: \(baseFileName.isEmpty ? "basename" : baseFileName)\(filenameSeparator)1.pdf")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
@@ -4513,9 +4906,8 @@ struct SplitNamingStageView: View {
                         ForEach(0..<numberOfFiles, id: \.self) { fileIndex in
                             SplitFileNamingRow(
                                 fileIndex: fileIndex,
-                                fileSizes: fileSizes,
-                                firstPageIndex: firstPageIndex(for: fileIndex),
-                                pdfDocument: pdfDocument,
+                                page: pdfDocument.page(at: firstPageIndex(for: fileIndex)),
+                                subtitle: subtitle(for: fileIndex),
                                 baseFileName: baseFileName,
                                 suffix: Binding(
                                     get: { customFileNames[fileIndex] ?? "" },
@@ -4566,11 +4958,17 @@ struct SplitNamingStageView: View {
 // MARK: - Split File Naming Row
 /// One row in the naming stage: large page thumbnail on the left, file info and
 /// suffix text field on the right.
+/// Used by both SplitNamingStageView (one row per output file from a single PDF)
+/// and BulkRenameView (one row per separate PDF file).
 struct SplitFileNamingRow: View {
     let fileIndex: Int
-    let fileSizes: [Int]
-    let firstPageIndex: Int
-    let pdfDocument: PDFDocument
+    /// The PDF page to display in the thumbnail strip.
+    /// SplitNamingStageView passes the first page of each output section;
+    /// BulkRenameView passes page 0 of each individual document.
+    let page: PDFPage?
+    /// Short descriptor shown in the row header, e.g. "Pages 1–4 · 4 pages"
+    /// (splitter) or the original filename (bulk rename).
+    let subtitle: String
     let baseFileName: String
     @Binding var suffix: String
     /// The parent's FocusState binding — passed directly so that Tab/click
@@ -4579,6 +4977,10 @@ struct SplitFileNamingRow: View {
     let instrumentNames: [String]   // ordered, deduplicated, capitalised
     let allSuffixes: [Int: String]  // snapshot of all rows' current suffixes
     @Binding var previewOffset: CGPoint
+
+    /// Separator inserted between base name and suffix in output filenames.
+    /// Mirrors the setting in Preferences → Renamer.
+    @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
 
     /// Step sizes in PDF points.
     /// cropH = 100 pt; stepV = 25 pt → 75 % overlap between consecutive positions.
@@ -4591,20 +4993,10 @@ struct SplitFileNamingRow: View {
     // Arrow-key selection index into the suggestions list (nil = field, not dropdown)
     @State private var selectedSuggestionIndex: Int? = nil
 
-    private var fileSize: Int {
-        fileIndex < fileSizes.count ? fileSizes[fileIndex] : 0
-    }
-
-    private var pageRangeText: String {
-        let start = firstPageIndex + 1
-        let end = firstPageIndex + fileSize
-        return start == end ? "Page \(start)" : "Pages \(start)–\(end)"
-    }
-
     private var finalFileName: String {
         suffix.isEmpty
-            ? "\(baseFileName)_\(fileIndex + 1).pdf"
-            : "\(baseFileName)\(suffix).pdf"
+            ? "\(baseFileName)\(filenameSeparator)\(fileIndex + 1).pdf"
+            : "\(baseFileName)\(filenameSeparator)\(suffix).pdf"
     }
 
     // ── Pan overlay ─────────────────────────────────────────────────────────
@@ -4727,23 +5119,19 @@ struct SplitFileNamingRow: View {
                     .fontWeight(.semibold)
                 Text("·")
                     .foregroundColor(.secondary)
-                Text(pageRangeText)
-                    .foregroundColor(.secondary)
-                Text("·")
-                    .foregroundColor(.secondary)
-                Text("\(fileSize) \(fileSize == 1 ? "page" : "pages")")
+                Text(subtitle)
                     .foregroundColor(.secondary)
                 Spacer()
             }
 
             // ── Instrument name crop with pan overlay ────────────────
-            if let page = pdfDocument.page(at: firstPageIndex) {
+            if let pg = page {
                 // panOverlay is applied as .overlay on the FRAMED container rather
                 // than as a ZStack sibling of PageInstrumentPreview.  This guarantees
                 // the overlay always receives the container's fixed 150 pt height as
                 // its layout size, completely independent of whatever
                 // PageInstrumentPreview draws (or redraws) inside.
-                PageInstrumentPreview(page: page, offset: previewOffset)
+                PageInstrumentPreview(page: pg, offset: previewOffset)
                     .allowsHitTesting(false)
                     .frame(maxWidth: .infinity)
                     .frame(height: 150)
@@ -5286,7 +5674,7 @@ class PDFManager: ObservableObject {
         }
     }
     
-    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], completion: PDFAlertHandler) {
+    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], separator: String = "_", completion: PDFAlertHandler) {
         guard let document = pdfDocument else { return }
 
         let numberOfFiles = (pageToFileMapping.values.max() ?? 0) + 1
@@ -5317,9 +5705,9 @@ class PDFManager: ObservableObject {
 
             let fileName: String
             if let customSuffix = customFileNames[fileIndex], !customSuffix.isEmpty {
-                fileName = "\(baseFileName)\(customSuffix).pdf"
+                fileName = "\(baseFileName)\(separator)\(customSuffix).pdf"
             } else {
-                fileName = "\(baseFileName)_\(fileIndex + 1).pdf"
+                fileName = "\(baseFileName)\(separator)\(fileIndex + 1).pdf"
             }
 
             let fileURL = folderURL.appendingPathComponent(fileName)
