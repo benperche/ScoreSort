@@ -2244,34 +2244,40 @@ private struct ScoreOrderFileRow: View {
     @State private var isHovered = false
 
     var body: some View {
-        HStack(spacing: 12) {
-            // Position badge (or status icon for skip/undetected)
-            Group {
-                switch operation.type {
-                case .alreadyPrefixed, .skip:
-                    Image(systemName: "checkmark.circle")
-                        .foregroundColor(.secondary)
-                case .undetected:
-                    Image(systemName: "questionmark.circle.fill")
-                        .foregroundColor(.orange)
-                default:
-                    let prefix = String(operation.newName.prefix(2))
-                    Text(prefix.isEmpty ? "??" : prefix)
-                        .font(.system(.body, design: .monospaced))
-                        .fontWeight(.semibold)
-                        .foregroundColor(.accentColor)
+        HStack(spacing: 0) {
+            // ── Left column: badge + original filename ────────────────────
+            HStack(spacing: 12) {
+                // Position badge or status icon
+                Group {
+                    switch operation.type {
+                    case .alreadyPrefixed, .skip:
+                        Image(systemName: "checkmark.circle")
+                            .foregroundColor(.secondary)
+                    case .undetected:
+                        Image(systemName: "questionmark.circle.fill")
+                            .foregroundColor(.orange)
+                    default:
+                        let prefix = String(operation.newName.prefix(2))
+                        Text(prefix.isEmpty ? "??" : prefix)
+                            .font(.system(.body, design: .monospaced))
+                            .fontWeight(.semibold)
+                            .foregroundColor(.accentColor)
+                    }
                 }
-            }
-            .frame(width: 30, alignment: .center)
+                .frame(width: 30, alignment: .center)
 
-            // Filenames
-            VStack(alignment: .leading, spacing: 3) {
                 Text(operation.originalName)
                     .lineLimit(1)
                     .foregroundColor(
                         (operation.type == .alreadyPrefixed || operation.type == .skip)
                         ? .secondary : .primary
                     )
+            }
+            .padding(.leading, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            // ── Right column: new filename or hint, status tag ────────────
+            HStack(spacing: 8) {
                 switch operation.type {
                 case .undetected:
                     HStack(spacing: 4) {
@@ -2281,40 +2287,34 @@ private struct ScoreOrderFileRow: View {
                         Text("No instrument detected — double-click to assign")
                             .font(.caption)
                             .foregroundColor(.orange)
+                            .lineLimit(1)
                     }
-                case .alreadyPrefixed:
-                    Text("Already prefixed — will skip")
+                case .alreadyPrefixed, .skip:
+                    Text(operation.type == .alreadyPrefixed ? "Already prefixed — will skip" : "Already correct — will skip")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
                 default:
                     if !operation.newName.isEmpty {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.right")
-                                .font(.caption2)
-                                .foregroundColor(.secondary)
-                            Text(operation.newName)
-                                .font(.caption)
-                                .fontWeight(.medium)
-                                .foregroundColor(operation.color)
-                                .lineLimit(1)
-                        }
+                        Text(operation.newName)
+                            .font(.body)
+                            .foregroundColor(operation.color)
+                            .lineLimit(1)
                     }
                 }
+                Spacer(minLength: 8)
+                switch operation.type {
+                case .manual:
+                    statusTag("Manual", color: .blue)
+                case .correct:
+                    statusTag("Correction", color: .orange)
+                default:
+                    EmptyView()
+                }
             }
-
-            Spacer()
-
-            // Status tag
-            switch operation.type {
-            case .manual:
-                statusTag("Manual", color: .blue)
-            case .correct:
-                statusTag("Correction", color: .orange)
-            default:
-                EmptyView()
-            }
+            .padding(.trailing, 16)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
-        .padding(.horizontal, 16)
         .padding(.vertical, 8)
         .background(isHovered ? Color.accentColor.opacity(0.05) : Color.clear)
         .contentShape(Rectangle())
