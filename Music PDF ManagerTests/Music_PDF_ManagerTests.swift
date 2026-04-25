@@ -714,7 +714,8 @@ struct PDFManagerTests {
         // [2, 2]: pages 0-1 → file 0, pages 2-3 → file 1
         let mapping: [Int: Int] = [0: 0, 1: 0, 2: 1, 3: 1]
         manager.saveSplitPDF(to: outDir, splitMarkers: [2], baseFileName: "Test",
-                             customFileNames: [:], pageToFileMapping: mapping) { _, _, _ in }
+                             customFileNames: [:], pageToFileMapping: mapping,
+                             separator: "_") { _, _, _ in }
 
         let pdfs = try FileManager.default.contentsOfDirectory(at: outDir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "pdf" }
@@ -729,7 +730,8 @@ struct PDFManagerTests {
         // [2, 4]: pages 0-1 → file 0, pages 2-5 → file 1
         let mapping: [Int: Int] = [0: 0, 1: 0, 2: 1, 3: 1, 4: 1, 5: 1]
         manager.saveSplitPDF(to: outDir, splitMarkers: [2], baseFileName: "Test",
-                             customFileNames: [:], pageToFileMapping: mapping) { _, _, _ in }
+                             customFileNames: [:], pageToFileMapping: mapping,
+                             separator: "_") { _, _, _ in }
 
         let file1 = try #require(PDFDocument(url: outDir.appendingPathComponent("Test_1.pdf")))
         let file2 = try #require(PDFDocument(url: outDir.appendingPathComponent("Test_2.pdf")))
@@ -742,9 +744,11 @@ struct PDFManagerTests {
         let outDir = tempDir.appendingPathComponent("split_names")
         try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
 
+        // Suffix is just the name part; separator is passed separately.
         let mapping: [Int: Int] = [0: 0, 1: 0, 2: 1, 3: 1]
         manager.saveSplitPDF(to: outDir, splitMarkers: [2], baseFileName: "Sonata",
-                             customFileNames: [0: " Mvt1", 1: " Mvt2"], pageToFileMapping: mapping) { _, _, _ in }
+                             customFileNames: [0: "Mvt1", 1: "Mvt2"], pageToFileMapping: mapping,
+                             separator: " ") { _, _, _ in }
 
         let names = try FileManager.default.contentsOfDirectory(at: outDir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "pdf" }
@@ -760,7 +764,8 @@ struct PDFManagerTests {
 
         let mapping: [Int: Int] = [0: 0, 1: 0, 2: 1, 3: 1]
         manager.saveSplitPDF(to: outDir, splitMarkers: [2], baseFileName: "Part",
-                             customFileNames: [:], pageToFileMapping: mapping) { _, _, _ in }
+                             customFileNames: [:], pageToFileMapping: mapping,
+                             separator: "_") { _, _, _ in }
 
         let names = try FileManager.default.contentsOfDirectory(at: outDir, includingPropertiesForKeys: nil)
             .filter { $0.pathExtension == "pdf" }
