@@ -5155,6 +5155,7 @@ struct SplitNamingStageView: View {
                     }
                     .padding(.vertical, 8)
                 }
+                .onAppear { proxy.scrollTo(0, anchor: .top) }
                 .onChange(of: focusedField) { newValue in
                     if let field = newValue {
                         withAnimation { proxy.scrollTo(field, anchor: .center) }
