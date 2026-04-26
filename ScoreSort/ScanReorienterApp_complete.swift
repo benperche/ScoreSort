@@ -5456,6 +5456,10 @@ struct SplitNamingStageView: View {
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
     @AppStorage("prefixEnsembleType") private var prefixEnsembleType: EnsembleType = .band
 
+    /// Set to true once we've auto-inferred the ensemble type from the first suffix.
+    /// Prevents re-inference on subsequent edits.
+    @State private var hasInferredEnsemble = false
+
     var numberOfFiles: Int { fileSizes.count }
 
     /// Page index of the first page in a given file.
@@ -5564,11 +5568,24 @@ struct SplitNamingStageView: View {
                     }
                     .padding(.vertical, 8)
                 }
-                .onAppear { proxy.scrollTo(0, anchor: .top) }
+                .onAppear {
+                    proxy.scrollTo(0, anchor: .top)
+                    hasInferredEnsemble = false
+                }
                 .onChange(of: focusedField) { newValue in
                     if let field = newValue {
                         withAnimation { proxy.scrollTo(field, anchor: .center) }
                     }
+                }
+                .onChange(of: customFileNames) { newNames in
+                    // Auto-infer ensemble type from the first suffix typed.
+                    // Only runs once per naming session.
+                    guard !hasInferredEnsemble,
+                          let first = newNames.values.first(where: { !$0.isEmpty }),
+                          let inferred = inferredSplitSuggestionEnsemble(first)
+                    else { return }
+                    prefixEnsembleType = inferred
+                    hasInferredEnsemble = true
                 }
             }
 
@@ -5612,6 +5629,125 @@ struct SplitNamingStageView: View {
             .background(Color(NSColor.windowBackgroundColor))
         }
     }
+}
+
+// MARK: - Split Suggestion Helpers
+
+/// Returns the base name of an instrument by stripping a trailing integer.
+/// "Flute 1" → "Flute", "Horn in F 3" → "Horn in F", "Score" → "Score"
+private func splitSuggestionBaseName(_ name: String) -> String {
+    let trimmed = name.trimmingCharacters(in: .whitespaces)
+    let parts = trimmed.components(separatedBy: " ")
+    if parts.count >= 2, let last = parts.last, Int(last) != nil {
+        return parts.dropLast().joined(separator: " ")
+    }
+    return trimmed
+}
+
+/// Normalises an instrument name to a canonical group key for alias matching.
+/// "Alto Sax", "Alto Saxophone", "Alto" → "alto saxophone"
+private func splitSuggestionGroupKey(_ name: String) -> String {
+    let base = splitSuggestionBaseName(name).lowercased()
+    let aliases: [(Set<String>, String)] = [
+        (["alto sax", "alto saxophone", "alto"], "alto saxophone"),
+        (["tenor sax", "tenor saxophone", "tenor"], "tenor saxophone"),
+        (["soprano sax", "soprano saxophone"], "soprano saxophone"),
+        (["baritone sax", "bari sax", "baritone saxophone", "bari"], "baritone saxophone"),
+        (["bb clarinet", "b-flat clarinet", "clarinet in bb"], "clarinet"),
+        (["bass clar", "bass clarinet"], "bass clarinet"),
+        (["contra clarinet", "contrabass clarinet", "contra bass clarinet"], "contrabass clarinet"),
+        (["bb trumpet", "trumpet in bb", "b-flat trumpet"], "trumpet"),
+        (["french horn", "horn in f", "f horn"], "horn"),
+        (["trombone", "tenor trombone"], "trombone"),
+        (["bass tbn", "bass trombone"], "bass trombone"),
+        (["string bass", "double bass", "contrabass"], "double bass"),
+        (["vln", "violin"], "violin"),
+        (["vla", "viola"], "viola"),
+        (["vlc", "cello", "violoncello"], "cello"),
+    ]
+    for (variants, canonical) in aliases {
+        if variants.contains(base) { return canonical }
+    }
+    return base
+}
+
+/// Typical number of parts for common instrument families (used to detect when
+/// to cross to the next instrument in cross-boundary suggestions).
+private func splitSuggestionTypicalPartCount(_ baseName: String) -> Int {
+    let key = splitSuggestionGroupKey(baseName)
+    let counts: [String: Int] = [
+        "flute": 2, "piccolo": 1, "oboe": 2, "english horn": 1, "bassoon": 2,
+        "clarinet": 3, "bass clarinet": 1, "contrabass clarinet": 1,
+        "alto saxophone": 2, "tenor saxophone": 1, "baritone saxophone": 1, "soprano saxophone": 1,
+        "cornet": 2, "trumpet": 4, "horn": 4, "trombone": 3, "bass trombone": 1,
+        "euphonium": 1, "baritone": 1, "tuba": 1,
+        "violin": 2, "viola": 1, "cello": 1, "double bass": 1,
+        "percussion": 4, "timpani": 1,
+    ]
+    return counts[key] ?? 2
+}
+
+/// If the previous suffix's number equals the typical part count for that family,
+/// returns "NextInstrument 1" as a cross-boundary numbered suggestion.
+/// E.g. after "Flute 2" (typical=2) → "Oboe 1" if Oboe follows Flute in the list.
+private func splitSuggestionStartingNumberedName(
+    prevSuffix: String,
+    instrumentNames: [String]
+) -> String? {
+    let prev = prevSuffix.trimmingCharacters(in: .whitespaces)
+    guard !prev.isEmpty else { return nil }
+    let parts = prev.components(separatedBy: " ")
+    guard parts.count >= 2,
+          let last = parts.last, let n = Int(last), n > 0
+    else { return nil }
+    let basePart = parts.dropLast().joined(separator: " ")
+    let typical = splitSuggestionTypicalPartCount(basePart)
+    guard n >= typical else { return nil }
+    // Find the instrument's position in the list via group key
+    let key = splitSuggestionGroupKey(basePart)
+    // Search for any name in the list whose base matches our key
+    if let idx = instrumentNames.firstIndex(where: {
+        splitSuggestionGroupKey(splitSuggestionBaseName($0)) == key ||
+        splitSuggestionGroupKey($0) == key
+    }) {
+        let nextIdx = (idx + 1) % instrumentNames.count
+        let nextName = splitSuggestionBaseName(instrumentNames[nextIdx])
+        return "\(nextName) 1"
+    }
+    return nil
+}
+
+/// Deduplicates a list by collapsing numbered variants to their base name.
+/// ["Flute 1", "Flute 2", "Oboe", "Oboe 1"] → ["Flute", "Oboe"]
+private func splitSuggestionDisplayNames(_ names: [String]) -> [String] {
+    var seen = Set<String>()
+    var result: [String] = []
+    for name in names {
+        let base = splitSuggestionBaseName(name)
+        let key = base.lowercased()
+        if seen.insert(key).inserted {
+            result.append(base)
+        }
+    }
+    return result
+}
+
+/// Infers the most likely ensemble type from the first suffix the user types.
+/// Returns nil if no confident match is found.
+private func inferredSplitSuggestionEnsemble(_ suffix: String) -> EnsembleType? {
+    let lower = suffix.lowercased()
+    let jazzKeywords = ["alto sax", "tenor sax", "baritone sax", "soprano sax",
+                        "lead trumpet", "lead trombone", "rhythm guitar", "guitar",
+                        "drum set", "drum kit", "bass guitar", "electric bass"]
+    for kw in jazzKeywords where lower.contains(kw) { return .jazz }
+    let orchKeywords = ["violin", "viola", "cello", "double bass", "string bass",
+                        "oboe", "bassoon", "french horn", "horn in f"]
+    for kw in orchKeywords where lower.contains(kw) { return .orchestra }
+    let bandKeywords = ["piccolo", "flute", "clarinet", "trumpet", "trombone",
+                        "euphonium", "tuba", "cornet", "percussion", "timpani",
+                        "saxophone", "baritone", "bb "]
+    for kw in bandKeywords where lower.contains(kw) { return .band }
+    return nil
 }
 
 // MARK: - Split File Naming Row
@@ -5710,19 +5846,26 @@ struct SplitFileNamingRow: View {
     // ── Autocomplete ─────────────────────────────────────────────────────────
     /// Index in `instrumentNames` to start suggestions from — the entry just
     /// after the most recently used instrument in the rows above this one.
+    /// Uses alias normalisation so "Alto Sax" and "Alto Saxophone" are treated
+    /// as the same instrument family.
     private var nextExpectedIndex: Int {
         for i in Swift.stride(from: fileIndex - 1, through: 0, by: -1) {
-            let prev = (allSuffixes[i] ?? "").lowercased()
-            if !prev.isEmpty,
-               let idx = instrumentNames.firstIndex(where: { $0.lowercased() == prev }) {
-                return min(idx + 1, instrumentNames.count - 1)
+            let prev = (allSuffixes[i] ?? "").trimmingCharacters(in: .whitespaces)
+            if !prev.isEmpty {
+                let prevKey = splitSuggestionGroupKey(prev)
+                if let idx = instrumentNames.firstIndex(where: {
+                    splitSuggestionGroupKey($0) == prevKey
+                }) {
+                    return min(idx + 1, instrumentNames.count - 1)
+                }
             }
         }
         return 0
     }
 
-    /// If the nearest previous suffix is "InstrumentName N" (e.g. "Flute 1"),
-    /// returns "InstrumentName N+1" ("Flute 2") as the top-priority suggestion.
+    /// Top-priority numbered suggestion based on the nearest previous suffix:
+    /// - If "Flute 1" and typical count for Flute is 2 → suggests "Flute 2"
+    /// - If "Flute 2" and typical count for Flute is 2 → cross-boundary: suggests "Oboe 1"
     private var numberedSuggestion: String? {
         for i in Swift.stride(from: fileIndex - 1, through: 0, by: -1) {
             let prev = (allSuffixes[i] ?? "").trimmingCharacters(in: .whitespaces)
@@ -5731,7 +5874,16 @@ struct SplitFileNamingRow: View {
             // Must have at least two tokens and last token must be a positive integer
             if parts.count >= 2, let last = parts.last, let n = Int(last), n > 0 {
                 let basePart = parts.dropLast().joined(separator: " ")
-                return "\(basePart) \(n + 1)"
+                let typical = splitSuggestionTypicalPartCount(basePart)
+                if n >= typical {
+                    // Cross-boundary: suggest the next instrument family at part 1
+                    return splitSuggestionStartingNumberedName(
+                        prevSuffix: prev,
+                        instrumentNames: instrumentNames
+                    )
+                } else {
+                    return "\(basePart) \(n + 1)"
+                }
             }
             break  // only consider the closest non-empty row
         }
@@ -5744,17 +5896,23 @@ struct SplitFileNamingRow: View {
         let rotated = Array(instrumentNames.suffix(from: start))
                     + Array(instrumentNames.prefix(start))
 
+        // Collapse "Flute 1", "Flute 2" → "Flute" so the list stays compact.
+        // When user types a number we show numbered variants (via numberedSuggestion).
+        let deduplicated = splitSuggestionDisplayNames(rotated)
+
         var result: [String]
         if suffix.isEmpty {
-            result = Array(rotated.prefix(8))
+            result = Array(deduplicated.prefix(8))
         } else {
             let q = suffix.lowercased()
-            let prefixMatches  = rotated.filter { $0.lowercased().hasPrefix(q) }
-            let containsMatches = rotated.filter { $0.lowercased().contains(q) && !$0.lowercased().hasPrefix(q) }
+            let prefixMatches   = deduplicated.filter { $0.lowercased().hasPrefix(q) }
+            let containsMatches = deduplicated.filter {
+                $0.lowercased().contains(q) && !$0.lowercased().hasPrefix(q)
+            }
             result = Array((prefixMatches + containsMatches).prefix(8))
         }
 
-        // Prepend numbered suggestion ("Flute 2") when relevant
+        // Prepend numbered suggestion ("Flute 2" or cross-boundary "Oboe 1") when relevant
         if let numbered = numberedSuggestion {
             let show = suffix.isEmpty || numbered.lowercased().hasPrefix(suffix.lowercased())
             if show {
@@ -5783,21 +5941,29 @@ struct SplitFileNamingRow: View {
                 Spacer()
             }
 
-            // ── Instrument name crop with pan overlay ────────────────
+            // ── Instrument name crop with pan overlay + minimap ──────────
             if let pg = page {
-                // panOverlay is applied as .overlay on the FRAMED container rather
-                // than as a ZStack sibling of PageInstrumentPreview.  This guarantees
-                // the overlay always receives the container's fixed 150 pt height as
-                // its layout size, completely independent of whatever
-                // PageInstrumentPreview draws (or redraws) inside.
-                PageInstrumentPreview(page: pg, offset: previewOffset)
-                    .allowsHitTesting(false)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: 150)
-                    .background(Color.white)
-                    .clipShape(RoundedRectangle(cornerRadius: 4))
-                    .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
-                    .overlay { panOverlay }
+                HStack(alignment: .top, spacing: 8) {
+                    // Main crop strip (panning)
+                    // panOverlay is applied as .overlay on the FRAMED container rather
+                    // than as a ZStack sibling of PageInstrumentPreview.  This guarantees
+                    // the overlay always receives the container's fixed 150 pt height as
+                    // its layout size, completely independent of whatever
+                    // PageInstrumentPreview draws (or redraws) inside.
+                    PageInstrumentPreview(page: pg, offset: previewOffset)
+                        .allowsHitTesting(false)
+                        .frame(maxWidth: .infinity)
+                        .frame(height: 150)
+                        .background(Color.white)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                        .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
+                        .overlay { panOverlay }
+
+                    // Minimap: full-page thumbnail with crop indicator
+                    PageCropOverview(page: pg, offset: previewOffset)
+                        .frame(width: 52, height: 70)
+                        .padding(.top, (150 - 70) / 2)  // vertically centre against the 150pt strip
+                }
             } else {
                 RoundedRectangle(cornerRadius: 4)
                     .fill(Color.gray.opacity(0.12))
@@ -6310,6 +6476,95 @@ struct PageInstrumentPreview: View {
 
         guard let cropped = cg.cropping(to: pixRect) else { return nil }
         return NSImage(cgImage: cropped, size: CGSize(width: cropW, height: cropH))
+    }
+}
+
+// MARK: - Page Crop Overview (minimap)
+/// Small thumbnail of the full page with a highlighted rectangle showing where
+/// the current crop window sits. Displayed beside the main instrument preview
+/// so users can orientate themselves within the page.
+struct PageCropOverview: View {
+    let page: PDFPage
+    var offset: CGPoint = .zero
+
+    /// Fixed display size for the minimap thumbnail.
+    private let thumbWidth: CGFloat  = 52
+    private let thumbHeight: CGFloat = 70
+
+    @State private var thumbnailImage: NSImage?
+
+    var body: some View {
+        ZStack(alignment: .topLeading) {
+            // Full-page thumbnail
+            Group {
+                if let img = thumbnailImage {
+                    Image(nsImage: img)
+                        .resizable()
+                        .aspectRatio(contentMode: .fill)
+                        .frame(width: thumbWidth, height: thumbHeight)
+                        .clipped()
+                } else {
+                    Color.gray.opacity(0.1)
+                        .frame(width: thumbWidth, height: thumbHeight)
+                }
+            }
+            .background(Color.white)
+
+            // Crop indicator rectangle overlay
+            cropIndicator
+        }
+        .frame(width: thumbWidth, height: thumbHeight)
+        .clipShape(RoundedRectangle(cornerRadius: 3))
+        .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+        .task {
+            thumbnailImage = await Self.renderThumbnailAsync(
+                page: page,
+                width: thumbWidth, height: thumbHeight
+            )
+        }
+    }
+
+    /// Computes the position and size of the highlighted rectangle in the minimap's
+    /// coordinate space, mirroring the crop logic in PageInstrumentPreview.
+    private var cropIndicator: some View {
+        let mediaBox = page.bounds(for: .mediaBox)
+        let rotation  = ((page.rotation % 360) + 360) % 360
+        let pageW = rotation == 90 || rotation == 270 ? mediaBox.height : mediaBox.width
+        let pageH = rotation == 90 || rotation == 270 ? mediaBox.width  : mediaBox.height
+
+        let cropH: CGFloat = 100
+        let cropW = min(pageW * 0.4, 200)
+
+        let defaultY = pageH - cropH
+        let clampedX = min(max(offset.x, 0), pageW - cropW)
+        let clampedY = min(max(defaultY + offset.y, 0), defaultY)
+
+        // Scale from PDF points to thumbnail pixels
+        let scaleX = thumbWidth  / pageW
+        let scaleY = thumbHeight / pageH
+
+        // PDF y=0 is at page bottom; SwiftUI y=0 is at top — flip
+        let rectX = clampedX * scaleX
+        let rectY = (pageH - clampedY - cropH) * scaleY
+        let rectW = cropW  * scaleX
+        let rectH = cropH  * scaleY
+
+        return Rectangle()
+            .stroke(Color.accentColor, lineWidth: 1.5)
+            .background(Color.accentColor.opacity(0.15))
+            .frame(width: max(rectW, 4), height: max(rectH, 4))
+            .offset(x: rectX, y: rectY)
+    }
+
+    private static func renderThumbnailAsync(
+        page: PDFPage, width: CGFloat, height: CGFloat
+    ) async -> NSImage? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async {
+                let size = NSSize(width: width * 2, height: height * 2)  // 2× for retina
+                continuation.resume(returning: page.thumbnail(of: size, for: .mediaBox))
+            }
+        }
     }
 }
 
