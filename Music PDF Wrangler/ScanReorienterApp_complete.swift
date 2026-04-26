@@ -1221,7 +1221,7 @@ func normalizeRomanNumerals(_ s: String) -> String {
 func numberedBase(of name: String) -> String? {
     let normalized = normalizeRomanNumerals(name.lowercased())
     let words = normalized.split(separator: " ")
-    guard words.count >= 2, Int(String(words.last!)) != nil else { return nil }
+    guard words.count >= 2, let lastWord = words.last, Int(String(lastWord)) != nil else { return nil }
     return words.dropLast().joined(separator: " ")
 }
 
@@ -1918,7 +1918,7 @@ class CombineManager: ObservableObject {
         let orderedIndices = files.indices.filter { fileIds.contains(files[$0].id) }
         guard orderedIndices.count >= 2 else { return }
 
-        let insertionIndex = orderedIndices.first!
+        let insertionIndex = orderedIndices[0]
         let groupFilesInOrder = orderedIndices.map { files[$0] }
 
         // Remove in reverse order so lower indices stay stable
@@ -2454,6 +2454,8 @@ struct ManualAssignmentView: View {
 /// Accepts a folder or individual PDFs, lets the user assign a shared base name
 /// plus per-file instrument suffixes (with the same autocomplete as the Splitter),
 /// then renames all files in place.
+private enum BulkStage { case base, prefix, summary }
+
 struct BulkRenameView: View {
 
     // ── Parent binding so RenamerView can react to file load/clear ────────
@@ -2472,8 +2474,7 @@ struct BulkRenameView: View {
     @State private var isTargeted = false
 
     // ── Prefix step ───────────────────────────────────────────────────────
-    @State private var showingPrefixStage: Bool = false
-    @State private var showingSummary: Bool = false
+    @State private var bulkStage: BulkStage = .base
     @State private var prefixItems: [PrefixItem] = []
     @State private var summaryNames: [String] = []
 
@@ -2483,15 +2484,7 @@ struct BulkRenameView: View {
     @AppStorage("prefixEnsembleType") private var prefixEnsembleType: EnsembleType = .band
 
     // ── Instrument names (same union as the Splitter) ─────────────────────
-    private var instrumentNames: [String] {
-        var seen = Set<String>()
-        var result: [String] = []
-        for name in InstrumentOrders.orchestra + InstrumentOrders.band + InstrumentOrders.jazz {
-            let key = name.lowercased()
-            if seen.insert(key).inserted { result.append(name.capitalized) }
-        }
-        return result
-    }
+    private var instrumentNames: [String] { InstrumentOrders.allNames }
 
     // ── Validation ────────────────────────────────────────────────────────
     private var baseNameError: String? { pdfFilenameError(for: baseFileName) }
@@ -2523,25 +2516,25 @@ struct BulkRenameView: View {
 
     // ── Body ──────────────────────────────────────────────────────────────
     var body: some View {
-        if showingSummary {
+        switch bulkStage {
+        case .summary:
             RenameSummaryView(
                 finalNames: summaryNames,
                 outputFolderURL: nil,
                 onStartOver: {
-                    showingSummary = false
-                    showingPrefixStage = false
+                    bulkStage = .base
                     clearFiles()
                 }
             )
-        } else if showingPrefixStage {
+        case .prefix:
             PrefixOrderStepView(
                 stepLabel: "Step 2",
                 initialItems: prefixItems,
                 ensembleType: $prefixEnsembleType,
-                onBack: { showingPrefixStage = false },
+                onBack: { bulkStage = .base },
                 onApply: { orderedItems in applyPrefixAndRenameBulk(orderedItems: orderedItems) }
             )
-        } else {
+        case .base:
             VStack(spacing: 0) {
                 // Header
                 HStack {
@@ -2821,7 +2814,7 @@ struct BulkRenameView: View {
                                   page: item.document.page(at: 0),
                                   originalURL: item.url)
             }
-            showingPrefixStage = true
+            bulkStage = .prefix
         } else {
             // Rename directly to the base name + suffix (no prefix step).
             var errors: [String] = []
@@ -2843,7 +2836,7 @@ struct BulkRenameView: View {
 
             if errors.isEmpty {
                 summaryNames = finalNames
-                showingSummary = true
+                bulkStage = .summary
             } else {
                 let failed = errors.prefix(5).joined(separator: "\n")
                 showNSAlert(
@@ -2878,8 +2871,7 @@ struct BulkRenameView: View {
 
         if errors.isEmpty {
             summaryNames = finalNames
-            showingPrefixStage = false
-            showingSummary = true
+            bulkStage = .summary
         } else {
             let failed = errors.prefix(5).joined(separator: "\n")
             showNSAlert(
@@ -3805,6 +3797,19 @@ struct InstrumentOrders {
         }
     }
 
+    /// Ordered, deduplicated union of orchestra + band + jazz, with each name
+    /// capitalised. Used for instrument-name autocomplete in both the Splitter
+    /// and the Bulk Renamer.
+    static var allNames: [String] {
+        var seen = Set<String>()
+        var result: [String] = []
+        for name in orchestra + band + jazz {
+            let key = name.lowercased()
+            if seen.insert(key).inserted { result.append(name.capitalized) }
+        }
+        return result
+    }
+
     // MARK: - Setup (call once at launch from AppDelegate)
     static func setup() {
         guard let url = fileURL else { return }
@@ -4385,6 +4390,8 @@ func splitSizes(totalPages: Int, stride: Int) -> [Int] {
 }
 
 // MARK: - Split View
+private enum SplitStage { case split, naming, prefix, summary }
+
 struct SplitView: View {
     @StateObject private var pdfManager = PDFManager()
     // fileSizes stores the page count for each output file in order.
@@ -4394,9 +4401,7 @@ struct SplitView: View {
     @State private var fileSizes: [Int] = []
     @State private var stride: Int = 2
     @State private var currentPage: Int = 0
-    @State private var showingNamingStage: Bool = false
-    @State private var showingPrefixStage: Bool = false
-    @State private var showingSummary: Bool = false
+    @State private var splitStage: SplitStage = .split
     @State private var baseFileName: String = ""
     @State private var customFileNames: [Int: String] = [:]
     /// Shared pan offset for all naming-stage previews (PDF points from the default top-left position).
@@ -4443,14 +4448,13 @@ struct SplitView: View {
     }
     
     var body: some View {
-        if showingSummary {
+        switch splitStage {
+        case .summary:
             RenameSummaryView(
                 finalNames: summaryNames,
                 outputFolderURL: pendingFolderURL,
                 onStartOver: {
-                    showingSummary = false
-                    showingPrefixStage = false
-                    showingNamingStage = false
+                    splitStage = .split
                     pdfManager.clearPDF()
                     baseFileName = ""
                     customFileNames = [:]
@@ -4459,34 +4463,33 @@ struct SplitView: View {
                     pendingFolderURL = nil
                 }
             )
-        } else if showingPrefixStage {
+        case .prefix:
             PrefixOrderStepView(
                 stepLabel: "Step 3",
                 initialItems: prefixItems,
                 ensembleType: $prefixEnsembleType,
-                onBack: {
-                    showingPrefixStage = false
-                    showingNamingStage = true
-                },
+                onBack: { splitStage = .naming },
                 onApply: { orderedItems in
                     applyPrefixAndSaveSplit(orderedItems: orderedItems)
                 }
             )
-        } else if showingNamingStage, let document = pdfManager.pdfDocument {
-            SplitNamingStageView(
-                pdfDocument: document,
-                fileSizes: fileSizes,
-                baseFileName: $baseFileName,
-                customFileNames: $customFileNames,
-                previewOffset: $previewOffset,
-                onBack: { showingNamingStage = false },
-                onClear: {
-                    showingNamingStage = false
-                    pdfManager.clearPDF()
-                },
-                onSave: { saveSplitPDF() }
-            )
-        } else {
+        case .naming:
+            if let document = pdfManager.pdfDocument {
+                SplitNamingStageView(
+                    pdfDocument: document,
+                    fileSizes: fileSizes,
+                    baseFileName: $baseFileName,
+                    customFileNames: $customFileNames,
+                    previewOffset: $previewOffset,
+                    onBack: { splitStage = .split },
+                    onClear: {
+                        splitStage = .split
+                        pdfManager.clearPDF()
+                    },
+                    onSave: { saveSplitPDF() }
+                )
+            }
+        case .split:
             splitStageBody
         }
     }
@@ -4617,7 +4620,7 @@ struct SplitView: View {
                             // Action button
                             HStack {
                                 Spacer()
-                                Button(action: { showingNamingStage = true }) {
+                                Button(action: { splitStage = .naming }) {
                                     Label("Next: Name Files", systemImage: "arrow.right.circle.fill")
                                 }
                                 .buttonStyle(.borderedProminent)
@@ -4726,8 +4729,7 @@ struct SplitView: View {
                 pagePos += fileSizes[fileIndex]
             }
             prefixItems = items
-            showingNamingStage = false
-            showingPrefixStage = true
+            splitStage = .prefix
         } else {
             // No prefix step — show folder picker now and save directly.
             let panel = NSOpenPanel()
@@ -4762,8 +4764,7 @@ struct SplitView: View {
                         }
                         pendingFolderURL = folderURL
                         summaryNames = names
-                        showingNamingStage = false
-                        showingSummary = true
+                        splitStage = .summary
                     }
                 }
             }
@@ -4821,8 +4822,7 @@ struct SplitView: View {
             } else {
                 pendingFolderURL = folderURL   // stored here so summary can offer "Show in Finder"
                 summaryNames = finalNamesForSummary
-                showingPrefixStage = false
-                showingSummary = true
+                splitStage = .summary
             }
         }
     }
@@ -5063,19 +5063,8 @@ struct SplitNamingStageView: View {
         return "\(range) · \(size) \(size == 1 ? "page" : "pages")"
     }
 
-    /// Ordered, deduplicated instrument name list built from InstrumentOrders
-    /// (orchestra → band → jazz), capitalised first letter only.
-    private var instrumentNames: [String] {
-        var seen = Set<String>()
-        var result: [String] = []
-        for name in InstrumentOrders.orchestra + InstrumentOrders.band + InstrumentOrders.jazz {
-            let key = name.lowercased()
-            if seen.insert(key).inserted {
-                result.append(name.capitalized)
-            }
-        }
-        return result
-    }
+    /// Ordered, deduplicated instrument name list (orchestra → band → jazz).
+    private var instrumentNames: [String] { InstrumentOrders.allNames }
 
     private var baseNameError: String? {
         filenameError(for: baseFileName)
@@ -5330,7 +5319,7 @@ struct SplitFileNamingRow: View {
             guard !prev.isEmpty else { continue }
             let parts = prev.components(separatedBy: " ")
             // Must have at least two tokens and last token must be a positive integer
-            if parts.count >= 2, let n = Int(parts.last!), n > 0 {
+            if parts.count >= 2, let last = parts.last, let n = Int(last), n > 0 {
                 let basePart = parts.dropLast().joined(separator: " ")
                 return "\(basePart) \(n + 1)"
             }
