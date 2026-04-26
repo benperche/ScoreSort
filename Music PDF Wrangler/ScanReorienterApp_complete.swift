@@ -1626,6 +1626,8 @@ struct ShortcutsHelpView: View {
                     shortcutRow("← / →", "Previous / next page")
                     shortcutRow("⌘← / ⌘→", "First / last page")
                     shortcutRow("Space", "Toggle split marker (Split tab)")
+                    shortcutRow("↑ / ↓", "Jump between output files (Split tab)")
+                    shortcutRow(", / .", "Rotate current page left / right (Rotate tab)")
                 }
 
                 shortcutSection("Renamer") {
@@ -1702,10 +1704,11 @@ struct WelcomeTourPage {
             title: "Welcome to Music PDF Manager",
             useCase: nil,
             bodyParagraphs: [
-                "Tools for music librarians, educators, publishers and copyists working with scanned or digital music PDFs.",
-                "The four tabs cover the most common workflow stages, arranged roughly from most to least used. The easiest way to get files into the app is to drag them directly from a Finder window."
+                "This app contains a suite of tools for music librarians, music educators, publishers and copyists for working with scanned or digital music PDFs.",
+                "Each tab handles a different stage of a typical workflow, arranged in order from most commonly used to least common — this short tour gives you a quick overview of each one.",
+                "The app is designed to work closely with the macOS Finder. Usually the easiest way to get files into the app will be by dragging files or folders onto the relevant page of this app."
             ],
-            tipText: "If your files live in Google Drive or Dropbox, install the desktop app so your folders appear directly in Finder.",
+            tipText: "If your files live in Google Drive or Dropbox, you may want to install the relevant desktop app so your folders appear directly in Finder.",
             imageName: nil
         ),
 
@@ -1717,9 +1720,10 @@ struct WelcomeTourPage {
             title: "Combine PDFs",
             useCase: "You have separate PDF files — one per instrument part — and want to merge them into a single document, ready to print all in one go.",
             bodyParagraphs: [
-                "Drag your files or a whole folder into the list, then reorder with **⌘↑ / ⌘↓**. Save your usual instrument allocations as **Ensemble Presets** (⌘,) — view them in the sidebar to check part counts, or use **Apply to Files** to automatically match them to your filenames.",
+                "Drag your files (or a whole folder) into the app, then reorder files with **⌘↑ / ⌘↓**. ",
+                "You can save your usual instrument allocations as **Ensemble Presets** in Preferences.) These can be viewed in the Presets sidebar to help you remember the normal number of parts required. Use **Apply to Files** to attempt to automatically match your preset allocations to your filenames.",
                 "When ready, click **Create PDF** to save the combined file, or **Open in Preview** to print directly without saving a new document.",
-                "**Collate Sets:** Select a group of parts and press **C** to interleave their pages — each player's copy will print as a ready-to-distribute stack. Ideal for any part needed by multiple players, such as a full percussion section."
+                "**Advanced: Collate Sets:** Select a group of parts and press **C** to interleave their pages in the output document. Ideal where you have a number of parts required for multiple players, for example in a percussion section, — each player's copies will print together in a  ready-to-distribute stack."
             ],
             tipText: "⌫ removes selected files · ⌘Z undoes any change · ⌘↑ / ⌘↓ reorders",
             imageName: nil
@@ -1731,13 +1735,14 @@ struct WelcomeTourPage {
             iconColor: .orange,
             tabShortcut: "⌘2",
             title: "Rename Files",
-            useCase: "You have a folder of parts with unhelpful filenames (e.g. `scan001.pdf`) and need to rename them consistently, or sort them into score order.",
+            useCase: "You have a folder of parts with unhelpful filenames (e.g. `scan001.pdf`) and want to rename them consistently, or have them sort into score order.",
             bodyParagraphs: [
-                "Drag a folder onto the **left side** to add score-order prefixes to already-named files (e.g. `01 - Beethoven - Flute.pdf`). Adjust the order as needed and re-number in one pass.",
-                "Drag a folder onto the **right side** to rename files from scratch — useful for parts downloaded from IMSLP. A preview of each file's top-left corner helps you confirm which part you're naming. Enter a base name, then fill in each instrument name; the app suggests names and numbers as you type, and you can accept suggestions with the arrow keys and Return.",
-                "Once all names are filled in, toggle **Prefix score order** to step through the score-order flow above."
+                "Drag a folder onto the **left side** to add score-order prefixes to already-named files (e.g. `01 - Beethoven - Flute.pdf`). Adjust the order as needed and re-number in one go.",
+                "Drag a folder onto the **right side** to replace the filenames of multiple files at once — for example for  parts downloaded from IMSLP. The preview window will show the top left of each file by default so you can check which part you are renaming, and you can move this preview around for all parts at once if required.",
+                "Enter a base name (e.g. `Beethoven Symphony 5`), then fill in each instrument name. The app intelligently suggests instrument names and numbers as you type, and you can accept suggestions with the arrow keys and Return.",
+                "Once all names are filled in, toggle **Prefix score order** to step through the score-order flow described above, or else skip to output files to a specified folder."
             ],
-            tipText: "Tab moves between instrument name fields · score order can be customised in Preferences",
+            tipText: "Tab moves between instrument name fields · You can change the default score order in Preferences",
             imageName: nil
         ),
 
@@ -1750,8 +1755,7 @@ struct WelcomeTourPage {
             useCase: "You have one large PDF — e.g. a complete scan of all parts bound together — and need to split it into separate instrument files.",
             bodyParagraphs: [
                 "Drop the PDF and use **← →** to move through pages. Press **Space** to toggle a split marker, and **↑ ↓** to jump to the first page of each output file. Equally-spaced markers can be placed automatically using the **stride** control.",
-                "In Step 2, name each output file — the same flow as Rename Files. Toggle **Prefix score order** to add score-order numbers automatically in Step 3.",
-                "The whole PDF is only written to disk once, at the very end — so you can take your time getting the split points and names exactly right."
+                "In Step 2, name each output file — the same flow as Rename Files. Toggle **Prefix score order** to add score-order numbers automatically in Step 3."
             ],
             tipText: "⌘← / ⌘→ jumps to the first or last page · Space toggles a split marker",
             imageName: nil
@@ -1763,7 +1767,7 @@ struct WelcomeTourPage {
             iconColor: .purple,
             tabShortcut: "⌘4",
             title: "Rotate Pages",
-            useCase: "Your scan has pages that came out sideways or upside-down and need correcting before use.",
+            useCase: "Your scan has multiple pages that came out sideways or upside-down and need correcting before use.",
             bodyParagraphs: [
                 "Drop a PDF and use **← →** to navigate pages. Rotate the current page, all pages, or all odd / even pages — handy for landscape-scanned scores where every other page is upside-down.",
                 "Save the corrected PDF when you're done."
@@ -4547,6 +4551,7 @@ struct RotateView: View {
     @State private var baseRotation: RotationAngle = .none
     @State private var additionalRotationMode: RotationMode = .none
     @State private var additionalRotationAngle: RotationAngle = .rotate180
+    @State private var pageRotationOverrides: [Int: Int] = [:]
     @State private var currentPage: Int = 0
     @State private var isShowingSavePanel = false
     @FocusState private var isViewFocused: Bool
@@ -4586,7 +4591,10 @@ struct RotateView: View {
                         currentPage: $currentPage,
                         baseRotation: baseRotation,
                         additionalRotationMode: additionalRotationMode,
-                        additionalRotationAngle: additionalRotationAngle
+                        additionalRotationAngle: additionalRotationAngle,
+                        pageRotationOverrides: pageRotationOverrides,
+                        onRotateCurrentPageLeft:  rotateCurrentPageLeft,
+                        onRotateCurrentPageRight: rotateCurrentPageRight
                     )
                     
                     Divider()
@@ -4688,15 +4696,34 @@ struct RotateView: View {
                 if press.modifiers.contains(.command) { currentPage = totalPages - 1 }
                 else if currentPage < totalPages - 1 { currentPage += 1 }
                 return .handled
+            case KeyEquivalent(","):
+                rotateCurrentPageLeft()
+                return .handled
+            case KeyEquivalent("."):
+                rotateCurrentPageRight()
+                return .handled
             default:
                 return .ignored
             }
+        }
+        .onChange(of: pdfManager.pdfDocument) { newValue in
+            if newValue == nil { pageRotationOverrides = [:] }
         }
         .onChange(of: isShowingSavePanel) { newValue in
             if newValue, let document = pdfManager.pdfDocument {
                 saveRotatedPDF(document: document)
             }
         }
+    }
+
+    private func rotateCurrentPageLeft() {
+        let current = pageRotationOverrides[currentPage, default: 0]
+        pageRotationOverrides[currentPage] = ((current - 90) % 360 + 360) % 360
+    }
+
+    private func rotateCurrentPageRight() {
+        let current = pageRotationOverrides[currentPage, default: 0]
+        pageRotationOverrides[currentPage] = ((current + 90) % 360 + 360) % 360
     }
 
     private func saveRotatedPDF(document: PDFDocument) {
@@ -4711,7 +4738,8 @@ struct RotateView: View {
                     to: url,
                     baseRotation: baseRotation,
                     additionalRotationMode: additionalRotationMode,
-                    additionalRotationAngle: additionalRotationAngle
+                    additionalRotationAngle: additionalRotationAngle,
+                    pageRotationOverrides: pageRotationOverrides
                 ) { title, message, isError in
                     showNSAlert(title: title, message: message, isError: isError)
                 }
@@ -4956,7 +4984,7 @@ struct SplitView: View {
                                 }
 
                                 VStack(alignment: .leading, spacing: 4) {
-                                    Text("**Stride** is the default number of pages per output file. When you load a PDF or press **Apply**, split markers are placed every N pages automatically.")
+                                    Text("**Stride** is the number of pages per output file. Press **Apply** to place split markers every N pages automatically.")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
                                     Text("Then navigate with ← → and press **Space** to fine-tune. Pressing Space in the *middle* of a file adds a split there. Pressing Space at the *start* of a file (highlighted in orange) removes that split and merges the file with the one above.")
@@ -5060,7 +5088,8 @@ struct SplitView: View {
             if newValue != nil {
                 baseFileName = pdfManager.currentFileName ?? ""
                 isViewFocused = true
-                applyStride()
+                // Load with no markers — user presses Apply to apply the stride
+                fileSizes = totalPages > 0 ? [totalPages] : []
                 previewOffset = .zero
             } else {
                 fileSizes = []
@@ -6349,42 +6378,35 @@ struct RotatePreviewSection: View {
     let baseRotation: RotationAngle
     let additionalRotationMode: RotationMode
     let additionalRotationAngle: RotationAngle
-    
-    var totalPages: Int {
-        document.pageCount
-    }
-    
+    let pageRotationOverrides: [Int: Int]
+    let onRotateCurrentPageLeft:  () -> Void
+    let onRotateCurrentPageRight: () -> Void
+
+    var totalPages: Int { document.pageCount }
+
     var totalRotationForCurrentPage: Int {
         let pageNumber = currentPage + 1
         var rotation = baseRotation.degrees
-        
+
         let shouldApplyAdditional: Bool
         switch additionalRotationMode {
-        case .odd:
-            shouldApplyAdditional = pageNumber % 2 == 1
-        case .even:
-            shouldApplyAdditional = pageNumber % 2 == 0
-        case .none:
-            shouldApplyAdditional = false
+        case .odd:  shouldApplyAdditional = pageNumber % 2 == 1
+        case .even: shouldApplyAdditional = pageNumber % 2 == 0
+        case .none: shouldApplyAdditional = false
         }
+        if shouldApplyAdditional { rotation += additionalRotationAngle.degrees }
 
-        if shouldApplyAdditional {
-            rotation += additionalRotationAngle.degrees
-        }
-        
-        return rotation % 360
+        rotation += pageRotationOverrides[currentPage, default: 0]
+
+        return ((rotation % 360) + 360) % 360
     }
-    
+
     var rotationDescription: String {
-        if totalRotationForCurrentPage == 0 {
-            return "No rotation"
-        } else if baseRotation.degrees == 0 {
-            return "Rotated \(additionalRotationAngle.degrees)°"
-        } else if additionalRotationMode == .none {
-            return "Rotated \(baseRotation.degrees)°"
-        } else {
-            return "Rotated \(additionalRotationAngle.degrees)°"
-        }
+        if totalRotationForCurrentPage == 0 { return "No rotation" }
+        let hasIndividual = pageRotationOverrides[currentPage, default: 0] != 0
+        return hasIndividual
+            ? "Rotated \(totalRotationForCurrentPage)° (this page)"
+            : "Rotated \(totalRotationForCurrentPage)°"
     }
     
     var body: some View {
@@ -6403,14 +6425,29 @@ struct RotatePreviewSection: View {
 
                 Spacer()
 
-                VStack(spacing: 4) {
-                    Text("Page \(currentPage + 1) of \(totalPages)")
-                        .font(.headline)
+                // Rotate-left button · page info · rotate-right button
+                HStack(spacing: 10) {
+                    Button(action: onRotateCurrentPageLeft) {
+                        Image(systemName: "rotate.left")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Rotate this page 90° counter-clockwise (,)")
 
-                    Text(rotationDescription)
-                        .font(.caption)
-                        .foregroundColor(totalRotationForCurrentPage > 0 ? .orange : .secondary)
-                        .fontWeight(totalRotationForCurrentPage > 0 ? .semibold : .regular)
+                    VStack(spacing: 4) {
+                        Text("Page \(currentPage + 1) of \(totalPages)")
+                            .font(.headline)
+
+                        Text(rotationDescription)
+                            .font(.caption)
+                            .foregroundColor(totalRotationForCurrentPage > 0 ? .orange : .secondary)
+                            .fontWeight(totalRotationForCurrentPage > 0 ? .semibold : .regular)
+                    }
+
+                    Button(action: onRotateCurrentPageRight) {
+                        Image(systemName: "rotate.right")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Rotate this page 90° clockwise (.)")
                 }
 
                 Spacer()
@@ -6550,7 +6587,7 @@ class PDFManager: ObservableObject {
         currentFileName = nil
     }
     
-    func saveRotatedPDF(to url: URL, baseRotation: RotationAngle, additionalRotationMode: RotationMode, additionalRotationAngle: RotationAngle, completion: PDFAlertHandler) {
+    func saveRotatedPDF(to url: URL, baseRotation: RotationAngle, additionalRotationMode: RotationMode, additionalRotationAngle: RotationAngle, pageRotationOverrides: [Int: Int] = [:], completion: PDFAlertHandler) {
         guard let document = pdfDocument else { return }
 
         let newDocument = PDFDocument()
@@ -6563,6 +6600,12 @@ class PDFManager: ObservableObject {
 
             if baseRotation.degrees != 0 {
                 page.rotation += baseRotation.degrees
+            }
+
+            // Per-page individual rotation (applied on top of the base rotation)
+            let individualDegrees = pageRotationOverrides[pageIndex, default: 0]
+            if individualDegrees != 0 {
+                page.rotation += individualDegrees
             }
 
             let shouldApplyAdditional: Bool
