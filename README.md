@@ -74,9 +74,7 @@ Rotate PDF pages with flexible options for odd/even page handling.
 ### Requirements
 - macOS 14.0 (Sonoma) or later
 
-### Download (Beta)
-
-> **This is a beta release.** The app is unsigned, so macOS will show a security warning the first time you open it. Follow the steps below to allow it.
+### Download
 
 1. Download the latest `ScoreSort.zip` from the [Releases](https://github.com/benperche/ScoreSort/releases) page
 2. Unzip it and move **ScoreSort.app** to your Applications folder

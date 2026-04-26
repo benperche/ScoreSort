@@ -192,10 +192,6 @@ struct AboutView: View {
                 .foregroundStyle(.secondary)
 
             Text("Developed by Ben Perche and Claude")
-
-            Link("github.com/benperche/ScoreSort",
-                 destination: URL(string: "https://github.com/benperche/ScoreSort")!)
-                .font(.callout)
         }
         .padding(32)
         .frame(width: 340)
