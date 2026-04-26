@@ -1,4 +1,4 @@
-# Music PDF Manager
+# ScoreSort
 
 A powerful macOS application for managing music PDFs with four tools for musicians and music librarians: PDF combining with smart copy management, automatic file renaming based on instrument detection, PDF splitting, and page rotation.
 
@@ -78,9 +78,9 @@ Rotate PDF pages with flexible options for odd/even page handling.
 
 > **This is a beta release.** The app is unsigned, so macOS will show a security warning the first time you open it. Follow the steps below to allow it.
 
-1. Download the latest `Music.PDF.Manager.zip` from the [Releases](https://github.com/benperche/music-pdf-manager/releases) page
-2. Unzip it and move **Music PDF Manager.app** to your Applications folder
-3. Double-click to open — macOS will show *"Music PDF Manager cannot be opened because it is from an unidentified developer"*
+1. Download the latest `ScoreSort.zip` from the [Releases](https://github.com/benperche/ScoreSort/releases) page
+2. Unzip it and move **ScoreSort.app** to your Applications folder
+3. Double-click to open — macOS will show *"ScoreSort cannot be opened because it is from an unidentified developer"*
 4. Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**
 5. Confirm in the dialog that appears — you'll only need to do this once
 
@@ -90,10 +90,10 @@ If you'd prefer to build it yourself:
 
 1. Clone the repository:
 ```bash
-git clone https://github.com/benperche/music-pdf-manager.git
+git clone https://github.com/benperche/ScoreSort.git
 ```
 
-2. Open `Music PDF Wrangler.xcodeproj` in Xcode 15 or later
+2. Open `ScoreSort.xcodeproj` in Xcode 15 or later
 
 3. Press ⌘R to build and run
 
@@ -317,7 +317,7 @@ If you encounter any issues or have suggestions:
 Ben Perche, developed with Claude
 Additional contributions from Lachlan Hamilton
 
-Project Link: [https://github.com/benperche/music-pdf-manager](https://github.com/benperche/music-pdf-manager)
+Project Link: [https://github.com/benperche/ScoreSort](https://github.com/benperche/ScoreSort)
 
 ---
 

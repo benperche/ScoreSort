@@ -1,13 +1,13 @@
-# Music PDF Manager — Code Reference
+# ScoreSort — Code Reference
 > Single file: `ScanReorienterApp_complete.swift` (~4 500 lines)
-> Xcode project: "Music PDF Wrangler"
+> Xcode project: "ScoreSort"
 
 ---
 
 ## App Structure
 
 ```
-MusicPDFManagerApp (@main)
+ScoreSortApp (@main)
   └── AppDelegate  — quits on window close
   └── WindowGroup  — ContentView
         └── ContentView  — TabView (tags 0–3)
@@ -23,7 +23,7 @@ MusicPDFManagerApp (@main)
 
 Window min size: 900×700.
 
-**App-level shared state** (held as `@StateObject` on `MusicPDFManagerApp`, injected via `.environmentObject()`):
+**App-level shared state** (held as `@StateObject` on `ScoreSortApp`, injected via `.environmentObject()`):
 - `AppState` — `selectedTab`, `showingKeyboardHelp`, `combineMenuState`
 - `RenamerManager` — used by both `RenamerView` and `AppPreferencesView`
 - `EnsemblePresetStore` — used by `CombineView`, `PresetSidebarView`, `CombinerPreferencesView`
@@ -198,7 +198,7 @@ struct EnsemblePreset: Identifiable, Codable, Equatable {
 @Published var presets: [EnsemblePreset] = []
 ```
 
-**Persistence:** JSON at `~/Library/Application Support/Music PDF Manager/ensemble-presets.json`. Loaded on `init`; saved by `save()` (called from all mutating methods).
+**Persistence:** JSON at `~/Library/Application Support/ScoreSort/ensemble-presets.json`. Loaded on `init`; saved by `save()` (called from all mutating methods).
 
 **Key methods:**
 | Method | Notes |
@@ -354,7 +354,7 @@ hasCustomOrder: Bool
 Three computed vars: `band`, `jazz`, `orchestra`. Loaded via `getOrder(for: EnsembleType)`.
 `customInstrumentOrder` starts from the active preset; `hasCustomOrder` flag prevents preset changes from overwriting user edits.
 
-**External file:** `~/Library/Application Support/Music PDF Manager/instrument-orders.json`
+**External file:** `~/Library/Application Support/ScoreSort/instrument-orders.json`
 Written from built-in defaults on first launch (via `InstrumentOrders.setup()` called in `AppDelegate.applicationDidFinishLaunching`). App loads from the file at startup; changes take effect on next launch. If the file is missing or unreadable the private `bandDefault`/`jazzDefault`/`orchestraDefault` arrays are used as fallback. File is pretty-printed JSON: `{ "band": [...], "jazz": [...], "orchestra": [...] }`.
 
 **Band order highlights:** score → piccolo → flute → oboe → cor anglais/english horn → bassoon → contrabassoon → Eb clarinet → clarinet → alto clarinet → bass clarinet → contrabass clarinet → sopranos sax → alto sax → tenor sax → bari sax → bass sax → cornet → trumpet → horn → trombone → bass trombone → euphonium/baritone → tuba → guitar/keyboard/piano/harp → string bass/bass → timpani → mallets → bells/chimes/glockenspiel/xylophone/vibraphone/marimba → drums → percussion → violin → viola → cello → double bass
@@ -478,8 +478,8 @@ enum RotationMode { case odd, even, none }
 
 ## Test Suite
 
-**Target:** `MusicPDFManagerTests` (Swift Testing framework — `@Suite` / `@Test` / `#expect`)  
-**File:** `Music PDF ManagerTests/Music_PDF_ManagerTests.swift`  
+**Target:** `ScoreSortTests` (Swift Testing framework — `@Suite` / `@Test` / `#expect`)  
+**File:** `ScoreSortTests/Music_PDF_ManagerTests.swift`  
 **Import:** `@testable import Music_PDF_Manager`
 
 **Shared helper:** `writePDF(pages: Int, to: URL)` — creates a real blank-page PDF using PDFKit.

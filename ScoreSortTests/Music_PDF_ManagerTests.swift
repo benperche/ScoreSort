@@ -1,6 +1,6 @@
 //
-//  Music_PDF_ManagerTests.swift
-//  Music PDF ManagerTests
+//  ScoreSortTests.swift
+//  ScoreSortTests
 //
 
 import Testing

@@ -1,6 +1,6 @@
 //
-//  MusicPDFManager.swift
-//  Music PDF Manager
+//  ScoreSort.swift
+//  ScoreSort
 //
 //  A macOS app for managing music PDFs:
 //  - Renaming sheet music files with sequential prefixes
@@ -136,7 +136,7 @@ struct HelpCommands: Commands {
 
 // MARK: - Main App
 @main
-struct MusicPDFManagerApp: App {
+struct ScoreSortApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState()
     @StateObject private var renamerManager = RenamerManager()
@@ -152,7 +152,7 @@ struct MusicPDFManagerApp: App {
         }
         .commands {
             CommandGroup(replacing: .appInfo) {
-                Button("About Music PDF Manager") {
+                Button("About ScoreSort") {
                     openWindow(id: "about")
                 }
             }
@@ -168,7 +168,7 @@ struct MusicPDFManagerApp: App {
                 .environmentObject(presetStore)
         }
 
-        Window("About Music PDF Manager", id: "about") {
+        Window("About ScoreSort", id: "about") {
             AboutView()
         }
         .windowResizability(.contentSize)
@@ -184,7 +184,7 @@ struct AboutView: View {
                 .resizable()
                 .frame(width: 80, height: 80)
 
-            Text("Music PDF Manager")
+            Text("ScoreSort")
                 .font(.title2)
                 .fontWeight(.semibold)
 
@@ -193,8 +193,8 @@ struct AboutView: View {
 
             Text("Developed by Ben Perche and Claude")
 
-            Link("github.com/benperche/music-pdf-manager",
-                 destination: URL(string: "https://github.com/benperche/music-pdf-manager")!)
+            Link("github.com/benperche/ScoreSort",
+                 destination: URL(string: "https://github.com/benperche/ScoreSort")!)
                 .font(.callout)
         }
         .padding(32)
@@ -1701,7 +1701,7 @@ struct WelcomeTourPage {
             icon: "music.note.list",
             iconColor: .accentColor,
             tabShortcut: nil,
-            title: "Welcome to Music PDF Manager",
+            title: "Welcome to ScoreSort",
             useCase: nil,
             bodyParagraphs: [
                 "This app contains a suite of tools for music librarians, music educators, publishers and copyists for working with scanned or digital music PDFs.",
@@ -2040,7 +2040,7 @@ class EnsemblePresetStore: ObservableObject {
     private var storeURL: URL? {
         guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
         else { return nil }
-        let folder = dir.appendingPathComponent("Music PDF Manager", isDirectory: true)
+        let folder = dir.appendingPathComponent("ScoreSort", isDirectory: true)
         try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         return folder.appendingPathComponent("ensemble-presets.json")
     }
@@ -4153,7 +4153,7 @@ struct InstrumentOrders {
         guard let appSupport = FileManager.default.urls(
             for: .applicationSupportDirectory, in: .userDomainMask).first
         else { return nil }
-        let dir = appSupport.appendingPathComponent("Music PDF Manager", isDirectory: true)
+        let dir = appSupport.appendingPathComponent("ScoreSort", isDirectory: true)
         return dir.appendingPathComponent("instrument-orders.json")
     }
 
