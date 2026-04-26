@@ -3335,6 +3335,16 @@ struct PreferencesView: View {
                     .foregroundColor(.secondary)
             }
 
+            // ── Folder search depth ───────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 6) {
+                @AppStorage("renamerSearchRecursively") var searchRecursively: Bool = false
+                Toggle("Search subfolders recursively", isOn: $searchRecursively)
+                    .toggleStyle(.checkbox)
+                Text("When off (default), only PDFs directly inside the dropped folder are shown. When on, PDFs inside any nested subfolders are included too.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
             Divider()
 
             // Ensemble type selector
@@ -3876,14 +3886,26 @@ class RenamerManager: ObservableObject {
             pdfFiles = directFiles
         } else if let folderURL = folderURL {
             let fileManager = FileManager.default
-            guard let enumerator = fileManager.enumerator(at: folderURL,
-                                                          includingPropertiesForKeys: [.isRegularFileKey]) else {
-                return
-            }
-            pdfFiles = []
-            for case let fileURL as URL in enumerator
-            where fileURL.pathExtension.lowercased() == "pdf" {
-                pdfFiles.append(fileURL)
+            let searchRecursively = UserDefaults.standard.bool(forKey: "renamerSearchRecursively")
+            if searchRecursively {
+                // Deep search: pick up PDFs anywhere inside the folder tree.
+                guard let enumerator = fileManager.enumerator(at: folderURL,
+                                                              includingPropertiesForKeys: [.isRegularFileKey]) else {
+                    return
+                }
+                pdfFiles = []
+                for case let fileURL as URL in enumerator
+                where fileURL.pathExtension.lowercased() == "pdf" {
+                    pdfFiles.append(fileURL)
+                }
+            } else {
+                // Shallow search (default): only immediate children of the folder.
+                let contents = (try? fileManager.contentsOfDirectory(
+                    at: folderURL,
+                    includingPropertiesForKeys: [.isRegularFileKey],
+                    options: [.skipsHiddenFiles]
+                )) ?? []
+                pdfFiles = contents.filter { $0.pathExtension.lowercased() == "pdf" }
             }
             pdfFiles.sort { $0.lastPathComponent < $1.lastPathComponent }
         } else {
