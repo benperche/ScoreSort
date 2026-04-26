@@ -41,14 +41,16 @@ class CombineMenuState: ObservableObject {
     var selectNext:              () -> Void = {}
     var selectPreviousExtending: () -> Void = {}
     var selectNextExtending:     () -> Void = {}
+    var togglePresetSidebar:     () -> Void = {}
 }
 
-// MARK: - Navigate Commands (tab switching — separate struct avoids double View menu)
+// MARK: - Navigate Commands (tab switching — placed in the Window menu)
 struct NavigateCommands: Commands {
     @ObservedObject var appState: AppState
 
     var body: some Commands {
-        CommandMenu("Navigate") {
+        CommandGroup(after: .windowArrangement) {
+            Divider()
             Button("Combine PDFs") { appState.selectedTab = 0 }
                 .keyboardShortcut("1", modifiers: .command)
             Button("Rename Files") { appState.selectedTab = 1 }
@@ -109,6 +111,11 @@ struct CombinerCommands: Commands {
 
             Button("Select All Files") { state.selectAll() }
                 .disabled(state.isPanelOpen || !state.hasFiles)
+
+            Divider()
+
+            Button("Toggle Presets Panel") { state.togglePresetSidebar() }
+                .keyboardShortcut("p", modifiers: [])
         }
     }
 }
@@ -863,6 +870,7 @@ struct CombineView: View {
         menuState.selectNext              = { navigateSelection(direction:  1, extending: false) }
         menuState.selectPreviousExtending = { navigateSelection(direction: -1, extending: true)  }
         menuState.selectNextExtending     = { navigateSelection(direction:  1, extending: true)  }
+        menuState.togglePresetSidebar     = { withAnimation { showPresetSidebar.toggle() } }
         syncMenuFlags()
     }
 
@@ -1607,7 +1615,7 @@ struct ShortcutsHelpView: View {
                 }
 
                 shortcutSection("Combine — Ensemble Presets") {
-                    shortcutRow("Presets button", "Toggle preset sidebar (top-right of toolbar)")
+                    shortcutRow("P", "Toggle preset sidebar")
                     shortcutRow("⌘,", "Open Preferences — create & edit presets")
                 }
 
