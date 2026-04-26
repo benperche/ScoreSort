@@ -17,6 +17,7 @@ import Combine
 class AppState: ObservableObject {
     @Published var selectedTab = 0
     @Published var showingKeyboardHelp = false
+    @Published var showingWelcomeTour = false
     let combineMenuState = CombineMenuState()
 }
 
@@ -117,7 +118,14 @@ struct HelpCommands: Commands {
     @ObservedObject var appState: AppState
 
     var body: some Commands {
-        CommandGroup(after: .help) {
+        // Replace the default "AppName Help" item (which shows a "no help" error)
+        // with our own entries.
+        CommandGroup(replacing: .help) {
+            Button("Welcome Tour\u{2026}") {
+                appState.showingWelcomeTour = true
+            }
+            .keyboardShortcut("/", modifiers: .command)
+
             Button("Keyboard Shortcuts\u{2026}") {
                 appState.showingKeyboardHelp = true
             }
@@ -207,7 +215,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 // MARK: - Main Content View
 struct ContentView: View {
     @EnvironmentObject private var appState: AppState
-    
+    @AppStorage("hasSeenWelcomeTour") private var hasSeenWelcomeTour = false
+
     var body: some View {
         ZStack {
             TabView(selection: $appState.selectedTab) {
@@ -237,6 +246,31 @@ struct ContentView: View {
                     .tag(3)
             }
             .frame(minWidth: 900, minHeight: 700)
+            .onAppear {
+                if !hasSeenWelcomeTour {
+                    hasSeenWelcomeTour = true
+                    // Short delay lets the window finish rendering before the overlay appears
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                        appState.showingWelcomeTour = true
+                    }
+                }
+            }
+
+            // Welcome tour overlay — shown on first launch and from Help menu
+            if appState.showingWelcomeTour {
+                Color.black.opacity(0.35)
+                    .ignoresSafeArea()
+                    .onTapGesture { appState.showingWelcomeTour = false }
+                    .transition(.opacity)
+
+                WelcomeTourView(onDismiss: { appState.showingWelcomeTour = false })
+                    .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .center)))
+
+                Button("") { appState.showingWelcomeTour = false }
+                    .keyboardShortcut(.cancelAction)
+                    .frame(width: 0, height: 0)
+                    .opacity(0)
+            }
 
             // Keyboard shortcuts overlay — tap the backdrop or press Escape/⏎ to close
             if appState.showingKeyboardHelp {
@@ -256,6 +290,7 @@ struct ContentView: View {
             }
         }
         .animation(.easeInOut(duration: 0.15), value: appState.showingKeyboardHelp)
+        .animation(.easeInOut(duration: 0.2), value: appState.showingWelcomeTour)
     }
 }
 
@@ -1632,6 +1667,347 @@ struct ShortcutsHelpView: View {
             Text(description)
         }
         .padding(.leading, 8)
+    }
+}
+
+// MARK: - Welcome Tour
+
+/// Data model for a single page of the welcome tour.
+struct WelcomeTourPage {
+    /// SF Symbols name for the header icon.
+    let icon: String
+    /// Accent colour for the icon.
+    let iconColor: Color
+    /// Keyboard shortcut badge shown top-right (e.g. "⌘1"), nil for the welcome page.
+    let tabShortcut: String?
+    /// Card title.
+    let title: String
+    /// One-line italicised use-case description shown below the title, nil for page 1.
+    let useCase: String?
+    /// Body paragraphs — each string supports inline Markdown (**bold**, `code`, *italic*).
+    let bodyParagraphs: [String]
+    /// Tip callout text (supports inline Markdown). Pass nil for no callout.
+    let tipText: String?
+    /// Asset-catalog image or GIF name to display at the top of the card.
+    /// Leave nil until screenshots are ready — an SF Symbols illustration is shown instead.
+    let imageName: String?
+
+    static let all: [WelcomeTourPage] = [
+
+        // ── Page 1: Welcome ───────────────────────────────────────────────
+        WelcomeTourPage(
+            icon: "music.note.list",
+            iconColor: .accentColor,
+            tabShortcut: nil,
+            title: "Welcome to Music PDF Manager",
+            useCase: nil,
+            bodyParagraphs: [
+                "Tools for music librarians, educators, publishers and copyists working with scanned or digital music PDFs.",
+                "The four tabs cover the most common workflow stages, arranged roughly from most to least used. The easiest way to get files into the app is to drag them directly from a Finder window."
+            ],
+            tipText: "If your files live in Google Drive or Dropbox, install the desktop app so your folders appear directly in Finder.",
+            imageName: nil
+        ),
+
+        // ── Page 2: Combine PDFs ──────────────────────────────────────────
+        WelcomeTourPage(
+            icon: "doc.on.doc",
+            iconColor: .blue,
+            tabShortcut: "⌘1",
+            title: "Combine PDFs",
+            useCase: "You have separate PDF files — one per instrument part — and want to merge them into a single document, ready to print all in one go.",
+            bodyParagraphs: [
+                "Drag your files or a whole folder into the list, then reorder with **⌘↑ / ⌘↓**. Save your usual instrument allocations as **Ensemble Presets** (⌘,) — view them in the sidebar to check part counts, or use **Apply to Files** to automatically match them to your filenames.",
+                "When ready, click **Create PDF** to save the combined file, or **Open in Preview** to print directly without saving a new document.",
+                "**Collate Sets:** Select a group of parts and press **C** to interleave their pages — each player's copy will print as a ready-to-distribute stack. Ideal for any part needed by multiple players, such as a full percussion section."
+            ],
+            tipText: "⌫ removes selected files · ⌘Z undoes any change · ⌘↑ / ⌘↓ reorders",
+            imageName: nil
+        ),
+
+        // ── Page 3: Rename Files ──────────────────────────────────────────
+        WelcomeTourPage(
+            icon: "folder.badge.gearshape",
+            iconColor: .orange,
+            tabShortcut: "⌘2",
+            title: "Rename Files",
+            useCase: "You have a folder of parts with unhelpful filenames (e.g. `scan001.pdf`) and need to rename them consistently, or sort them into score order.",
+            bodyParagraphs: [
+                "Drag a folder onto the **left side** to add score-order prefixes to already-named files (e.g. `01 - Beethoven - Flute.pdf`). Adjust the order as needed and re-number in one pass.",
+                "Drag a folder onto the **right side** to rename files from scratch — useful for parts downloaded from IMSLP. A preview of each file's top-left corner helps you confirm which part you're naming. Enter a base name, then fill in each instrument name; the app suggests names and numbers as you type, and you can accept suggestions with the arrow keys and Return.",
+                "Once all names are filled in, toggle **Prefix score order** to step through the score-order flow above."
+            ],
+            tipText: "Tab moves between instrument name fields · score order can be customised in Preferences",
+            imageName: nil
+        ),
+
+        // ── Page 4: Split PDF ─────────────────────────────────────────────
+        WelcomeTourPage(
+            icon: "scissors",
+            iconColor: .green,
+            tabShortcut: "⌘3",
+            title: "Split PDF",
+            useCase: "You have one large PDF — e.g. a complete scan of all parts bound together — and need to split it into separate instrument files.",
+            bodyParagraphs: [
+                "Drop the PDF and use **← →** to move through pages. Press **Space** to toggle a split marker, and **↑ ↓** to jump to the first page of each output file. Equally-spaced markers can be placed automatically using the **stride** control.",
+                "In Step 2, name each output file — the same flow as Rename Files. Toggle **Prefix score order** to add score-order numbers automatically in Step 3.",
+                "The whole PDF is only written to disk once, at the very end — so you can take your time getting the split points and names exactly right."
+            ],
+            tipText: "⌘← / ⌘→ jumps to the first or last page · Space toggles a split marker",
+            imageName: nil
+        ),
+
+        // ── Page 5: Rotate Pages ──────────────────────────────────────────
+        WelcomeTourPage(
+            icon: "rotate.right",
+            iconColor: .purple,
+            tabShortcut: "⌘4",
+            title: "Rotate Pages",
+            useCase: "Your scan has pages that came out sideways or upside-down and need correcting before use.",
+            bodyParagraphs: [
+                "Drop a PDF and use **← →** to navigate pages. Rotate the current page, all pages, or all odd / even pages — handy for landscape-scanned scores where every other page is upside-down.",
+                "Save the corrected PDF when you're done."
+            ],
+            tipText: "← → navigates pages · rotating odd/even pages is useful for two-sided landscape scans",
+            imageName: nil
+        ),
+    ]
+}
+
+// MARK: - Welcome Tour View
+
+struct WelcomeTourView: View {
+    var onDismiss: () -> Void
+
+    @State private var currentPage = 0
+    @State private var goingForward = true
+
+    private let pages = WelcomeTourPage.all
+
+    var body: some View {
+        VStack(spacing: 0) {
+
+            // ── Scrollable content ────────────────────────────────────────
+            ScrollView(.vertical, showsIndicators: false) {
+                TourPageContentView(page: pages[currentPage])
+                    .id(currentPage)
+                    .transition(.asymmetric(
+                        insertion: .move(edge: goingForward ? .trailing : .leading)
+                                    .combined(with: .opacity),
+                        removal:   .move(edge: goingForward ? .leading : .trailing)
+                                    .combined(with: .opacity)
+                    ))
+                    .padding(.horizontal, 36)
+                    .padding(.vertical, 28)
+            }
+            // Grows up to 560 pt; tallens automatically when images are added
+            .frame(maxHeight: 560)
+
+            Divider()
+
+            // ── Navigation bar ────────────────────────────────────────────
+            HStack(alignment: .center) {
+
+                // Back button
+                Button {
+                    goingForward = false
+                    withAnimation(.easeInOut(duration: 0.25)) { currentPage -= 1 }
+                } label: {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Back")
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(currentPage == 0 ? .clear : .accentColor)
+                .disabled(currentPage == 0)
+
+                Spacer()
+
+                // Page-dot indicators
+                HStack(spacing: 8) {
+                    ForEach(pages.indices, id: \.self) { i in
+                        Circle()
+                            .fill(currentPage == i
+                                  ? Color.accentColor
+                                  : Color.secondary.opacity(0.3))
+                            .frame(width: 7, height: 7)
+                            .scaleEffect(currentPage == i ? 1.25 : 1.0)
+                            .animation(.spring(response: 0.3, dampingFraction: 0.6), value: currentPage)
+                            .onTapGesture {
+                                goingForward = i > currentPage
+                                withAnimation(.easeInOut(duration: 0.25)) { currentPage = i }
+                            }
+                    }
+                }
+
+                Spacer()
+
+                // Next / Get Started button
+                if currentPage < pages.count - 1 {
+                    Button {
+                        goingForward = true
+                        withAnimation(.easeInOut(duration: 0.25)) { currentPage += 1 }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Text("Next")
+                            Image(systemName: "chevron.right")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                } else {
+                    Button("Get Started") { onDismiss() }
+                        .buttonStyle(.borderedProminent)
+                        .keyboardShortcut(.defaultAction)
+                }
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 16)
+        }
+        .frame(width: 660)
+        .background(Color(NSColor.windowBackgroundColor))
+        .cornerRadius(14)
+        .shadow(color: .black.opacity(0.28), radius: 24, x: 0, y: 10)
+    }
+}
+
+// MARK: - Tour Page Content View
+
+struct TourPageContentView: View {
+    let page: WelcomeTourPage
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+
+            // ── Optional screenshot / GIF image ───────────────────────────
+            if let name = page.imageName {
+                TourImageView(imageName: name)
+                    .aspectRatio(16 / 9, contentMode: .fit)
+                    .cornerRadius(8)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+                    )
+                    .padding(.bottom, 20)
+            }
+
+            // ── Header row ────────────────────────────────────────────────
+            HStack(alignment: .center, spacing: 12) {
+                Image(systemName: page.icon)
+                    .font(.system(size: 26, weight: .medium))
+                    .foregroundColor(page.iconColor)
+                    .frame(width: 32, alignment: .center)
+
+                Text(page.title)
+                    .font(.title2)
+                    .fontWeight(.semibold)
+
+                Spacer()
+
+                if let shortcut = page.tabShortcut {
+                    Text(shortcut)
+                        .font(.system(.footnote, design: .monospaced))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 7)
+                        .padding(.vertical, 3)
+                        .background(Color.secondary.opacity(0.12))
+                        .cornerRadius(5)
+                }
+            }
+
+            // ── Use-case line ─────────────────────────────────────────────
+            if let useCase = page.useCase {
+                Text(useCase)
+                    .font(.callout)
+                    .italic()
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .padding(.top, 8)
+            }
+
+            Divider()
+                .padding(.vertical, 14)
+
+            // ── Body paragraphs ───────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 10) {
+                ForEach(page.bodyParagraphs.indices, id: \.self) { i in
+                    Text(markdownString: page.bodyParagraphs[i])
+                        .fixedSize(horizontal: false, vertical: true)
+                        .lineSpacing(2)
+                }
+            }
+
+            // ── Tip callout ───────────────────────────────────────────────
+            if let tip = page.tipText {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: "lightbulb.fill")
+                        .foregroundColor(.yellow)
+                        .font(.callout)
+                        .padding(.top, 1)
+                    Text(markdownString: tip)
+                        .font(.callout)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(12)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(Color.yellow.opacity(0.07))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.yellow.opacity(0.25), lineWidth: 1)
+                )
+                .cornerRadius(8)
+                .padding(.top, 16)
+            }
+        }
+    }
+}
+
+// MARK: - Tour Image View (supports PNG and animated GIF)
+
+/// Wraps NSImageView so both static screenshots and animated GIFs display correctly.
+/// Slot is ready — just add the image to the asset catalog and set `imageName` on the page.
+struct TourImageView: NSViewRepresentable {
+    let imageName: String
+
+    func makeNSView(context: Context) -> NSImageView {
+        let iv = NSImageView()
+        iv.animates = true   // enables GIF animation automatically
+        iv.imageScaling = .scaleProportionallyUpOrDown
+        iv.image = NSImage(named: imageName)
+        return iv
+    }
+
+    func updateNSView(_ nsView: NSImageView, context: Context) {
+        nsView.image = NSImage(named: imageName)
+    }
+}
+
+// MARK: - Markdown Text helper
+
+extension View {
+    /// Renders a String containing inline Markdown (**bold**, *italic*, `code`) as a SwiftUI Text.
+    func markdownText(_ string: String) -> Text {
+        if let attr = try? AttributedString(
+            markdown: string,
+            options: AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+            return Text(attr)
+        }
+        return Text(string)
+    }
+}
+
+extension Text {
+    /// Initialises a Text view that renders inline Markdown in the string.
+    init(markdownString string: String) {
+        if let attr = try? AttributedString(
+            markdown: string,
+            options: AttributedString.MarkdownParsingOptions(
+                interpretedSyntax: .inlineOnlyPreservingWhitespace)) {
+            self.init(attr)
+        } else {
+            self.init(string)
+        }
     }
 }
 
