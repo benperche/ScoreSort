@@ -3288,179 +3288,170 @@ struct PreferencesView: View {
     }
 
     var body: some View {
-        VStack(spacing: 20) {
-            Text("Instrument Order Preferences")
-                .font(.title2)
-                .fontWeight(.semibold)
+        VStack(spacing: 0) {
+            // ── Scrollable content ────────────────────────────────────────────
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
 
-            // ── Suffix separator (Splitter & Bulk Rename) ─────────────────
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Suffix Separator:")
-                    .font(.headline)
-                HStack(spacing: 10) {
-                    TextField("e.g.  - ", text: $filenameSeparator)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 80)
-                        .font(.system(.body, design: .monospaced))
-                    Text("Inserted between base name and suffix, e.g.  Beethoven\(filenameSeparator)Flute.pdf")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Button("Reset") { filenameSeparator = " - " }
-                        .font(.caption)
-                }
-                Text("Leave blank to join base name and suffix with no separator. Used by both the Splitter and Bulk Part Rename.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
+                    Text("Instrument Order Preferences")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                        .frame(maxWidth: .infinity, alignment: .center)
 
-            // ── Prefix separator (Score Order Sorter) ─────────────────────
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Prefix Separator:")
-                    .font(.headline)
-                HStack(spacing: 10) {
-                    TextField("e.g.  - ", text: $prefixSeparator)
-                        .textFieldStyle(.roundedBorder)
-                        .frame(width: 80)
-                        .font(.system(.body, design: .monospaced))
-                    Text("Inserted between the number prefix and filename, e.g.  01\(prefixSeparator)Flute.pdf")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                    Spacer()
-                    Button("Reset") { prefixSeparator = " - " }
-                        .font(.caption)
-                }
-                Text("Leave blank to join number and filename with no separator. Used by the Score Order Sorter.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            // ── Folder search depth ───────────────────────────────────────────
-            VStack(alignment: .leading, spacing: 6) {
-                @AppStorage("renamerSearchRecursively") var searchRecursively: Bool = false
-                Toggle("Search subfolders recursively", isOn: $searchRecursively)
-                    .toggleStyle(.checkbox)
-                Text("When off (default), only PDFs directly inside the dropped folder are shown. When on, PDFs inside any nested subfolders are included too.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-            }
-
-            Divider()
-
-            // Ensemble type selector
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Ensemble Type:")
-                    .font(.headline)
-                
-                Picker("Ensemble Type", selection: $ensembleType) {
-                    Text("Wind Band").tag(EnsembleType.band)
-                    Text("Jazz Band").tag(EnsembleType.jazz)
-                    Text("Orchestra").tag(EnsembleType.orchestra)
-                }
-                .pickerStyle(.segmented)
-                .onChange(of: ensembleType) { newType in
-                    editableOrder = InstrumentOrders.getOrder(for: newType)
-                }
-            }
-            
-            Divider()
-            
-            // Instrument list
-            VStack(alignment: .leading, spacing: 8) {
-                HStack {
-                    Text("Instruments (in order):")
-                        .font(.headline)
-                    
-                    Spacer()
-                    
-                    Button("Reset to Default") {
-                        editableOrder = InstrumentOrders.getOrder(for: ensembleType)
+                    // ── Ensemble type selector ────────────────────────────────
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Ensemble Type:")
+                            .font(.headline)
+                        Picker("Ensemble Type", selection: $ensembleType) {
+                            Text("Wind Band").tag(EnsembleType.band)
+                            Text("Jazz Band").tag(EnsembleType.jazz)
+                            Text("Orchestra").tag(EnsembleType.orchestra)
+                        }
+                        .pickerStyle(.segmented)
+                        .onChange(of: ensembleType) { newType in
+                            editableOrder = InstrumentOrders.getOrder(for: newType)
+                        }
                     }
-                    .font(.caption)
-                }
-                
-                Text("Files are numbered sequentially based on this order. Drag to reorder.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                
-                List {
-                    ForEach(Array(editableOrder.enumerated()), id: \.element) { index, instrument in
-                        HStack(spacing: 8) {
-                            // Up/down arrows on the left, away from the scrollbar
-                            VStack(spacing: 2) {
-                                Button(action: {
-                                    if index > 0 {
-                                        editableOrder.swapAt(index, index - 1)
-                                    }
-                                }) {
-                                    Image(systemName: "chevron.up")
-                                        .font(.caption)
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(index == 0)
 
-                                Button(action: {
-                                    if index < editableOrder.count - 1 {
-                                        editableOrder.swapAt(index, index + 1)
-                                    }
-                                }) {
-                                    Image(systemName: "chevron.down")
-                                        .font(.caption)
-                                }
-                                .buttonStyle(.plain)
-                                .disabled(index == editableOrder.count - 1)
+                    Divider()
+
+                    // ── Instrument list ───────────────────────────────────────
+                    VStack(alignment: .leading, spacing: 8) {
+                        HStack {
+                            Text("Instruments (in order):")
+                                .font(.headline)
+                            Spacer()
+                            Button("Reset to Default") {
+                                editableOrder = InstrumentOrders.getOrder(for: ensembleType)
                             }
-                            .padding(.leading, 4)
+                            .font(.caption)
+                        }
 
-                            Text("\(index + 1).")
+                        Text("Files are numbered sequentially based on this order. Drag to reorder.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        List {
+                            ForEach(Array(editableOrder.enumerated()), id: \.element) { index, instrument in
+                                HStack(spacing: 8) {
+                                    VStack(spacing: 2) {
+                                        Button(action: {
+                                            if index > 0 { editableOrder.swapAt(index, index - 1) }
+                                        }) {
+                                            Image(systemName: "chevron.up").font(.caption)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(index == 0)
+
+                                        Button(action: {
+                                            if index < editableOrder.count - 1 {
+                                                editableOrder.swapAt(index, index + 1)
+                                            }
+                                        }) {
+                                            Image(systemName: "chevron.down").font(.caption)
+                                        }
+                                        .buttonStyle(.plain)
+                                        .disabled(index == editableOrder.count - 1)
+                                    }
+                                    .padding(.leading, 4)
+
+                                    Text("\(index + 1).")
+                                        .foregroundColor(.secondary)
+                                        .frame(width: 36, alignment: .trailing)
+
+                                    Text(instrument)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+
+                                    Button(action: { editableOrder.remove(at: index) }) {
+                                        Image(systemName: "minus.circle.fill")
+                                            .foregroundColor(.red)
+                                    }
+                                    .buttonStyle(.plain)
+                                    .padding(.trailing, 4)
+                                }
+                            }
+                            .onMove { source, destination in
+                                editableOrder.move(fromOffsets: source, toOffset: destination)
+                            }
+                        }
+                        .listStyle(.bordered)
+                        .frame(height: 300)
+
+                        // Add new instrument
+                        HStack {
+                            TextField("Add new instrument...", text: $newInstrument)
+                                .textFieldStyle(.roundedBorder)
+                                .onSubmit { addInstrument() }
+                            Button(action: addInstrument) {
+                                Image(systemName: "plus.circle.fill")
+                            }
+                            .disabled(newInstrument.trimmingCharacters(in: .whitespaces).isEmpty)
+                        }
+                    }
+
+                    Divider()
+
+                    // ── Suffix separator (Splitter & Bulk Rename) ─────────────
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Suffix Separator:")
+                            .font(.headline)
+                        HStack(spacing: 10) {
+                            TextField("e.g.  - ", text: $filenameSeparator)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 80)
+                                .font(.system(.body, design: .monospaced))
+                            Text("Inserted between base name and suffix, e.g.  Beethoven\(filenameSeparator)Flute.pdf")
+                                .font(.caption)
                                 .foregroundColor(.secondary)
-                                .frame(width: 36, alignment: .trailing)
-
-                            Text(instrument)
-                                .frame(maxWidth: .infinity, alignment: .leading)
-
-                            Button(action: {
-                                editableOrder.remove(at: index)
-                            }) {
-                                Image(systemName: "minus.circle.fill")
-                                    .foregroundColor(.red)
-                            }
-                            .buttonStyle(.plain)
-                            .padding(.trailing, 4)
+                            Spacer()
+                            Button("Reset") { filenameSeparator = " - " }
+                                .font(.caption)
                         }
+                        Text("Leave blank to join base name and suffix with no separator. Used by both the Splitter and Bulk Part Rename.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
-                    .onMove { source, destination in
-                        editableOrder.move(fromOffsets: source, toOffset: destination)
+
+                    // ── Prefix separator (Score Order Sorter) ─────────────────
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Prefix Separator:")
+                            .font(.headline)
+                        HStack(spacing: 10) {
+                            TextField("e.g.  - ", text: $prefixSeparator)
+                                .textFieldStyle(.roundedBorder)
+                                .frame(width: 80)
+                                .font(.system(.body, design: .monospaced))
+                            Text("Inserted between the number prefix and filename, e.g.  01\(prefixSeparator)Flute.pdf")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Button("Reset") { prefixSeparator = " - " }
+                                .font(.caption)
+                        }
+                        Text("Leave blank to join number and filename with no separator. Used by the Score Order Sorter.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    // ── Folder search depth ───────────────────────────────────
+                    VStack(alignment: .leading, spacing: 6) {
+                        @AppStorage("renamerSearchRecursively") var searchRecursively: Bool = false
+                        Toggle("Search subfolders recursively", isOn: $searchRecursively)
+                            .toggleStyle(.checkbox)
+                        Text("When off (default), only PDFs directly inside the dropped folder are shown. When on, PDFs inside any nested subfolders are included too.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
                     }
                 }
-                .listStyle(.bordered)
-                .frame(height: 300)
-                
-                // Add new instrument
-                HStack {
-                    TextField("Add new instrument...", text: $newInstrument)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit {
-                            addInstrument()
-                        }
-                    
-                    Button(action: addInstrument) {
-                        Image(systemName: "plus.circle.fill")
-                    }
-                    .disabled(newInstrument.trimmingCharacters(in: .whitespaces).isEmpty)
-                }
+                .padding(28)
             }
-            
-            Spacer()
-            
+
+            // ── Sticky footer ─────────────────────────────────────────────────
+            Divider()
             HStack {
-                Button("Cancel") {
-                    dismiss()
-                }
-                .keyboardShortcut(.cancelAction)
-                
+                Button("Cancel") { dismiss() }
+                    .keyboardShortcut(.cancelAction)
                 Spacer()
-                
                 Button("Save") {
                     instrumentOrder = editableOrder
                     dismiss()
@@ -3468,10 +3459,9 @@ struct PreferencesView: View {
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
             }
-            .padding(.top, 16)
+            .padding(.horizontal, 28)
+            .padding(.vertical, 16)
         }
-        .padding(28)
-        .frame(width: 650, height: 660)
     }
     
     private func addInstrument() {
@@ -3490,15 +3480,15 @@ struct AppPreferencesView: View {
 
     var body: some View {
         TabView {
+            CombinerPreferencesView()
+                .tabItem { Label("Combiner", systemImage: "doc.on.doc") }
+
             PreferencesView(
                 ensembleType: $renamerManager.ensembleType,
                 instrumentOrder: $renamerManager.customInstrumentOrder,
                 prefixSeparator: $renamerManager.prefixSeparator
             )
             .tabItem { Label("Renamer", systemImage: "folder.badge.gearshape") }
-
-            CombinerPreferencesView()
-                .tabItem { Label("Combiner", systemImage: "doc.on.doc") }
         }
         .frame(width: 680, height: 720)
     }
