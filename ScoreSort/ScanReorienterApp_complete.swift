@@ -4306,8 +4306,12 @@ struct InstrumentOrders {
         "keyboard",
         "piano",
         "harp",
+        "violin",
+        "viola",
+        "cello",
         "string bass",
         "bass",
+        "double bass",
         "timpani",
         "mallet",
         "mallets",
@@ -4326,10 +4330,6 @@ struct InstrumentOrders {
         "cymbals",
         "tambourine",
         "auxiliary",
-        "violin",
-        "viola",
-        "cello",
-        "double bass",
     ]
 
     private static let jazzDefault = [
@@ -4856,49 +4856,76 @@ struct SplitView: View {
     }
     
     var body: some View {
-        switch splitStage {
-        case .summary:
-            RenameSummaryView(
-                finalNames: summaryNames,
-                outputFolderURL: pendingFolderURL,
-                onStartOver: {
-                    splitStage = .split
-                    pdfManager.clearPDF()
-                    baseFileName = ""
-                    customFileNames = [:]
-                    fileSizes = []
-                    summaryNames = []
-                    pendingFolderURL = nil
-                }
-            )
-        case .prefix:
-            PrefixOrderStepView(
-                stepLabel: "Step 3",
-                initialItems: prefixItems,
-                ensembleType: $prefixEnsembleType,
-                onBack: { splitStage = .naming },
-                onApply: { orderedItems in
-                    applyPrefixAndSaveSplit(orderedItems: orderedItems)
-                }
-            )
-        case .naming:
-            if let document = pdfManager.pdfDocument {
-                SplitNamingStageView(
-                    pdfDocument: document,
-                    fileSizes: fileSizes,
-                    baseFileName: $baseFileName,
-                    customFileNames: $customFileNames,
-                    previewOffset: $previewOffset,
-                    onBack: { splitStage = .split },
-                    onClear: {
+        // The onChange lives at the Group level — outside all stage views — so it
+        // fires regardless of which stage (split / naming / prefix / summary) is
+        // currently active.  Previously it was buried inside splitStageBody and
+        // therefore silent when a new PDF arrived during naming or later stages,
+        // causing stale customFileNames from an earlier file to bleed through.
+        Group {
+            switch splitStage {
+            case .summary:
+                RenameSummaryView(
+                    finalNames: summaryNames,
+                    outputFolderURL: pendingFolderURL,
+                    onStartOver: {
                         splitStage = .split
                         pdfManager.clearPDF()
-                    },
-                    onSave: { saveSplitPDF() }
+                        baseFileName = ""
+                        customFileNames = [:]
+                        fileSizes = []
+                        summaryNames = []
+                        pendingFolderURL = nil
+                    }
                 )
+            case .prefix:
+                PrefixOrderStepView(
+                    stepLabel: "Step 3",
+                    initialItems: prefixItems,
+                    ensembleType: $prefixEnsembleType,
+                    onBack: { splitStage = .naming },
+                    onApply: { orderedItems in
+                        applyPrefixAndSaveSplit(orderedItems: orderedItems)
+                    }
+                )
+            case .naming:
+                if let document = pdfManager.pdfDocument {
+                    SplitNamingStageView(
+                        pdfDocument: document,
+                        fileSizes: fileSizes,
+                        baseFileName: $baseFileName,
+                        customFileNames: $customFileNames,
+                        previewOffset: $previewOffset,
+                        onBack: { splitStage = .split },
+                        onClear: {
+                            splitStage = .split
+                            pdfManager.clearPDF()
+                        },
+                        onSave: { saveSplitPDF() }
+                    )
+                }
+            case .split:
+                splitStageBody
             }
-        case .split:
-            splitStageBody
+        }
+        .onChange(of: pdfManager.pdfDocument) { newValue in
+            if newValue != nil {
+                // New PDF loaded — reset the entire split flow so no state from
+                // a previous file can survive into the naming or prefix stages.
+                baseFileName = pdfManager.currentFileName ?? ""
+                isViewFocused = true
+                fileSizes = totalPages > 0 ? [totalPages] : []
+                customFileNames.removeAll()   // ← was missing in the old code
+                previewOffset = .zero
+                // Return to the split stage if we were somewhere else
+                // (e.g. user loaded a new file straight from the summary screen).
+                if splitStage != .split { splitStage = .split }
+            } else {
+                // PDF cleared (e.g. "Clear" button or "Start Over")
+                fileSizes = []
+                currentPage = 0
+                customFileNames.removeAll()
+                previewOffset = .zero
+            }
         }
     }
 
@@ -5087,20 +5114,6 @@ struct SplitView: View {
         .focused($isViewFocused)
         .onAppear {
             isViewFocused = true
-        }
-        .onChange(of: pdfManager.pdfDocument) { newValue in
-            if newValue != nil {
-                baseFileName = pdfManager.currentFileName ?? ""
-                isViewFocused = true
-                // Load with no markers — user presses Apply to apply the stride
-                fileSizes = totalPages > 0 ? [totalPages] : []
-                previewOffset = .zero
-            } else {
-                fileSizes = []
-                currentPage = 0
-                customFileNames.removeAll()
-                previewOffset = .zero
-            }
         }
     } // end splitStageBody
     
