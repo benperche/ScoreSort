@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <!-- ScoreSort does not track users and collects no personal data. -->
+
+    <key>NSPrivacyTracking</key>
+    <false/>
+
+    <key>NSPrivacyTrackingDomains</key>
+    <array/>
+
+    <key>NSPrivacyCollectedDataTypes</key>
+    <array/>
+
+    <key>NSPrivacyAccessedAPITypes</key>
+    <array>
+
+        <!--
+            UserDefaults / @AppStorage
+            Used to store app preferences (instrument order, separators,
+            ensemble type, first-launch flag) written and read by this app only.
+            Reason CA92.1: info accessed is not used for tracking purposes.
+        -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryUserDefaults</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>CA92.1</string>
+            </array>
+        </dict>
+
+        <!--
+            File timestamps (FileManager / contentsOfDirectory)
+            Used to list and access PDF files in user-selected folders.
+            Reason 0A2A.1: metadata is only accessed inside the app sandbox
+            or for user-selected files opened via NSOpenPanel.
+        -->
+        <dict>
+            <key>NSPrivacyAccessedAPIType</key>
+            <string>NSPrivacyAccessedAPICategoryFileTimestamp</string>
+            <key>NSPrivacyAccessedAPITypeReasons</key>
+            <array>
+                <string>0A2A.1</string>
+            </array>
+        </dict>
+
+    </array>
+</dict>
+</plist>

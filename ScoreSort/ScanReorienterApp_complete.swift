@@ -157,6 +157,10 @@ struct ScoreSortApp: App {
                 .environmentObject(renamerManager)
                 .environmentObject(presetStore)
         }
+        // ── Screenshot size ───────────────────────────────────────────────────
+        // Uncomment the line below when taking App Store screenshots (1280×800).
+        // Re-comment it before shipping so users can freely resize the window.
+        // .defaultSize(width: 1280, height: 800)
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About ScoreSort") {
