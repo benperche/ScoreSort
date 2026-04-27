@@ -160,7 +160,7 @@ struct ScoreSortApp: App {
         // ── Screenshot size ───────────────────────────────────────────────────
         // Uncomment the line below when taking App Store screenshots (1280×800).
         // Re-comment it before shipping so users can freely resize the window.
-        // .defaultSize(width: 1280, height: 800)
+//         .defaultSize(width: 1280, height: 800)
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About ScoreSort") {
@@ -4656,27 +4656,35 @@ struct RotateView: View {
                             Text("Step 2: Additional Rotation (Optional)")
                                 .font(.headline)
                             
-                            HStack(spacing: 20) {
+                            HStack(spacing: 0) {
+                                // Left half — mode selector
                                 Picker("Then also rotate:", selection: $additionalRotationMode) {
                                     Text("No additional rotation").tag(RotationMode.none)
                                     Text("Odd pages (1, 3, 5...)").tag(RotationMode.odd)
                                     Text("Even pages (2, 4, 6...)").tag(RotationMode.even)
                                 }
                                 .pickerStyle(.radioGroup)
-                                
-                                Spacer()
-                                
+                                .frame(maxWidth: .infinity, alignment: .leading)
+
+                                // Right half — angle selector, left-aligned at window midpoint
                                 if additionalRotationMode != .none {
-                                    HStack {
-                                        Text("by:")
+                                    HStack(spacing: 8) {
+                                        Text("By:")
+                                            .foregroundColor(.secondary)
                                         Picker("Additional rotation angle", selection: $additionalRotationAngle) {
                                             Text("90°").tag(RotationAngle.rotate90)
                                             Text("180°").tag(RotationAngle.rotate180)
                                             Text("270°").tag(RotationAngle.rotate270)
                                         }
                                         .pickerStyle(.segmented)
+                                        .labelsHidden()
                                         .frame(width: 200)
+                                        Spacer()
                                     }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                } else {
+                                    Spacer()
+                                        .frame(maxWidth: .infinity)
                                 }
                             }
                         }
