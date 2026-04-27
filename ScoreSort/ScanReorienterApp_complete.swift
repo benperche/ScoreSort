@@ -226,7 +226,10 @@ struct ContentView: View {
 
     var body: some View {
         ZStack {
-            TabView(selection: $appState.selectedTab) {
+            TabView(selection: Binding(
+                get: { appState.selectedTab },
+                set: { newValue in DispatchQueue.main.async { appState.selectedTab = newValue } }
+            )) {
                 CombineView(showingKeyboardHelp: $appState.showingKeyboardHelp,
                             menuState: appState.combineMenuState)
                     .tabItem {
