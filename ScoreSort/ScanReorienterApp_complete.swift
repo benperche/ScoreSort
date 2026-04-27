@@ -335,8 +335,8 @@ struct CombineView: View {
             return true
         }
         .onAppear { syncMenuClosures() }
-        .onChange(of: selectedFiles)          { _ in syncMenuFlags() }
-        .onChange(of: combineManager.files)   { _ in syncMenuFlags() }
+        .onChange(of: selectedFiles)          { syncMenuFlags() }
+        .onChange(of: combineManager.files)   { syncMenuFlags() }
     }
 
     private var mainContent: some View {
@@ -1034,7 +1034,7 @@ struct CombineFileRow: View {
         )
         .contentShape(Rectangle())
         .onTapGesture { onToggleSelect() }
-        .onChange(of: copiesFieldFocused) { focused in
+        .onChange(of: copiesFieldFocused) { _, focused in
             if !focused && isEditingCopies { commitCopiesEdit() }
         }
     }
@@ -1121,7 +1121,7 @@ struct CollateGroupHeaderRow: View {
         .padding(.horizontal)
         .padding(.vertical, 6)
         .background(Color.accentColor.opacity(0.07))
-        .onChange(of: copiesFocused) { focused in
+        .onChange(of: copiesFocused) { _, focused in
             if !focused && isEditingCopies { commitEdit() }
         }
     }
@@ -1215,10 +1215,10 @@ struct PresetPartRow: View {
         }
         .padding(.vertical, 1)
         .background(isUnmatched ? Color.orange.opacity(0.12) : Color.clear)
-        .onChange(of: nameFocused) { focused in
+        .onChange(of: nameFocused) { _, focused in
             if !focused && isEditingName { commitNameEdit() }
         }
-        .onChange(of: copiesFocused) { focused in
+        .onChange(of: copiesFocused) { _, focused in
             if !focused && isEditingCopies { commitCopiesEdit() }
         }
     }
@@ -1560,7 +1560,7 @@ struct PresetSidebarView: View {
         }
         .background(Color(NSColor.controlBackgroundColor))
         .onAppear { loadDraft() }
-        .onChange(of: presetStore.selectedPresetId) { _ in loadDraft() }
+        .onChange(of: presetStore.selectedPresetId) { loadDraft() }
         .sheet(isPresented: $showingNewPreset) {
             NewPresetSheet { name, parts in
                 presetStore.addPreset(name: name, parts: parts)
@@ -3070,7 +3070,7 @@ struct BulkRenameView: View {
                     }
                     .padding(.vertical, 8)
                 }
-                .onChange(of: focusedField) { newValue in
+                .onChange(of: focusedField) { _, newValue in
                     if let field = newValue {
                         withAnimation { proxy.scrollTo(field, anchor: .center) }
                     }
@@ -3312,7 +3312,7 @@ struct PreferencesView: View {
                             Text("Orchestra").tag(EnsembleType.orchestra)
                         }
                         .pickerStyle(.segmented)
-                        .onChange(of: ensembleType) { newType in
+                        .onChange(of: ensembleType) { _, newType in
                             editableOrder = InstrumentOrders.getOrder(for: newType)
                         }
                     }
@@ -3690,13 +3690,13 @@ struct CombinerPreferencesView: View {
             selectedId = presetStore.presets.first?.id
             editingPreset = presetStore.presets.first
         }
-        .onChange(of: selectedId) { newId in
+        .onChange(of: selectedId) { _, newId in
             editingPreset = presetStore.presets.first { $0.id == newId }
         }
         // Keep the right panel in sync when the store is changed externally
         // (e.g. "Save to Preset" from the sidebar while preferences is open).
         // Since saveEditing() always writes before this fires, reloading is safe.
-        .onChange(of: presetStore.presets) { updated in
+        .onChange(of: presetStore.presets) { _, updated in
             guard let id = selectedId,
                   let fresh = updated.first(where: { $0.id == id }),
                   fresh != editingPreset else { return }
@@ -4715,7 +4715,7 @@ struct RotateView: View {
         .focusable()
         .focused($isViewFocused)
         .onAppear { isViewFocused = true }
-        .onChange(of: pdfManager.pdfDocument) { newValue in
+        .onChange(of: pdfManager.pdfDocument) { _, newValue in
             if newValue != nil { isViewFocused = true }
         }
         .onKeyPress { press in
@@ -4739,10 +4739,10 @@ struct RotateView: View {
                 return .ignored
             }
         }
-        .onChange(of: pdfManager.pdfDocument) { newValue in
+        .onChange(of: pdfManager.pdfDocument) { _, newValue in
             if newValue == nil { pageRotationOverrides = [:] }
         }
-        .onChange(of: isShowingSavePanel) { newValue in
+        .onChange(of: isShowingSavePanel) { _, newValue in
             if newValue, let document = pdfManager.pdfDocument {
                 saveRotatedPDF(document: document)
             }
@@ -4936,7 +4936,7 @@ struct SplitView: View {
                 splitStageBody
             }
         }
-        .onChange(of: pdfManager.pdfDocument) { newValue in
+        .onChange(of: pdfManager.pdfDocument) { _, newValue in
             if newValue != nil {
                 // New PDF loaded — reset the entire split flow so no state from
                 // a previous file can survive into the naming or prefix stages.
@@ -5614,12 +5614,12 @@ struct SplitNamingStageView: View {
                     proxy.scrollTo(0, anchor: .top)
                     hasInferredEnsemble = false
                 }
-                .onChange(of: focusedField) { newValue in
+                .onChange(of: focusedField) { _, newValue in
                     if let field = newValue {
                         withAnimation { proxy.scrollTo(field, anchor: .center) }
                     }
                 }
-                .onChange(of: customFileNames) { newNames in
+                .onChange(of: customFileNames) { _, newNames in
                     // Auto-infer ensemble type from the first suffix typed.
                     // Only runs once per naming session.
                     guard !hasInferredEnsemble,
@@ -6059,7 +6059,7 @@ struct SplitFileNamingRow: View {
                             selectedSuggestionIndex = nil
                             return .handled
                         }
-                        .onChange(of: suffix) { _ in
+                        .onChange(of: suffix) {
                             // Reset arrow-key position whenever text changes
                             selectedSuggestionIndex = nil
                         }
@@ -6304,7 +6304,7 @@ struct PrefixOrderStepView: View {
                 }
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 280)
-                .onChange(of: ensembleType) { newType in
+                .onChange(of: ensembleType) { _, newType in
                     let order = InstrumentOrders.getOrder(for: newType)
                     withAnimation { items = Self.autoSorted(items, by: order) }
                 }
@@ -6464,7 +6464,7 @@ struct PageInstrumentPreview: View {
             cachedPageImage = full
             displayImage = Self.cropToStrip(from: full, page: page, offset: .zero)
         }
-        .onChange(of: offset) { newOffset in
+        .onChange(of: offset) { _, newOffset in
             // Fast path: crop from the cached image — no PDF re-render required.
             displayImage = Self.cropToStrip(from: cachedPageImage, page: page, offset: newOffset)
         }
