@@ -334,9 +334,9 @@ struct CombineView: View {
             handleDrop(providers: providers)
             return true
         }
-        .onAppear { syncMenuClosures() }
-        .onChange(of: selectedFiles)          { syncMenuFlags() }
-        .onChange(of: combineManager.files)   { syncMenuFlags() }
+        .onAppear { DispatchQueue.main.async { syncMenuClosures() } }
+        .onChange(of: selectedFiles)          { DispatchQueue.main.async { syncMenuFlags() } }
+        .onChange(of: combineManager.files)   { DispatchQueue.main.async { syncMenuFlags() } }
     }
 
     private var mainContent: some View {
