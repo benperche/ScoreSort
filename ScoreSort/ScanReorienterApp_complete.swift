@@ -12,6 +12,7 @@ import SwiftUI
 import PDFKit
 import UniformTypeIdentifiers
 import Combine
+import Sparkle
 
 // MARK: - App State
 class AppState: ObservableObject {
@@ -141,6 +142,28 @@ struct HelpCommands: Commands {
     }
 }
 
+// MARK: - Sparkle Updater
+/// Thin ObservableObject wrapper around SPUStandardUpdaterController so the
+/// "Check for Updates…" menu item can bind to canCheckForUpdates reactively.
+final class UpdaterViewModel: ObservableObject {
+    private let updaterController: SPUStandardUpdaterController
+    @Published var canCheckForUpdates = false
+
+    init() {
+        updaterController = SPUStandardUpdaterController(
+            startingUpdater: true,
+            updaterDelegate: nil,
+            userDriverDelegate: nil
+        )
+        updaterController.updater.publisher(for: \.canCheckForUpdates)
+            .assign(to: &$canCheckForUpdates)
+    }
+
+    func checkForUpdates() {
+        updaterController.updater.checkForUpdates()
+    }
+}
+
 // MARK: - Main App
 @main
 struct ScoreSortApp: App {
@@ -148,6 +171,7 @@ struct ScoreSortApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var renamerManager = RenamerManager()
     @StateObject private var presetStore = EnsemblePresetStore()
+    @StateObject private var updaterViewModel = UpdaterViewModel()
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
@@ -160,12 +184,18 @@ struct ScoreSortApp: App {
         // ── Screenshot size ───────────────────────────────────────────────────
         // Uncomment the line below when taking App Store screenshots (1280×800).
         // Re-comment it before shipping so users can freely resize the window.
-//         .defaultSize(width: 1280, height: 800)
+         .defaultSize(width: 1280, height: 800)
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About ScoreSort") {
                     openWindow(id: "about")
                 }
+            }
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates\u{2026}") {
+                    updaterViewModel.checkForUpdates()
+                }
+                .disabled(!updaterViewModel.canCheckForUpdates)
             }
             CommandGroup(replacing: .newItem) { }
             NavigateCommands(appState: appState)
