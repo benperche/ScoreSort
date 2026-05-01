@@ -4749,7 +4749,16 @@ struct RotateView: View {
         .focused($isViewFocused)
         .onAppear { isViewFocused = true }
         .onChange(of: pdfManager.pdfDocument) { _, newValue in
-            if newValue != nil { isViewFocused = true }
+            if newValue != nil {
+                isViewFocused = true
+            } else {
+                // PDF cleared — reset all rotation state for the next document.
+                baseRotation = .none
+                additionalRotationMode = .none
+                additionalRotationAngle = .rotate180
+                pageRotationOverrides = [:]
+                currentPage = 0
+            }
         }
         .onKeyPress { press in
             guard pdfManager.pdfDocument != nil else { return .ignored }
@@ -4930,13 +4939,7 @@ struct SplitView: View {
                     finalNames: summaryNames,
                     outputFolderURL: pendingFolderURL,
                     onStartOver: {
-                        splitStage = .split
-                        pdfManager.clearPDF()
-                        baseFileName = ""
-                        customFileNames = [:]
-                        fileSizes = []
-                        summaryNames = []
-                        pendingFolderURL = nil
+                        pdfManager.clearPDF() // onChange handles full state reset
                     }
                 )
             case .prefix:
@@ -4982,11 +4985,17 @@ struct SplitView: View {
                 // (e.g. user loaded a new file straight from the summary screen).
                 if splitStage != .split { splitStage = .split }
             } else {
-                // PDF cleared (e.g. "Clear" button or "Start Over")
+                // PDF cleared — reset all split flow state so nothing bleeds
+                // into the next session regardless of which stage we were on.
                 fileSizes = []
                 currentPage = 0
                 customFileNames.removeAll()
                 previewOffset = .zero
+                splitStage = .split
+                baseFileName = ""
+                prefixItems = []
+                summaryNames = []
+                pendingFolderURL = nil
             }
         }
     }
