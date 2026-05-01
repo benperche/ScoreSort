@@ -4889,6 +4889,10 @@ struct SplitView: View {
     @State private var prefixItems: [PrefixItem] = []
     @State private var summaryNames: [String] = []
     @State private var pendingFolderURL: URL? = nil
+    /// Pages to omit from output. A file whose every page is in this set is treated as "fully skipped".
+    @State private var skippedPages: Set<Int> = []
+    /// File indices currently highlighted in the output-files list (for multi-select + Delete).
+    @State private var selectedFileIndices: Set<Int> = []
     @FocusState private var isViewFocused: Bool
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
@@ -4925,7 +4929,35 @@ struct SplitView: View {
     var numberOfFiles: Int {
         fileSizes.count
     }
-    
+
+    /// Returns all page indices for a given output file index (sorted).
+    func pagesForFile(_ fileIndex: Int) -> [Int] {
+        pageToFileMapping.filter { $0.value == fileIndex }.keys.sorted()
+    }
+
+    /// True if every page in the output file is in skippedPages.
+    func isFileFullySkipped(_ fileIndex: Int) -> Bool {
+        let pages = pagesForFile(fileIndex)
+        return !pages.isEmpty && pages.allSatisfy { skippedPages.contains($0) }
+    }
+
+    /// True if some (but not all) pages in the output file are in skippedPages.
+    func isFilePartiallySkipped(_ fileIndex: Int) -> Bool {
+        let pages = pagesForFile(fileIndex)
+        let n = pages.filter { skippedPages.contains($0) }.count
+        return n > 0 && n < pages.count
+    }
+
+    /// Number of output files that have at least one non-skipped page.
+    var activeFileCount: Int {
+        (0..<numberOfFiles).filter { !isFileFullySkipped($0) }.count
+    }
+
+    /// Indices of output files whose every page is skipped.
+    var skippedFileIndices: Set<Int> {
+        Set((0..<numberOfFiles).filter { isFileFullySkipped($0) })
+    }
+
     var body: some View {
         // The onChange lives at the Group level — outside all stage views — so it
         // fires regardless of which stage (split / naming / prefix / summary) is
@@ -4957,6 +4989,8 @@ struct SplitView: View {
                     SplitNamingStageView(
                         pdfDocument: document,
                         fileSizes: fileSizes,
+                        skippedPages: skippedPages,
+                        skippedFileIndices: skippedFileIndices,
                         baseFileName: $baseFileName,
                         customFileNames: $customFileNames,
                         previewOffset: $previewOffset,
@@ -4979,8 +5013,10 @@ struct SplitView: View {
                 baseFileName = pdfManager.currentFileName ?? ""
                 isViewFocused = true
                 fileSizes = totalPages > 0 ? [totalPages] : []
-                customFileNames.removeAll()   // ← was missing in the old code
+                customFileNames.removeAll()
                 previewOffset = .zero
+                skippedPages = []
+                selectedFileIndices = []
                 // Return to the split stage if we were somewhere else
                 // (e.g. user loaded a new file straight from the summary screen).
                 if splitStage != .split { splitStage = .split }
@@ -4996,6 +5032,8 @@ struct SplitView: View {
                 prefixItems = []
                 summaryNames = []
                 pendingFolderURL = nil
+                skippedPages = []
+                selectedFileIndices = []
             }
         }
     }
@@ -5041,7 +5079,14 @@ struct SplitView: View {
                                 splitMarkers: splitMarkers,
                                 fileSizes: fileSizes,
                                 totalPages: totalPages,
-                                onToggleMarker: { toggleSplitAt(page: currentPage) }
+                                skippedPages: skippedPages,
+                                onToggleMarker: { toggleSplitAt(page: currentPage) },
+                                onSkipCurrentFile: {
+                                    if let fi = pageToFileMapping[currentPage] {
+                                        toggleSkipFiles([fi])
+                                    }
+                                },
+                                onSkipCurrentPage: { toggleSkipPage(currentPage) }
                             )
 
                             Divider()
@@ -5102,11 +5147,19 @@ struct SplitView: View {
                             )
 
                             // ── Output files list ─────────────────────────────
-                            Text("Output Files (\(numberOfFiles))")
-                                .font(.headline)
+                            let skippedCount = numberOfFiles - activeFileCount
+                            Group {
+                                if skippedCount > 0 {
+                                    Text("Output Files (\(activeFileCount) active · \(skippedCount) skipped)")
+                                        .font(.headline)
+                                } else {
+                                    Text("Output Files (\(numberOfFiles))")
+                                        .font(.headline)
+                                }
+                            }
 
                             ScrollView {
-                                VStack(alignment: .leading, spacing: 8) {
+                                VStack(alignment: .leading, spacing: 4) {
                                     ForEach(0..<numberOfFiles, id: \.self) { fileIndex in
                                         FilePreviewCard(
                                             fileIndex: fileIndex,
@@ -5115,8 +5168,13 @@ struct SplitView: View {
                                             baseFileName: baseFileName,
                                             customFileNames: customFileNames,
                                             currentPage: currentPage,
-                                            onNavigate: { pageIndex in
-                                                currentPage = pageIndex
+                                            isFullySkipped: isFileFullySkipped(fileIndex),
+                                            isPartiallySkipped: isFilePartiallySkipped(fileIndex),
+                                            skippedPages: skippedPages,
+                                            isSelected: selectedFileIndices.contains(fileIndex),
+                                            onNavigate: { pageIndex in currentPage = pageIndex },
+                                            onSelect: { isCmd, isShift in
+                                                handleFileSelection(fileIndex, isCmd: isCmd, isShift: isShift)
                                             }
                                         )
                                     }
@@ -5131,7 +5189,7 @@ struct SplitView: View {
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.large)
-                                .disabled(numberOfFiles < 2)
+                                .disabled(activeFileCount < 2)
                             }
                         }
                         .padding()
@@ -5172,6 +5230,14 @@ struct SplitView: View {
                                 toggleSplitAt(page: currentPage)
                             }
                             return .handled
+                        case .delete, .deleteForward:
+                            // Delete/Backspace: toggle skip on selected files, or on the
+                            // file that contains the current preview page if nothing is selected.
+                            let targets = selectedFileIndices.isEmpty
+                                ? Set([pageToFileMapping[currentPage]].compactMap { $0 })
+                                : selectedFileIndices
+                            if !targets.isEmpty { toggleSkipFiles(targets) }
+                            return .handled
                         default:
                             return .ignored
                         }
@@ -5191,35 +5257,88 @@ struct SplitView: View {
     private func clearAllMarkers() {
         fileSizes = totalPages > 0 ? [totalPages] : []
         customFileNames.removeAll()
+        skippedPages = []
+        selectedFileIndices = []
     }
 
     private func applyStride() {
         fileSizes = splitSizes(totalPages: totalPages, stride: stride)
         customFileNames.removeAll()
+        skippedPages = []
+        selectedFileIndices = []
     }
 
     private func toggleSplitAt(page: Int) {
         fileSizes = toggleSplit(in: fileSizes, at: page)
     }
 
+    /// Toggle skip on all pages of the given file indices.
+    /// If every file in the set is already fully skipped, they are un-skipped; otherwise all are skipped.
+    private func toggleSkipFiles(_ fileIndices: Set<Int>) {
+        let allFullySkipped = fileIndices.allSatisfy { isFileFullySkipped($0) }
+        for idx in fileIndices {
+            let pages = pagesForFile(idx)
+            if allFullySkipped {
+                skippedPages.subtract(pages)
+            } else {
+                skippedPages.formUnion(pages)
+            }
+        }
+        selectedFileIndices = []
+    }
+
+    /// Toggle skip on a single page.
+    private func toggleSkipPage(_ page: Int) {
+        if skippedPages.contains(page) {
+            skippedPages.remove(page)
+        } else {
+            skippedPages.insert(page)
+        }
+    }
+
+    /// Handle a tap on a file card in the output-files list.
+    private func handleFileSelection(_ fileIndex: Int, isCmd: Bool, isShift: Bool) {
+        if isShift, let anchor = selectedFileIndices.min() {
+            let lo = min(anchor, fileIndex)
+            let hi = max(anchor, fileIndex)
+            selectedFileIndices = Set(lo...hi)
+        } else if isCmd {
+            if selectedFileIndices.contains(fileIndex) {
+                selectedFileIndices.remove(fileIndex)
+            } else {
+                selectedFileIndices.insert(fileIndex)
+            }
+        } else {
+            selectedFileIndices = [fileIndex]
+            // Also navigate the preview to the first page of this file.
+            if let firstPage = pagesForFile(fileIndex).first {
+                currentPage = firstPage
+            }
+        }
+    }
+
     func saveSplitPDF() {
-        guard let document = pdfManager.pdfDocument, numberOfFiles >= 2 else { return }
+        guard let document = pdfManager.pdfDocument, activeFileCount >= 2 else { return }
 
         if prefixEnabled {
             // Go straight to Step 3 — folder picker comes after the user confirms order.
+            // Only include files that have at least one non-skipped page.
             var items: [PrefixItem] = []
             var pagePos = 0
             for fileIndex in 0..<fileSizes.count {
-                let suffix = customFileNames[fileIndex] ?? ""
-                let proposed: String
-                if suffix.isEmpty {
-                    proposed = "\(baseFileName)\(filenameSeparator)\(fileIndex + 1).pdf"
-                } else {
-                    proposed = "\(baseFileName)\(filenameSeparator)\(suffix).pdf"
+                let fileSize = fileSizes[fileIndex]
+                if !isFileFullySkipped(fileIndex) {
+                    let suffix = customFileNames[fileIndex] ?? ""
+                    let proposed: String
+                    if suffix.isEmpty {
+                        proposed = "\(baseFileName)\(filenameSeparator)\(fileIndex + 1).pdf"
+                    } else {
+                        proposed = "\(baseFileName)\(filenameSeparator)\(suffix).pdf"
+                    }
+                    let firstPage = document.page(at: pagePos)
+                    items.append(PrefixItem(id: fileIndex, proposedName: proposed, page: firstPage))
                 }
-                let firstPage = document.page(at: pagePos)
-                items.append(PrefixItem(id: fileIndex, proposedName: proposed, page: firstPage))
-                pagePos += fileSizes[fileIndex]
+                pagePos += fileSize
             }
             prefixItems = items
             splitStage = .prefix
@@ -5241,6 +5360,7 @@ struct SplitView: View {
                     baseFileName: baseFileName,
                     customFileNames: customFileNames,
                     pageToFileMapping: pageToFileMapping,
+                    skippedPages: skippedPages,
                     separator: filenameSeparator
                 ) { title, message, isError in
                     if isError {
@@ -5248,6 +5368,7 @@ struct SplitView: View {
                     } else {
                         var names: [String] = []
                         for i in 0..<fileSizes.count {
+                            guard !isFileFullySkipped(i) else { continue }
                             let sfx = customFileNames[i] ?? ""
                             if sfx.isEmpty {
                                 names.append("\(baseFileName)\(filenameSeparator)\(i + 1).pdf")
@@ -5306,6 +5427,7 @@ struct SplitView: View {
             baseFileName: "",
             customFileNames: finalCustomNames,
             pageToFileMapping: pageToFileMapping,
+            skippedPages: skippedPages,
             separator: ""
         ) { _, _, isError in
             if isError {
@@ -5327,7 +5449,10 @@ struct SplitControlsSection: View {
     let splitMarkers: Set<Int>
     let fileSizes: [Int]
     let totalPages: Int
+    let skippedPages: Set<Int>
     let onToggleMarker: () -> Void
+    let onSkipCurrentFile: () -> Void
+    let onSkipCurrentPage: () -> Void
 
     /// Returns which file index the current page belongs to, and the size of that file.
     private var currentFileInfo: (fileIndex: Int, fileStart: Int, fileSize: Int)? {
@@ -5339,6 +5464,16 @@ struct SplitControlsSection: View {
             pos += size
         }
         return nil
+    }
+
+    /// True if the current page is in skippedPages.
+    private var currentPageIsSkipped: Bool { skippedPages.contains(currentPage) }
+
+    /// True if every page in the current file is skipped.
+    private var currentFileIsFullySkipped: Bool {
+        guard let info = currentFileInfo else { return false }
+        let pages = info.fileStart..<(info.fileStart + info.fileSize)
+        return pages.allSatisfy { skippedPages.contains($0) }
     }
 
     var body: some View {
@@ -5358,8 +5493,20 @@ struct SplitControlsSection: View {
                 Spacer()
 
                 VStack(spacing: 2) {
-                    Text("Page \(currentPage + 1) of \(totalPages)")
-                        .font(.headline)
+                    HStack(spacing: 6) {
+                        Text("Page \(currentPage + 1) of \(totalPages)")
+                            .font(.headline)
+                        if currentPageIsSkipped {
+                            Text("SKIPPED")
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Color.red.opacity(0.15))
+                                .foregroundColor(.red)
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                        }
+                    }
                     // Show which output file this page belongs to
                     if let info = currentFileInfo {
                         let isAtStart = currentPage == info.fileStart
@@ -5367,9 +5514,12 @@ struct SplitControlsSection: View {
                         let rangeText = info.fileStart == endPage
                             ? "p.\(info.fileStart + 1)"
                             : "pp.\(info.fileStart + 1)–\(endPage + 1)"
-                        Text("File \(info.fileIndex + 1) (\(rangeText), \(info.fileSize) \(info.fileSize == 1 ? "page" : "pages"))\(isAtStart && currentPage > 0 ? " — split marker" : "")")
+                        let skipSuffix = currentFileIsFullySkipped ? " — skipped" : ""
+                        Text("File \(info.fileIndex + 1) (\(rangeText), \(info.fileSize) \(info.fileSize == 1 ? "page" : "pages"))\(isAtStart && currentPage > 0 ? " — split marker" : "")\(skipSuffix)")
                             .font(.caption)
-                            .foregroundColor(isAtStart && currentPage > 0 ? .orange : .secondary)
+                            .foregroundColor(currentFileIsFullySkipped ? .red
+                                            : (isAtStart && currentPage > 0) ? .orange
+                                            : .secondary)
                     }
                 }
 
@@ -5387,7 +5537,7 @@ struct SplitControlsSection: View {
             }
             .padding(.horizontal)
 
-            // Split marker controls
+            // Split marker + skip controls
             HStack(spacing: 12) {
                 Button(action: onToggleMarker) {
                     if splitMarkers.contains(currentPage) {
@@ -5402,6 +5552,24 @@ struct SplitControlsSection: View {
                 Text("Space to toggle")
                     .font(.caption)
                     .foregroundColor(.secondary)
+
+                Spacer()
+
+                Button(action: {
+                    if NSEvent.modifierFlags.contains(.command) {
+                        onSkipCurrentPage()
+                    } else {
+                        onSkipCurrentFile()
+                    }
+                }) {
+                    Label(currentFileIsFullySkipped ? "Un-skip File" : "Skip File",
+                          systemImage: currentFileIsFullySkipped ? "arrow.uturn.backward" : "trash")
+                    .foregroundColor(currentFileIsFullySkipped ? .orange : .red)
+                }
+                .buttonStyle(.bordered)
+                .help(currentFileIsFullySkipped
+                      ? "Un-skip this output file (⌘-click to un-skip just this page)"
+                      : "Skip this output file (⌘-click to skip just this page)")
             }
         }
         .padding()
@@ -5428,7 +5596,13 @@ struct FilePreviewCard: View {
     let customFileNames: [Int: String]
     /// The page currently shown in the left preview — used to highlight the active card.
     let currentPage: Int
+    let isFullySkipped: Bool
+    let isPartiallySkipped: Bool
+    let skippedPages: Set<Int>
+    let isSelected: Bool
     let onNavigate: (Int) -> Void
+    /// Called when the user clicks the card; provides Cmd and Shift modifier state.
+    let onSelect: (_ isCmd: Bool, _ isShift: Bool) -> Void
 
     var pagesInFile: [Int] {
         pageToFileMapping.filter { $0.value == fileIndex }.keys.sorted()
@@ -5447,24 +5621,73 @@ struct FilePreviewCard: View {
         }
     }
 
+    /// Background fill colour reflecting skip / selection / active state.
+    private var cardFill: Color {
+        if isFullySkipped    { return Color.red.opacity(0.12) }
+        if isPartiallySkipped { return Color.orange.opacity(0.12) }
+        if isSelected        { return Color.accentColor.opacity(0.15) }
+        if isActive          { return Color.accentColor.opacity(0.08) }
+        return Color(NSColor.controlBackgroundColor)
+    }
+
+    private var cardBorder: Color {
+        if isFullySkipped    { return Color.red.opacity(0.4) }
+        if isPartiallySkipped { return Color.orange.opacity(0.4) }
+        if isSelected        { return Color.accentColor.opacity(0.7) }
+        if isActive          { return Color.accentColor.opacity(0.5) }
+        return .clear
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Image(systemName: "doc.fill")
-                    .foregroundColor(isActive ? .accentColor : .blue)
+                Image(systemName: isFullySkipped ? "doc.fill" : "doc.fill")
+                    .foregroundColor(isFullySkipped ? .red
+                                     : isPartiallySkipped ? .orange
+                                     : isActive ? .accentColor : .blue)
 
                 Text(fileName)
                     .font(.headline)
+                    .foregroundColor(isFullySkipped ? .secondary : .primary)
+                    .strikethrough(isFullySkipped)
+
+                if isFullySkipped {
+                    Text("SKIPPED")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.red.opacity(0.15))
+                        .foregroundColor(.red)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                } else if isPartiallySkipped {
+                    Text("PARTIAL")
+                        .font(.caption2)
+                        .fontWeight(.semibold)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(Color.orange.opacity(0.15))
+                        .foregroundColor(.orange)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
 
                 Spacer()
 
-                Text("\(pagesInFile.count) page\(pagesInFile.count == 1 ? "" : "s")")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                let activeCount = pagesInFile.filter { !skippedPages.contains($0) }.count
+                if isPartiallySkipped {
+                    Text("\(activeCount) of \(pagesInFile.count) pages")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("\(pagesInFile.count) page\(pagesInFile.count == 1 ? "" : "s")")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
             }
 
             HStack(spacing: 4) {
                 ForEach(pagesInFile.prefix(10), id: \.self) { pageIndex in
+                    let pageSkipped = skippedPages.contains(pageIndex)
                     Button(action: {
                         onNavigate(pageIndex)
                     }) {
@@ -5473,8 +5696,11 @@ struct FilePreviewCard: View {
                             .padding(4)
                             .background(
                                 RoundedRectangle(cornerRadius: 4)
-                                    .fill(Color.accentColor.opacity(0.2))
+                                    .fill(pageSkipped
+                                          ? Color.red.opacity(0.25)
+                                          : Color.accentColor.opacity(0.2))
                             )
+                            .foregroundColor(pageSkipped ? .red : .primary)
                     }
                     .buttonStyle(.plain)
                 }
@@ -5486,25 +5712,21 @@ struct FilePreviewCard: View {
                 }
             }
         }
-        .padding()
+        .padding(8)
         .background(
             RoundedRectangle(cornerRadius: 8)
-                .fill(isActive
-                      ? Color.accentColor.opacity(0.08)
-                      : Color(NSColor.controlBackgroundColor))
+                .fill(cardFill)
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(isActive ? Color.accentColor.opacity(0.5) : Color.clear,
-                                      lineWidth: 1.5)
+                        .strokeBorder(cardBorder, lineWidth: 1.5)
                 )
         )
-        // Tapping anywhere on the card (outside the page-number buttons) jumps
-        // the preview to the first page of this output file.
+        // Tap selects the card (with modifier support); the selection handler
+        // in SplitView also navigates when it's a plain single-click.
         .contentShape(Rectangle())
         .onTapGesture {
-            if let firstPage = pagesInFile.first {
-                onNavigate(firstPage)
-            }
+            let mods = NSEvent.modifierFlags
+            onSelect(mods.contains(.command), mods.contains(.shift))
         }
         .onHover { inside in
             if inside { NSCursor.pointingHand.push() } else { NSCursor.pop() }
@@ -5522,12 +5744,31 @@ func pdfFilenameError(for text: String) -> String? {
     return nil
 }
 
+/// Formats a set of 0-based page indices into a compact human-readable range string.
+/// E.g. {0,1,2,6,7,8,9} → "pp.1–3, 7–10"
+func formatSkippedPageRanges(_ pages: Set<Int>) -> String {
+    guard !pages.isEmpty else { return "" }
+    let sorted = pages.sorted()
+    var ranges: [(Int, Int)] = []
+    var start = sorted[0], end = sorted[0]
+    for p in sorted.dropFirst() {
+        if p == end + 1 { end = p }
+        else { ranges.append((start, end)); start = p; end = p }
+    }
+    ranges.append((start, end))
+    return ranges.map { s, e in s == e ? "p.\(s+1)" : "pp.\(s+1)–\(e+1)" }.joined(separator: ", ")
+}
+
 // MARK: - Split Naming Stage (Step 2)
 /// Full-window Step 2: lets users set the base filename and per-file name suffixes,
 /// with a large first-page thumbnail for each output file.
 struct SplitNamingStageView: View {
     let pdfDocument: PDFDocument
     let fileSizes: [Int]
+    /// Pages omitted from output (passed from SplitView).
+    let skippedPages: Set<Int>
+    /// File indices whose every page is skipped — hidden from this step.
+    let skippedFileIndices: Set<Int>
     @Binding var baseFileName: String
     @Binding var customFileNames: [Int: String]
     @Binding var previewOffset: CGPoint
@@ -5544,6 +5785,11 @@ struct SplitNamingStageView: View {
     /// Prevents re-inference on subsequent edits.
     @State private var hasInferredEnsemble = false
 
+    /// All file indices, excluding fully-skipped ones.
+    var visibleFileIndices: [Int] {
+        (0..<fileSizes.count).filter { !skippedFileIndices.contains($0) }
+    }
+
     var numberOfFiles: Int { fileSizes.count }
 
     /// Page index of the first page in a given file.
@@ -5551,12 +5797,16 @@ struct SplitNamingStageView: View {
         fileSizes.prefix(fileIndex).reduce(0, +)
     }
 
-    /// Row subtitle: page range + page count, e.g. "Pages 3–5 · 3 pages".
+    /// Row subtitle: page range + active page count, noting any partially-skipped pages.
     private func subtitle(for fileIndex: Int) -> String {
         let start = firstPageIndex(for: fileIndex)
         let size  = fileSizes[fileIndex]
         let end   = start + size - 1
         let range = (start == end) ? "Page \(start + 1)" : "Pages \(start + 1)–\(end + 1)"
+        let activeCount = (start..<(start + size)).filter { !skippedPages.contains($0) }.count
+        if activeCount < size {
+            return "\(range) · \(activeCount) active of \(size) pages"
+        }
         return "\(range) · \(size) \(size == 1 ? "page" : "pages")"
     }
 
@@ -5572,7 +5822,7 @@ struct SplitNamingStageView: View {
     }
 
     private var canSave: Bool {
-        numberOfFiles >= 2 && baseNameError == nil && !anySuffixError
+        visibleFileIndices.count >= 2 && baseNameError == nil && !anySuffixError
     }
 
     private func filenameError(for text: String) -> String? { pdfFilenameError(for: text) }
@@ -5627,11 +5877,36 @@ struct SplitNamingStageView: View {
 
             Divider()
 
+            // ── Skipped-pages banner ──────────────────────────────────────
+            if !skippedPages.isEmpty {
+                HStack(spacing: 8) {
+                    Image(systemName: "eye.slash")
+                        .foregroundColor(.orange)
+                    let rangeStr = formatSkippedPageRanges(skippedPages)
+                    let hiddenCount = skippedFileIndices.count
+                    if hiddenCount > 0 {
+                        Text("Skipping \(rangeStr) from input · \(hiddenCount) file\(hiddenCount == 1 ? "" : "s") hidden above")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    } else {
+                        Text("Skipping \(rangeStr) from input")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+                .background(Color.orange.opacity(0.07))
+
+                Divider()
+            }
+
             // ── File list ─────────────────────────────────────────────────
             ScrollViewReader { proxy in
                 ScrollView {
                     VStack(spacing: 0) {
-                        ForEach(0..<numberOfFiles, id: \.self) { fileIndex in
+                        ForEach(visibleFileIndices, id: \.self) { fileIndex in
                             SplitFileNamingRow(
                                 fileIndex: fileIndex,
                                 page: pdfDocument.page(at: firstPageIndex(for: fileIndex)),
@@ -5647,7 +5922,7 @@ struct SplitNamingStageView: View {
                                 previewOffset: $previewOffset
                             )
                             .id(fileIndex)
-                            if fileIndex < numberOfFiles - 1 { Divider() }
+                            if fileIndex != visibleFileIndices.last { Divider() }
                         }
                     }
                     .padding(.vertical, 8)
@@ -6975,7 +7250,7 @@ class PDFManager: ObservableObject {
         }
     }
     
-    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], separator: String = "_", completion: PDFAlertHandler) {
+    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], skippedPages: Set<Int> = [], separator: String = "_", completion: PDFAlertHandler) {
         guard let document = pdfDocument else { return }
 
         let numberOfFiles = (pageToFileMapping.values.max() ?? 0) + 1
@@ -6986,9 +7261,10 @@ class PDFManager: ObservableObject {
             fileDocuments[fileIndex] = PDFDocument()
         }
 
-        // Distribute pages to files
+        // Distribute pages to files, skipping any pages in skippedPages
         for pageIndex in 0..<document.pageCount {
-            guard let page = document.page(at: pageIndex),
+            guard !skippedPages.contains(pageIndex),
+                  let page = document.page(at: pageIndex),
                   let fileIndex = pageToFileMapping[pageIndex],
                   let targetDoc = fileDocuments[fileIndex] else {
                 continue
@@ -6997,12 +7273,13 @@ class PDFManager: ObservableObject {
             targetDoc.insert(page, at: targetDoc.pageCount)
         }
 
-        // Save each file
+        // Save each file (skip files that ended up with zero pages after skipping)
         var savedFiles: [String] = []
         var errors: [String] = []
 
         for fileIndex in 0..<numberOfFiles {
-            guard let doc = fileDocuments[fileIndex] else { continue }
+            guard let doc = fileDocuments[fileIndex],
+                  doc.pageCount > 0 else { continue }
 
             let fileName: String
             if let customSuffix = customFileNames[fileIndex], !customSuffix.isEmpty {
