@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <channel>
+        <title>ScoreSort</title>
+        <link>https://benperche.github.io/ScoreSort/appcast.xml</link>
+        <description>ScoreSort release history</description>
+        <language>en</language>
+
+        <!-- Template for future releases — uncomment and fill in when publishing an update:
+
+        <item>
+            <title>Version X.X</title>
+            <sparkle:version>BUILD_NUMBER</sparkle:version>
+            <sparkle:shortVersionString>X.X</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <pubDate>DAY, DD MON YYYY HH:MM:SS +1000</pubDate>
+            <sparkle:releaseNotesLink>https://github.com/benperche/ScoreSort/releases/tag/vX.X</sparkle:releaseNotesLink>
+            <enclosure
+                url="https://github.com/benperche/ScoreSort/releases/download/vX.X/ScoreSort.dmg"
+                sparkle:edSignature="SIGNATURE_FROM_SIGN_UPDATE"
+                length="FILE_SIZE_IN_BYTES"
+                type="application/octet-stream"/>
+        </item>
+
+        -->
+
+    </channel>
+</rss>
