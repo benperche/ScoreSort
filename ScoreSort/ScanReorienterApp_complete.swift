@@ -2592,8 +2592,8 @@ struct ScoreOrderSortView: View {
 
     // ── File list ─────────────────────────────────────────────────────────
     private var fileListView: some View {
-        let undetected = renamerManager.operations.filter { $0.newName.isEmpty }
-        let detected   = renamerManager.operations.filter { !$0.newName.isEmpty }
+        let undetected = renamerManager.operations.filter { $0.type == .undetected }
+        let detected   = renamerManager.operations.filter { $0.type != .undetected }
         return ScrollView {
             LazyVStack(spacing: 0) {
                 // Undetected section
@@ -4165,15 +4165,14 @@ class RenamerManager: ObservableObject {
         
         // Sort: undetected files first (so they are immediately visible), then by new filename
         operations.sort { op1, op2 in
-            if op1.newName.isEmpty && !op2.newName.isEmpty {
-                return true   // undetected before detected
-            } else if !op1.newName.isEmpty && op2.newName.isEmpty {
-                return false  // detected after undetected
-            } else if op1.newName.isEmpty && op2.newName.isEmpty {
-                return op1.originalName < op2.originalName
-            } else {
-                return op1.newName < op2.newName
-            }
+            let u1 = op1.type == .undetected
+            let u2 = op2.type == .undetected
+            if u1 && !u2 { return true }
+            if !u1 && u2 { return false }
+            if op1.newName.isEmpty && op2.newName.isEmpty { return op1.originalName < op2.originalName }
+            if op1.newName.isEmpty { return false }
+            if op2.newName.isEmpty { return true }
+            return op1.newName < op2.newName
         }
     }
     
