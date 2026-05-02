@@ -1941,14 +1941,17 @@ struct TourPageContentView: View {
 
             // ── Optional screenshot / GIF image ───────────────────────────
             if let name = page.imageName {
-                TourImageView(imageName: name)
-                    .frame(maxWidth: .infinity, maxHeight: 260)
-                    .cornerRadius(8)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
-                    )
-                    .padding(.bottom, 20)
+                GeometryReader { geo in
+                    TourImageView(imageName: name)
+                        .frame(width: geo.size.width, height: 240)
+                }
+                .frame(height: 240)
+                .cornerRadius(8)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
+                )
+                .padding(.bottom, 20)
             }
 
             // ── Header row ────────────────────────────────────────────────
