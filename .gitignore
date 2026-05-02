@@ -2,3 +2,15 @@
 # Claude Code
 # =========================
 .claude/
+
+# =========================
+# Xcode user data
+# =========================
+xcuserdata/
+*.xcuserdatad/
+ScoreSort.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+
+# =========================
+# Screenshots / assets
+# =========================
+screenshots/
