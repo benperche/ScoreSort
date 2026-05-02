@@ -6577,6 +6577,7 @@ private struct PrefixOrderRow: View {
     let finalName: String
     let onMoveUp: (() -> Void)?
     let onMoveDown: (() -> Void)?
+    var isUnmatched: Bool = false
 
     var body: some View {
         HStack(spacing: 12) {
@@ -6624,6 +6625,7 @@ private struct PrefixOrderRow: View {
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
+        .background(isUnmatched ? Color.orange.opacity(0.06) : Color.clear)
     }
 }
 
@@ -6637,6 +6639,8 @@ struct PrefixOrderStepView: View {
     let onApply: ([PrefixItem]) -> Void  // reordered list; caller handles save
 
     @State private var items: [PrefixItem]
+    /// IDs of items whose proposed name couldn't be matched to the current instrument order.
+    @State private var unmatchedIds: Set<Int>
     @AppStorage("prefixSeparator") private var prefixSeparator: String = " - "
 
     init(stepLabel: String,
@@ -6650,11 +6654,15 @@ struct PrefixOrderStepView: View {
         self.onBack = onBack
         self.onApply = onApply
         let order = InstrumentOrders.getOrder(for: ensembleType.wrappedValue)
-        self._items = State(initialValue: Self.autoSorted(initialItems, by: order))
+        let sorted = Self.autoSorted(initialItems, by: order)
+        self._items = State(initialValue: sorted)
+        self._unmatchedIds = State(initialValue: Self.computeUnmatchedIds(initialItems, by: order))
     }
 
     // MARK: Auto-sort helpers
 
+    /// Returns items sorted by instrument order, with unmatched items first so they
+    /// are immediately visible without scrolling.
     static func autoSorted(_ items: [PrefixItem], by order: [String]) -> [PrefixItem] {
         var matched:   [(rank: Int, item: PrefixItem)] = []
         var unmatched: [PrefixItem] = []
@@ -6665,7 +6673,12 @@ struct PrefixOrderStepView: View {
                 unmatched.append(item)
             }
         }
-        return matched.sorted { $0.rank < $1.rank }.map(\.item) + unmatched
+        return unmatched + matched.sorted { $0.rank < $1.rank }.map(\.item)
+    }
+
+    /// Returns the set of item IDs whose proposed names don't match any instrument in `order`.
+    static func computeUnmatchedIds(_ items: [PrefixItem], by order: [String]) -> Set<Int> {
+        Set(items.filter { matchInstrumentOrder(in: $0.proposedName, order: order) == nil }.map(\.id))
     }
 
     private func prefixedName(for item: PrefixItem, at position: Int) -> String {
@@ -6702,10 +6715,12 @@ struct PrefixOrderStepView: View {
                 .onChange(of: ensembleType) { _, newType in
                     let order = InstrumentOrders.getOrder(for: newType)
                     withAnimation { items = Self.autoSorted(items, by: order) }
+                    unmatchedIds = Self.computeUnmatchedIds(items, by: order)
                 }
                 Button("Re-sort") {
                     let order = InstrumentOrders.getOrder(for: ensembleType)
                     withAnimation { items = Self.autoSorted(items, by: order) }
+                    unmatchedIds = Self.computeUnmatchedIds(items, by: order)
                 }
                 .help("Re-apply instrument order to the current list")
                 Spacer()
@@ -6719,15 +6734,66 @@ struct PrefixOrderStepView: View {
             // ── File list ─────────────────────────────────────────────────
             ScrollView {
                 VStack(spacing: 0) {
-                    ForEach(Array(items.enumerated()), id: \.element.id) { position, item in
-                        PrefixOrderRow(
-                            item: item,
-                            position: position + 1,
-                            finalName: prefixedName(for: item, at: position + 1),
-                            onMoveUp:   position > 0              ? { items.swapAt(position, position - 1) } : nil,
-                            onMoveDown: position < items.count - 1 ? { items.swapAt(position, position + 1) } : nil
-                        )
-                        if position < items.count - 1 { Divider() }
+                    // ── Unmatched section ─────────────────────────────────
+                    let unmatchedItems = items.filter { unmatchedIds.contains($0.id) }
+                    let matchedItems   = items.filter { !unmatchedIds.contains($0.id) }
+
+                    if !unmatchedItems.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundColor(.orange)
+                                .font(.caption)
+                            Text("Unmatched — instrument not recognised in current order")
+                                .font(.caption)
+                                .foregroundColor(.orange)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(Color.orange.opacity(0.10))
+
+                        ForEach(unmatchedItems, id: \.id) { item in
+                            let position = items.firstIndex(where: { $0.id == item.id })!
+                            PrefixOrderRow(
+                                item: item,
+                                position: position + 1,
+                                finalName: prefixedName(for: item, at: position + 1),
+                                onMoveUp:   position > 0              ? { items.swapAt(position, position - 1) } : nil,
+                                onMoveDown: position < items.count - 1 ? { items.swapAt(position, position + 1) } : nil,
+                                isUnmatched: true
+                            )
+                            Divider()
+                        }
+                    }
+
+                    // ── Matched section ───────────────────────────────────
+                    if !matchedItems.isEmpty {
+                        if !unmatchedItems.isEmpty {
+                            HStack(spacing: 6) {
+                                Image(systemName: "checkmark.circle.fill")
+                                    .foregroundColor(.secondary)
+                                    .font(.caption)
+                                Text("Matched")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                Spacer()
+                            }
+                            .padding(.horizontal, 14)
+                            .padding(.vertical, 6)
+                            .background(Color(NSColor.controlBackgroundColor))
+                        }
+
+                        ForEach(matchedItems, id: \.id) { item in
+                            let position = items.firstIndex(where: { $0.id == item.id })!
+                            PrefixOrderRow(
+                                item: item,
+                                position: position + 1,
+                                finalName: prefixedName(for: item, at: position + 1),
+                                onMoveUp:   position > 0              ? { items.swapAt(position, position - 1) } : nil,
+                                onMoveDown: position < items.count - 1 ? { items.swapAt(position, position + 1) } : nil
+                            )
+                            if item.id != matchedItems.last?.id { Divider() }
+                        }
                     }
                 }
                 .padding(.vertical, 8)
