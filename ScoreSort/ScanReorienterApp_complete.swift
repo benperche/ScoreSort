@@ -4893,6 +4893,8 @@ struct SplitView: View {
     @State private var skippedPages: Set<Int> = []
     /// File indices currently highlighted in the output-files list (for multi-select + Delete).
     @State private var selectedFileIndices: Set<Int> = []
+    /// Retained reference to the local NSEvent monitor that handles the delete key.
+    @State private var splitViewKeyMonitor: Any?
     @FocusState private var isViewFocused: Bool
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
@@ -5189,7 +5191,7 @@ struct SplitView: View {
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.large)
-                                .disabled(activeFileCount < 2)
+                                .disabled(activeFileCount < 1 || (activeFileCount < 2 && skippedPages.isEmpty))
                             }
                         }
                         .padding()
@@ -5203,6 +5205,8 @@ struct SplitView: View {
                             } else if currentPage > 0 {
                                 currentPage -= 1
                             }
+                            // Keep selection in sync with whichever file the page lands in
+                            if let fi = pageToFileMapping[currentPage] { selectedFileIndices = [fi] }
                             return .handled
                         case .rightArrow:
                             if press.modifiers.contains(.command) {
@@ -5210,33 +5214,39 @@ struct SplitView: View {
                             } else if currentPage < totalPages - 1 {
                                 currentPage += 1
                             }
+                            if let fi = pageToFileMapping[currentPage] { selectedFileIndices = [fi] }
                             return .handled
                         case .downArrow:
-                            // Jump to the first page of the next output file
-                            let fileStarts = ([0] + splitMarkers.sorted())
-                            if let next = fileStarts.first(where: { $0 > currentPage }) {
+                            let fileStartsDown = ([0] + splitMarkers.sorted())
+                            if let next = fileStartsDown.first(where: { $0 > currentPage }),
+                               let fi = pageToFileMapping[next] {
                                 currentPage = next
+                                if press.modifiers.contains(.shift) {
+                                    // Extend the range from the anchor (lowest selected index)
+                                    let anchor = selectedFileIndices.min() ?? fi
+                                    selectedFileIndices = Set(anchor...max(anchor, fi))
+                                } else {
+                                    selectedFileIndices = [fi]
+                                }
                             }
                             return .handled
                         case .upArrow:
-                            // Jump to the first page of the previous output file
-                            let fileStarts = ([0] + splitMarkers.sorted())
-                            if let prev = fileStarts.last(where: { $0 < currentPage }) {
+                            let fileStartsUp = ([0] + splitMarkers.sorted())
+                            if let prev = fileStartsUp.last(where: { $0 < currentPage }),
+                               let fi = pageToFileMapping[prev] {
                                 currentPage = prev
+                                if press.modifiers.contains(.shift) {
+                                    let anchor = selectedFileIndices.max() ?? fi
+                                    selectedFileIndices = Set(min(anchor, fi)...anchor)
+                                } else {
+                                    selectedFileIndices = [fi]
+                                }
                             }
                             return .handled
                         case .space:
                             if currentPage > 0 {
                                 toggleSplitAt(page: currentPage)
                             }
-                            return .handled
-                        case .delete, .deleteForward:
-                            // Delete/Backspace: toggle skip on selected files, or on the
-                            // file that contains the current preview page if nothing is selected.
-                            let targets = selectedFileIndices.isEmpty
-                                ? Set([pageToFileMapping[currentPage]].compactMap { $0 })
-                                : selectedFileIndices
-                            if !targets.isEmpty { toggleSkipFiles(targets) }
                             return .handled
                         default:
                             return .ignored
@@ -5251,6 +5261,20 @@ struct SplitView: View {
         .focused($isViewFocused)
         .onAppear {
             isViewFocused = true
+            // SwiftUI's onKeyPress doesn't reliably fire for the delete/backspace key
+            // on macOS — the system routes it through a different responder path first.
+            // A local NSEvent monitor catches it at the app level before that happens.
+            splitViewKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                guard event.keyCode == 51 || event.keyCode == 117 else { return event }
+                // Don't steal delete from text fields (stride stepper etc.)
+                if NSApp.keyWindow?.firstResponder is NSTextView { return event }
+                DispatchQueue.main.async { self.handleDeleteKey() }
+                return nil  // consume — prevents the system bonk
+            }
+        }
+        .onDisappear {
+            if let m = splitViewKeyMonitor { NSEvent.removeMonitor(m) }
+            splitViewKeyMonitor = nil
         }
     } // end splitStageBody
     
@@ -5287,6 +5311,15 @@ struct SplitView: View {
         selectedFileIndices = []
     }
 
+    /// Called by the NSEvent monitor when Delete or Forward-Delete is pressed.
+    /// Toggles skip on the selected file cards, or the file containing the current page.
+    private func handleDeleteKey() {
+        let targets = selectedFileIndices.isEmpty
+            ? Set([pageToFileMapping[currentPage]].compactMap { $0 })
+            : selectedFileIndices
+        if !targets.isEmpty { toggleSkipFiles(targets) }
+    }
+
     /// Toggle skip on a single page.
     private func toggleSkipPage(_ page: Int) {
         if skippedPages.contains(page) {
@@ -5315,10 +5348,15 @@ struct SplitView: View {
                 currentPage = firstPage
             }
         }
+        // Clicking a card in the right panel takes focus away from the key-press
+        // handler. Restore it so Delete/Space/arrows work without an extra click.
+        isViewFocused = true
     }
 
     func saveSplitPDF() {
-        guard let document = pdfManager.pdfDocument, activeFileCount >= 2 else { return }
+        guard let document = pdfManager.pdfDocument,
+              activeFileCount >= 1,
+              activeFileCount >= 2 || !skippedPages.isEmpty else { return }
 
         if prefixEnabled {
             // Go straight to Step 3 — folder picker comes after the user confirms order.
@@ -5822,7 +5860,9 @@ struct SplitNamingStageView: View {
     }
 
     private var canSave: Bool {
-        visibleFileIndices.count >= 2 && baseNameError == nil && !anySuffixError
+        let count = visibleFileIndices.count
+        return (count >= 2 || (count >= 1 && !skippedPages.isEmpty))
+            && baseNameError == nil && !anySuffixError
     }
 
     private func filenameError(for text: String) -> String? { pdfFilenameError(for: text) }
@@ -5919,7 +5959,9 @@ struct SplitNamingStageView: View {
                                 fieldFocus: $focusedField,
                                 instrumentNames: instrumentNames,
                                 allSuffixes: customFileNames,
-                                previewOffset: $previewOffset
+                                previewOffset: $previewOffset,
+                                isLastField: fileIndex == visibleFileIndices.last,
+                                onLastTab: { if canSave { onSave() } }
                             )
                             .id(fileIndex)
                             if fileIndex != visibleFileIndices.last { Divider() }
@@ -6131,6 +6173,11 @@ struct SplitFileNamingRow: View {
     let instrumentNames: [String]   // ordered, deduplicated, capitalised
     let allSuffixes: [Int: String]  // snapshot of all rows' current suffixes
     @Binding var previewOffset: CGPoint
+    /// True for the last visible row — Tab/Return will call onLastTab instead of advancing focus.
+    var isLastField: Bool = false
+    /// Called when Tab or Return is pressed on the last field. Defaults to a no-op so
+    /// BulkRenameView (which doesn't pass this) keeps its existing behaviour.
+    var onLastTab: () -> Void = {}
 
     /// Separator inserted between base name and suffix in output filenames.
     /// Mirrors the setting in Preferences → Renamer.
@@ -6144,8 +6191,11 @@ struct SplitFileNamingRow: View {
 
     private var isFieldFocused: Bool { fieldFocus.wrappedValue == fileIndex }
 
-    // Arrow-key selection index into the suggestions list (nil = field, not dropdown)
+    // Arrow-key selection index into the suggestions list (nil = in the text field)
     @State private var selectedSuggestionIndex: Int? = nil
+    /// What the user actually typed before arrowing into a suggestion.
+    /// Restored when the user presses Escape or arrows back above the first item.
+    @State private var committedTypedText: String = ""
 
     private var finalFileName: String {
         suffix.isEmpty
@@ -6249,6 +6299,14 @@ struct SplitFileNamingRow: View {
         return nil
     }
 
+    /// The text to use when filtering suggestions.
+    /// While the user is arrowing through the list, the field shows the highlighted
+    /// suggestion but suggestions must stay anchored to what was actually typed —
+    /// otherwise arrowing to "Flute" collapses the list to a single match.
+    private var queryText: String {
+        selectedSuggestionIndex != nil ? committedTypedText : suffix
+    }
+
     private var suggestions: [String] {
         // Rotate the base instrument list so "next expected" comes first
         let start = nextExpectedIndex
@@ -6260,10 +6318,10 @@ struct SplitFileNamingRow: View {
         let deduplicated = splitSuggestionDisplayNames(rotated)
 
         var result: [String]
-        if suffix.isEmpty {
+        if queryText.isEmpty {
             result = Array(deduplicated.prefix(8))
         } else {
-            let q = suffix.lowercased()
+            let q = queryText.lowercased()
             let prefixMatches   = deduplicated.filter { $0.lowercased().hasPrefix(q) }
             let containsMatches = deduplicated.filter {
                 $0.lowercased().contains(q) && !$0.lowercased().hasPrefix(q)
@@ -6273,7 +6331,7 @@ struct SplitFileNamingRow: View {
 
         // Prepend numbered suggestion ("Flute 2" or cross-boundary "Oboe 1") when relevant
         if let numbered = numberedSuggestion {
-            let show = suffix.isEmpty || numbered.lowercased().hasPrefix(suffix.lowercased())
+            let show = queryText.isEmpty || numbered.lowercased().hasPrefix(queryText.lowercased())
             if show {
                 result.removeAll { $0.lowercased() == numbered.lowercased() }
                 result.insert(numbered, at: 0)
@@ -6344,41 +6402,61 @@ struct SplitFileNamingRow: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 220)
                         .focused(fieldFocus, equals: fileIndex)
-                        // Arrow-key navigation through suggestions
+                        // Arrow-key navigation: immediately apply the highlighted suggestion
+                        // to the field so Tab/Return can advance without an extra keypress.
                         .onKeyPress(.downArrow) {
                             guard !suggestions.isEmpty else { return .ignored }
-                            selectedSuggestionIndex = min(
-                                (selectedSuggestionIndex ?? -1) + 1,
-                                suggestions.count - 1
-                            )
+                            if selectedSuggestionIndex == nil {
+                                committedTypedText = suffix   // remember what was typed
+                            }
+                            let newIdx = min((selectedSuggestionIndex ?? -1) + 1,
+                                            suggestions.count - 1)
+                            selectedSuggestionIndex = newIdx
+                            suffix = suggestions[newIdx]
                             return .handled
                         }
                         .onKeyPress(.upArrow) {
                             if let idx = selectedSuggestionIndex, idx > 0 {
                                 selectedSuggestionIndex = idx - 1
+                                suffix = suggestions[idx - 1]
                             } else {
+                                // Arrowed back above the list — restore what the user typed
                                 selectedSuggestionIndex = nil
+                                suffix = committedTypedText
                             }
                             return .handled
                         }
                         .onKeyPress(.return) {
-                            if let idx = selectedSuggestionIndex {
-                                // Accept the highlighted suggestion
-                                suffix = suggestions[idx]
-                                selectedSuggestionIndex = nil
-                                return .handled
-                            }
-                            // No selection active: advance focus to next field
-                            fieldFocus.wrappedValue = fileIndex + 1
+                            // Suggestion is already in the field; just clear the dropdown.
+                            if selectedSuggestionIndex != nil { selectedSuggestionIndex = nil }
+                            if isLastField { onLastTab() }
+                            else { fieldFocus.wrappedValue = fileIndex + 1 }
+                            return .handled
+                        }
+                        .onKeyPress(.tab) {
+                            // For non-last fields: return .ignored so AppKit's natural Tab
+                            // traversal moves focus — that's more reliable than a manual
+                            // FocusState update in the same event.
+                            if selectedSuggestionIndex != nil { selectedSuggestionIndex = nil }
+                            guard isLastField else { return .ignored }
+                            onLastTab()
                             return .handled
                         }
                         .onKeyPress(.escape) {
+                            // Cancel: restore what the user had typed before arrowing
                             selectedSuggestionIndex = nil
+                            suffix = committedTypedText
                             return .handled
                         }
-                        .onChange(of: suffix) {
-                            // Reset arrow-key position whenever text changes
+                        .onChange(of: suffix) { _, newValue in
+                            // If this change was caused by arrow-key selection, don't reset
+                            // the selection or the committed text — we set suffix intentionally.
+                            if let idx = selectedSuggestionIndex,
+                               idx < suggestions.count,
+                               suggestions[idx] == newValue { return }
+                            // The user typed — reset arrow navigation
                             selectedSuggestionIndex = nil
+                            committedTypedText = newValue
                         }
                     Text(".pdf")
                         .foregroundColor(.secondary)
