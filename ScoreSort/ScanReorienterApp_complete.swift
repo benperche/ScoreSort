@@ -1942,7 +1942,7 @@ struct TourPageContentView: View {
             // ── Optional screenshot / GIF image ───────────────────────────
             if let name = page.imageName {
                 TourImageView(imageName: name)
-                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity, maxHeight: 260)
                     .cornerRadius(8)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
