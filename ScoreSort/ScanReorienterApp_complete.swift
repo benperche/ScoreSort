@@ -1935,13 +1935,12 @@ struct TourPageContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
 
-            // ── Screenshot — fills full card width, cropped to fixed height ─
+            // ── Screenshot — full image, no cropping ──────────────────────
             if let name = page.imageName, let nsImage = NSImage(named: name) {
                 Image(nsImage: nsImage)
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(maxWidth: .infinity, minHeight: 300, maxHeight: 300)
-                    .clipped()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(maxWidth: .infinity)
                     .overlay(
                         Rectangle()
                             .strokeBorder(Color.secondary.opacity(0.15), lineWidth: 0.5)
