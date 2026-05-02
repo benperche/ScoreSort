@@ -1663,12 +1663,17 @@ struct ShortcutsHelpView: View {
                     shortcutRow("⌘4", "Rotate Pages")
                 }
 
-                shortcutSection("Split PDF & Rotate Pages") {
+                shortcutSection("Split PDF") {
                     shortcutRow("← / →", "Previous / next page")
                     shortcutRow("⌘← / ⌘→", "First / last page")
-                    shortcutRow("Space", "Toggle split marker (Split tab)")
-                    shortcutRow("↑ / ↓", "Jump between output files (Split tab)")
-                    shortcutRow(", / .", "Rotate current page left / right (Rotate tab)")
+                    shortcutRow("Space", "Toggle split marker")
+                    shortcutRow("↑ / ↓", "Jump between output files")
+                    shortcutRow("⌫", "Toggle skip on selected output file(s)")
+                }
+
+                shortcutSection("Rotate Pages") {
+                    shortcutRow("← / →", "Previous / next page")
+                    shortcutRow(", / .", "Rotate current page left / right")
                 }
 
                 shortcutSection("Renamer") {
@@ -1749,7 +1754,7 @@ struct WelcomeTourPage {
                 "Each tab handles a different stage of a typical workflow, arranged in order from most commonly used to least common — this short tour gives you a quick overview of each one.",
                 "The app is designed to work closely with the macOS Finder. Usually the easiest way to get files into the app will be by dragging files or folders onto the relevant page of this app."
             ],
-            tipText: "If your files live in Google Drive or Dropbox, you may want to install the relevant desktop app so your folders appear directly in Finder.",
+            tipText: "You can return to this tour at any time via **Help → Welcome Tour**. If your files live in Google Drive or Dropbox, install the desktop app so your folders appear in Finder.",
             imageName: nil
         ),
 
@@ -1810,10 +1815,10 @@ struct WelcomeTourPage {
             title: "Split PDF",
             useCase: "You have one large PDF — e.g. a complete scan of all parts bound together — and need to split it into separate instrument files.",
             bodyParagraphs: [
-                "Drop the PDF and use **← →** to move through pages. Press **Space** to toggle a split marker, and **↑ ↓** to jump to the first page of each output file. Equally-spaced markers can be placed automatically using the **stride** control.",
+                "Drop the PDF and use **← →** to move through pages. Press **Space** to toggle a split marker, and **↑ ↓** to jump to the first page of each output file. Equally-spaced markers can be placed automatically using the **stride** control. Once you have entered your split markers, you can also choose to skip certain sections of the PDF in the output using your **Delete** key.",
                 "In Step 2, name each output file — the same flow as Rename Files. Toggle **Prefix score order** to add score-order numbers automatically in Step 3."
             ],
-            tipText: "⌘← / ⌘→ jumps to the first or last page · Space toggles a split marker",
+            tipText: "⌘← / ⌘→ jumps to the first or last page · Space toggles a split marker · Delete skips the selected file",
             imageName: "tour-splitter"
         ),
 
