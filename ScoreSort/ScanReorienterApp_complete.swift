@@ -6809,13 +6809,14 @@ struct PrefixOrderStepView: View {
                         .background(Color.orange.opacity(0.10))
 
                         ForEach(unmatchedItems, id: \.id) { item in
-                            let position = items.firstIndex(where: { $0.id == item.id })!
+                            let position  = items.firstIndex(where: { $0.id == item.id })!
+                            let sectionIdx = unmatchedItems.firstIndex(where: { $0.id == item.id })!
                             PrefixOrderRow(
                                 item: item,
                                 position: position + 1,
                                 finalName: prefixedName(for: item, at: position + 1),
-                                onMoveUp:   position > 0              ? { items.swapAt(position, position - 1) } : nil,
-                                onMoveDown: position < items.count - 1 ? { items.swapAt(position, position + 1) } : nil,
+                                onMoveUp:   sectionIdx > 0                        ? { items.swapAt(position, position - 1) } : nil,
+                                onMoveDown: sectionIdx < unmatchedItems.count - 1 ? { items.swapAt(position, position + 1) } : nil,
                                 isUnmatched: true
                             )
                             Divider()
@@ -6840,13 +6841,14 @@ struct PrefixOrderStepView: View {
                         }
 
                         ForEach(matchedItems, id: \.id) { item in
-                            let position = items.firstIndex(where: { $0.id == item.id })!
+                            let position   = items.firstIndex(where: { $0.id == item.id })!
+                            let sectionIdx = matchedItems.firstIndex(where: { $0.id == item.id })!
                             PrefixOrderRow(
                                 item: item,
                                 position: position + 1,
                                 finalName: prefixedName(for: item, at: position + 1),
-                                onMoveUp:   position > 0              ? { items.swapAt(position, position - 1) } : nil,
-                                onMoveDown: position < items.count - 1 ? { items.swapAt(position, position + 1) } : nil
+                                onMoveUp:   sectionIdx > 0                      ? { items.swapAt(position, position - 1) } : nil,
+                                onMoveDown: sectionIdx < matchedItems.count - 1 ? { items.swapAt(position, position + 1) } : nil
                             )
                             if item.id != matchedItems.last?.id { Divider() }
                         }

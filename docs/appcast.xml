@@ -6,6 +6,20 @@
         <description>ScoreSort release history</description>
         <language>en</language>
 
+        <item>
+            <title>Version 1.1</title>
+            <sparkle:version>2</sparkle:version>
+            <sparkle:shortVersionString>1.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <pubDate>Fri, 02 May 2025 12:00:00 +1000</pubDate>
+            <sparkle:releaseNotesLink>https://github.com/benperche/ScoreSort/releases/tag/v1.1</sparkle:releaseNotesLink>
+            <enclosure
+                url="https://github.com/benperche/ScoreSort/releases/download/v1.1/ScoreSort.dmg"
+                sparkle:edSignature="SIGNATURE_FROM_SIGN_UPDATE"
+                length="FILE_SIZE_IN_BYTES"
+                type="application/octet-stream"/>
+        </item>
+
         <!-- Template for future releases — uncomment and fill in when publishing an update:
 
         <item>
