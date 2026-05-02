@@ -1857,11 +1857,7 @@ struct WelcomeTourView: View {
                         removal:   .move(edge: goingForward ? .leading : .trailing)
                                     .combined(with: .opacity)
                     ))
-                    .padding(.horizontal, 36)
-                    .padding(.vertical, 28)
             }
-            // Grows up to 560 pt; tallens automatically when images are added
-            .frame(maxHeight: 560)
 
             Divider()
 
@@ -1924,7 +1920,7 @@ struct WelcomeTourView: View {
             .padding(.horizontal, 28)
             .padding(.vertical, 16)
         }
-        .frame(width: 660)
+        .frame(width: 700)
         .background(Color(NSColor.windowBackgroundColor))
         .cornerRadius(14)
         .shadow(color: .black.opacity(0.28), radius: 24, x: 0, y: 10)
@@ -1939,88 +1935,91 @@ struct TourPageContentView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
 
-            // ── Optional screenshot / GIF image ───────────────────────────
-            if let name = page.imageName {
-                GeometryReader { geo in
-                    TourImageView(imageName: name)
-                        .frame(width: geo.size.width, height: 240)
-                }
-                .frame(height: 240)
-                .cornerRadius(8)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
-                )
-                .padding(.bottom, 20)
+            // ── Screenshot — fills full card width, cropped to fixed height ─
+            if let name = page.imageName, let nsImage = NSImage(named: name) {
+                Image(nsImage: nsImage)
+                    .resizable()
+                    .aspectRatio(contentMode: .fill)
+                    .frame(maxWidth: .infinity, minHeight: 300, maxHeight: 300)
+                    .clipped()
+                    .overlay(
+                        Rectangle()
+                            .strokeBorder(Color.secondary.opacity(0.15), lineWidth: 0.5)
+                    )
             }
 
-            // ── Header row ────────────────────────────────────────────────
-            HStack(alignment: .center, spacing: 12) {
-                Image(systemName: page.icon)
-                    .font(.system(size: 26, weight: .medium))
-                    .foregroundColor(page.iconColor)
-                    .frame(width: 32, alignment: .center)
+            // ── Text content ──────────────────────────────────────────────
+            VStack(alignment: .leading, spacing: 0) {
 
-                Text(page.title)
-                    .font(.title2)
-                    .fontWeight(.semibold)
+                // Header row
+                HStack(alignment: .center, spacing: 10) {
+                    Image(systemName: page.icon)
+                        .font(.system(size: 20, weight: .medium))
+                        .foregroundColor(page.iconColor)
 
-                Spacer()
+                    Text(page.title)
+                        .font(.headline)
 
-                if let shortcut = page.tabShortcut {
-                    Text(shortcut)
-                        .font(.system(.footnote, design: .monospaced))
+                    Spacer()
+
+                    if let shortcut = page.tabShortcut {
+                        Text(shortcut)
+                            .font(.system(.caption2, design: .monospaced))
+                            .foregroundColor(.secondary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.secondary.opacity(0.12))
+                            .cornerRadius(4)
+                    }
+                }
+                .padding(.top, page.imageName != nil ? 14 : 28)
+
+                if let useCase = page.useCase {
+                    Text(useCase)
+                        .font(.callout)
+                        .italic()
                         .foregroundColor(.secondary)
-                        .padding(.horizontal, 7)
-                        .padding(.vertical, 3)
-                        .background(Color.secondary.opacity(0.12))
-                        .cornerRadius(5)
-                }
-            }
-
-            // ── Use-case line ─────────────────────────────────────────────
-            if let useCase = page.useCase {
-                Text(useCase)
-                    .font(.callout)
-                    .italic()
-                    .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-                    .padding(.top, 8)
-            }
-
-            Divider()
-                .padding(.vertical, 14)
-
-            // ── Body paragraphs ───────────────────────────────────────────
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(page.bodyParagraphs.indices, id: \.self) { i in
-                    Text(markdownString: page.bodyParagraphs[i])
                         .fixedSize(horizontal: false, vertical: true)
-                        .lineSpacing(2)
+                        .padding(.top, 5)
                 }
-            }
 
-            // ── Tip callout ───────────────────────────────────────────────
-            if let tip = page.tipText {
-                HStack(alignment: .top, spacing: 10) {
-                    Image(systemName: "lightbulb.fill")
-                        .foregroundColor(.yellow)
-                        .font(.callout)
-                        .padding(.top, 1)
-                    Text(markdownString: tip)
-                        .font(.callout)
-                        .fixedSize(horizontal: false, vertical: true)
+                Divider()
+                    .padding(.vertical, 10)
+
+                // Body paragraphs
+                VStack(alignment: .leading, spacing: 7) {
+                    ForEach(page.bodyParagraphs.indices, id: \.self) { i in
+                        Text(markdownString: page.bodyParagraphs[i])
+                            .font(.callout)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .lineSpacing(1.5)
+                    }
                 }
-                .padding(12)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .background(Color.yellow.opacity(0.07))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(Color.yellow.opacity(0.25), lineWidth: 1)
-                )
-                .cornerRadius(8)
-                .padding(.top, 16)
+
+                // Tip callout
+                if let tip = page.tipText {
+                    HStack(alignment: .top, spacing: 8) {
+                        Image(systemName: "lightbulb.fill")
+                            .foregroundColor(.yellow)
+                            .font(.footnote)
+                            .padding(.top, 1)
+                        Text(markdownString: tip)
+                            .font(.footnote)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                    .padding(10)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color.yellow.opacity(0.07))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .strokeBorder(Color.yellow.opacity(0.25), lineWidth: 1)
+                    )
+                    .cornerRadius(7)
+                    .padding(.top, 12)
+                }
             }
+            .padding(.horizontal, 28)
+            .padding(.bottom, 20)
         }
     }
 }
