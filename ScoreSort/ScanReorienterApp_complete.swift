@@ -1655,14 +1655,11 @@ struct ShortcutsHelpView: View {
                     shortcutRow("P", "Toggle preset sidebar")
                     shortcutRow("⌘,", "Open Preferences — create & edit presets")
                 }
-
-                shortcutSection("Tabs") {
-                    shortcutRow("⌘1", "Combine PDFs")
-                    shortcutRow("⌘2", "Rename Files")
-                    shortcutRow("⌘3", "Split PDF")
-                    shortcutRow("⌘4", "Rotate Pages")
+                
+                shortcutSection("Renamer") {
+                    shortcutRow("⌘,", "Open Preferences")
                 }
-
+                
                 shortcutSection("Split PDF") {
                     shortcutRow("← / →", "Previous / next page")
                     shortcutRow("⌘← / ⌘→", "First / last page")
@@ -1670,15 +1667,19 @@ struct ShortcutsHelpView: View {
                     shortcutRow("↑ / ↓", "Jump between output files")
                     shortcutRow("⌫", "Toggle skip on selected output file(s)")
                 }
-
+                
                 shortcutSection("Rotate Pages") {
                     shortcutRow("← / →", "Previous / next page")
                     shortcutRow(", / .", "Rotate current page left / right")
                 }
-
-                shortcutSection("Renamer") {
-                    shortcutRow("⌘,", "Open Preferences")
+                
+                shortcutSection("Tabs") {
+                    shortcutRow("⌘1", "Combine PDFs")
+                    shortcutRow("⌘2", "Rename Files")
+                    shortcutRow("⌘3", "Split PDF")
+                    shortcutRow("⌘4", "Rotate Pages")
                 }
+
 
                 HStack {
                     Spacer()
@@ -1752,9 +1753,10 @@ struct WelcomeTourPage {
             bodyParagraphs: [
                 "This app contains a suite of tools for music librarians, music educators, publishers and copyists for working with scanned or digital music PDFs.",
                 "Each tab handles a different stage of a typical workflow, arranged in order from most commonly used to least common — this short tour gives you a quick overview of each one.",
-                "The app is designed to work closely with the macOS Finder. Usually the easiest way to get files into the app will be by dragging files or folders onto the relevant page of this app."
+                "The app is designed to work closely with the macOS Finder. Usually the easiest way to get files into the app will be by dragging files or folders onto the relevant page of this app.",
+                "You can return to this tour at any time via **Help → Welcome Tour**."
             ],
-            tipText: "You can return to this tour at any time via **Help → Welcome Tour**. If your files live in Google Drive or Dropbox, install the desktop app so your folders appear in Finder.",
+            tipText: "If your files live in Google Drive or Dropbox, install the desktop app so your folders appear in Finder.",
             imageName: nil
         ),
 
