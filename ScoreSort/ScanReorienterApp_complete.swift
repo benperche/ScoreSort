@@ -1762,12 +1762,12 @@ struct WelcomeTourPage {
             useCase: "You have separate PDF files — one per instrument part — and want to merge them into a single document, ready to print all in one go.",
             bodyParagraphs: [
                 "Drag your files (or a whole folder) into the app, then reorder files with **⌘↑ / ⌘↓**. ",
-                "You can save your usual instrument allocations as **Ensemble Presets** in Preferences.) These can be viewed in the Presets sidebar to help you remember the normal number of parts required. Use **Apply to Files** to attempt to automatically match your preset allocations to your filenames.",
+                "You can save your usual instrument allocations as **Ensemble Presets** in Preferences. These can be viewed in the Presets sidebar to help you remember the normal number of parts required. Use **Apply to Files** to attempt to automatically match your preset allocations to your filenames.",
                 "When ready, click **Create PDF** to save the combined file, or **Open in Preview** to print directly without saving a new document.",
-                "**Advanced: Collate Sets:** Select a group of parts and press **C** to interleave their pages in the output document. Ideal where you have a number of parts required for multiple players, for example in a percussion section, — each player's copies will print together in a  ready-to-distribute stack."
+                "**Advanced: Collate Sets:** Select a group of parts and press **C** to interleave their pages in the output document. Ideal where you have a number of parts required for multiple players, for example in a percussion section — each player's copies will print together in a ready-to-distribute stack."
             ],
             tipText: "⌫ removes selected files · ⌘Z undoes any change · ⌘↑ / ⌘↓ reorders",
-            imageName: nil
+            imageName: "tour-combiner"
         ),
 
         // ── Page 3: Rename Files ──────────────────────────────────────────
@@ -1776,18 +1776,33 @@ struct WelcomeTourPage {
             iconColor: .orange,
             tabShortcut: "⌘2",
             title: "Rename Files",
-            useCase: "You have a folder of parts with unhelpful filenames (e.g. `scan001.pdf`) and want to rename them consistently, or have them sort into score order.",
+            useCase: "You have a folder of parts with unhelpful filenames (e.g. `scan001.pdf`) and want to rename them consistently.",
             bodyParagraphs: [
-                "Drag a folder onto the **left side** to add score-order prefixes to already-named files (e.g. `01 - Beethoven - Flute.pdf`). Adjust the order as needed and re-number in one go.",
-                "Drag a folder onto the **right side** to replace the filenames of multiple files at once — for example for  parts downloaded from IMSLP. The preview window will show the top left of each file by default so you can check which part you are renaming, and you can move this preview around for all parts at once if required.",
-                "Enter a base name (e.g. `Beethoven Symphony 5`), then fill in each instrument name. The app intelligently suggests instrument names and numbers as you type, and you can accept suggestions with the arrow keys and Return.",
-                "Once all names are filled in, toggle **Prefix score order** to step through the score-order flow described above, or else skip to output files to a specified folder."
+                "Drag a folder onto the **right side** to replace the filenames of multiple files at once — for example for parts downloaded from IMSLP. A preview window shows the top of each file so you can identify each part.",
+                "Enter a base name (e.g. `Beethoven Symphony 5`), then fill in each instrument name. The app intelligently suggests instrument names and numbers as you type — accept suggestions with the arrow keys and Return.",
+                "Once all names are filled in, toggle **Prefix score order** to step through the score-order flow, or skip straight to saving files to a chosen folder."
             ],
             tipText: "Tab moves between instrument name fields · You can change the default score order in Preferences",
-            imageName: nil
+            imageName: "tour-renamer"
         ),
 
-        // ── Page 4: Split PDF ─────────────────────────────────────────────
+        // ── Page 4: Score Order Sorter ────────────────────────────────────
+        WelcomeTourPage(
+            icon: "list.number",
+            iconColor: .orange,
+            tabShortcut: "⌘2",
+            title: "Score Order Sorter",
+            useCase: "You have a folder of already-named parts and want to add score-order prefix numbers so they sort correctly in Finder.",
+            bodyParagraphs: [
+                "Drag a folder onto the **left side** of the Rename Files tab. The app detects instrument names and assigns sequential prefix numbers automatically (e.g. `01 - Beethoven - Flute.pdf`).",
+                "Files whose instrument name isn't recognised appear at the top, highlighted in orange — double-click any of them to assign a number manually.",
+                "Adjust the order as needed using the up/down arrows, then click **Rename Files** to apply."
+            ],
+            tipText: "Switch between Wind Band, Jazz Band, and Orchestra orderings to match your ensemble",
+            imageName: "tour-score-order"
+        ),
+
+        // ── Page 5: Split PDF ─────────────────────────────────────────────
         WelcomeTourPage(
             icon: "scissors",
             iconColor: .green,
@@ -1799,10 +1814,10 @@ struct WelcomeTourPage {
                 "In Step 2, name each output file — the same flow as Rename Files. Toggle **Prefix score order** to add score-order numbers automatically in Step 3."
             ],
             tipText: "⌘← / ⌘→ jumps to the first or last page · Space toggles a split marker",
-            imageName: nil
+            imageName: "tour-splitter"
         ),
 
-        // ── Page 5: Rotate Pages ──────────────────────────────────────────
+        // ── Page 6: Rotate Pages ──────────────────────────────────────────
         WelcomeTourPage(
             icon: "rotate.right",
             iconColor: .purple,
@@ -1814,7 +1829,7 @@ struct WelcomeTourPage {
                 "Save the corrected PDF when you're done."
             ],
             tipText: "← → navigates pages · rotating odd/even pages is useful for two-sided landscape scans",
-            imageName: nil
+            imageName: "tour-rotator"
         ),
     ]
 }
@@ -1927,7 +1942,7 @@ struct TourPageContentView: View {
             // ── Optional screenshot / GIF image ───────────────────────────
             if let name = page.imageName {
                 TourImageView(imageName: name)
-                    .aspectRatio(16 / 9, contentMode: .fit)
+                    .aspectRatio(contentMode: .fit)
                     .cornerRadius(8)
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)

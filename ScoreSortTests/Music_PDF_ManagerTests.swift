@@ -6,7 +6,7 @@
 import Testing
 import Foundation
 import PDFKit
-@testable import Music_PDF_Manager
+@testable import ScoreSort
 
 // MARK: - Shared test helpers
 
