@@ -2592,13 +2592,56 @@ struct ScoreOrderSortView: View {
 
     // ── File list ─────────────────────────────────────────────────────────
     private var fileListView: some View {
-        ScrollView {
+        let undetected = renamerManager.operations.filter { $0.newName.isEmpty }
+        let detected   = renamerManager.operations.filter { !$0.newName.isEmpty }
+        return ScrollView {
             LazyVStack(spacing: 0) {
-                ForEach(renamerManager.operations) { operation in
-                    ScoreOrderFileRow(operation: operation) {
-                        selectedFileForAssignment = operation
+                // Undetected section
+                if !undetected.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundColor(.orange)
+                            .font(.caption)
+                        Text("Unmatched — instrument not recognised")
+                            .font(.caption)
+                            .foregroundColor(.orange)
+                        Spacer()
                     }
-                    Divider()
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Color.orange.opacity(0.10))
+
+                    ForEach(undetected) { operation in
+                        ScoreOrderFileRow(operation: operation, isUnmatched: true) {
+                            selectedFileForAssignment = operation
+                        }
+                        Divider()
+                    }
+                }
+
+                // Detected section
+                if !detected.isEmpty {
+                    if !undetected.isEmpty {
+                        HStack(spacing: 6) {
+                            Image(systemName: "checkmark.circle.fill")
+                                .foregroundColor(.secondary)
+                                .font(.caption)
+                            Text("Matched")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                        }
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 6)
+                        .background(Color(NSColor.controlBackgroundColor))
+                    }
+
+                    ForEach(detected) { operation in
+                        ScoreOrderFileRow(operation: operation) {
+                            selectedFileForAssignment = operation
+                        }
+                        Divider()
+                    }
                 }
             }
         }
@@ -2665,6 +2708,7 @@ struct ScoreOrderSortView: View {
 /// One row in the Score Order Sorter list — matches the visual style of PrefixOrderRow.
 private struct ScoreOrderFileRow: View {
     let operation: RenameOperation
+    var isUnmatched: Bool = false
     let onDoubleClick: () -> Void
     @State private var isHovered = false
 
@@ -2741,7 +2785,11 @@ private struct ScoreOrderFileRow: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 8)
-        .background(isHovered ? Color.accentColor.opacity(0.05) : Color.clear)
+        .background(
+            isHovered ? Color.accentColor.opacity(0.05)
+            : isUnmatched ? Color.orange.opacity(0.06)
+            : Color.clear
+        )
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { onDoubleClick() }
         .onHover { isHovered = $0 }
@@ -4115,12 +4163,12 @@ class RenamerManager: ObservableObject {
             operations.append(op)
         }
         
-        // Sort by new filename
+        // Sort: undetected files first (so they are immediately visible), then by new filename
         operations.sort { op1, op2 in
             if op1.newName.isEmpty && !op2.newName.isEmpty {
-                return false
+                return true   // undetected before detected
             } else if !op1.newName.isEmpty && op2.newName.isEmpty {
-                return true
+                return false  // detected after undetected
             } else if op1.newName.isEmpty && op2.newName.isEmpty {
                 return op1.originalName < op2.originalName
             } else {
