@@ -3718,13 +3718,15 @@ struct CombinerPreferencesView: View {
                     .buttonStyle(.plain)
 
                     Button {
+                        // Fall back to first preset if selection was lost
+                        if selectedId == nil { selectedId = presetStore.presets.first?.id }
                         if selectedId != nil { showingDeleteConfirm = true }
                     } label: {
                         Image(systemName: "minus")
                             .frame(width: 28, height: 24)
                     }
                     .buttonStyle(.plain)
-                    .disabled(selectedId == nil)
+                    .disabled(presetStore.presets.isEmpty)
 
                     Divider()
                         .frame(height: 16)
@@ -3904,11 +3906,19 @@ struct CombinerPreferencesView: View {
             }
         }
         .onAppear {
-            selectedId = presetStore.presets.first?.id
-            editingPreset = presetStore.presets.first
+            if selectedId == nil || !presetStore.presets.contains(where: { $0.id == selectedId }) {
+                selectedId = presetStore.presets.first?.id
+            }
+            editingPreset = presetStore.presets.first { $0.id == selectedId }
         }
         .onChange(of: selectedId) { _, newId in
             editingPreset = presetStore.presets.first { $0.id == newId }
+        }
+        .onChange(of: presetStore.presets) { _, updated in
+            // If selection was lost (e.g. after rapid import), restore it
+            if selectedId == nil || !updated.contains(where: { $0.id == selectedId }) {
+                selectedId = updated.first?.id
+            }
         }
         // Keep the right panel in sync when the store is changed externally
         // (e.g. "Save to Preset" from the sidebar while preferences is open).
