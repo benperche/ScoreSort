@@ -1163,6 +1163,10 @@ struct PresetPartRow: View {
     var isUnmatched: Bool = false
     var onMarkDirty: () -> Void
     var onDelete: () -> Void
+    /// Pass non-nil to show up/down reorder buttons (preferences panel).
+    /// Leave nil to hide them (sidebar).
+    var onMoveUp: (() -> Void)? = nil
+    var onMoveDown: (() -> Void)? = nil
 
     // Name editing
     @State private var isEditingName = false
@@ -1176,6 +1180,25 @@ struct PresetPartRow: View {
 
     var body: some View {
         HStack(spacing: 4) {
+            // Up / down reorder buttons (preferences only)
+            if onMoveUp != nil || onMoveDown != nil {
+                VStack(spacing: 1) {
+                    Button { onMoveUp?() } label: {
+                        Image(systemName: "chevron.up").font(.system(size: 9, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(onMoveUp == nil)
+
+                    Button { onMoveDown?() } label: {
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .medium))
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(onMoveDown == nil)
+                }
+                .foregroundColor(.secondary)
+                .padding(.trailing, 2)
+            }
+
             // Name — double-click to rename inline
             if isEditingName {
                 TextField("", text: $nameText)
@@ -3824,7 +3847,7 @@ struct CombinerPreferencesView: View {
 
                     Divider()
 
-                    Text("Parts (drag to reorder):")
+                    Text("Parts:")
                         .fontWeight(.medium)
                         .padding(.horizontal, 12)
                         .padding(.top, 10)
@@ -3832,14 +3855,16 @@ struct CombinerPreferencesView: View {
 
                     List {
                         ForEach(editingPreset?.parts ?? [], id: \.id) { part in
+                            let idx = editingPreset?.parts.firstIndex(where: { $0.id == part.id }) ?? 0
+                            let count = editingPreset?.parts.count ?? 0
                             PresetPartRow(
                                 part: Binding(
                                     get: {
                                         editingPreset?.parts.first { $0.id == part.id } ?? part
                                     },
                                     set: { newVal in
-                                        if let idx = editingPreset?.parts.firstIndex(where: { $0.id == part.id }) {
-                                            editingPreset?.parts[idx] = newVal
+                                        if let i = editingPreset?.parts.firstIndex(where: { $0.id == part.id }) {
+                                            editingPreset?.parts[i] = newVal
                                         }
                                     }
                                 ),
@@ -3850,12 +3875,16 @@ struct CombinerPreferencesView: View {
                                         editingPreset?.parts = renumberAfterDeletion(updated)
                                     }
                                     saveEditing()
-                                }
+                                },
+                                onMoveUp: idx > 0 ? {
+                                    editingPreset?.parts.move(fromOffsets: IndexSet(integer: idx), toOffset: idx - 1)
+                                    saveEditing()
+                                } : nil,
+                                onMoveDown: idx < count - 1 ? {
+                                    editingPreset?.parts.move(fromOffsets: IndexSet(integer: idx), toOffset: idx + 2)
+                                    saveEditing()
+                                } : nil
                             )
-                        }
-                        .onMove { from, to in
-                            editingPreset?.parts.move(fromOffsets: from, toOffset: to)
-                            saveEditing()
                         }
                     }
                     .listStyle(.bordered)
