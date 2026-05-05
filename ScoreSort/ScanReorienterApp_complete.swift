@@ -2147,6 +2147,87 @@ class EnsemblePresetStore: ObservableObject {
         save()
     }
 
+    func duplicatePreset(_ id: UUID) {
+        guard let original = presets.first(where: { $0.id == id }) else { return }
+        let copy = EnsemblePreset(
+            id: UUID(),
+            name: "Copy of \(original.name)",
+            parts: original.parts.map { PresetPart(id: UUID(), name: $0.name, copies: $0.copies) }
+        )
+        if let idx = presets.firstIndex(where: { $0.id == id }) {
+            presets.insert(copy, at: idx + 1)
+        } else {
+            presets.append(copy)
+        }
+        selectedPresetId = copy.id
+        save()
+    }
+
+    func exportCSV() -> String {
+        var lines = ["Preset Name,Part Name,Copies"]
+        for preset in presets {
+            for part in preset.parts {
+                func escape(_ s: String) -> String {
+                    s.contains(",") || s.contains("\"") ? "\"\(s.replacingOccurrences(of: "\"", with: "\"\""))\"" : s
+                }
+                lines.append("\(escape(preset.name)),\(escape(part.name)),\(part.copies)")
+            }
+        }
+        return lines.joined(separator: "\n")
+    }
+
+    func importCSV(_ string: String) {
+        var partsByPreset: [String: [PresetPart]] = [:]
+        var order: [String] = []
+        let lines = string.components(separatedBy: .newlines).dropFirst()
+        for line in lines {
+            let trimmed = line.trimmingCharacters(in: .whitespaces)
+            guard !trimmed.isEmpty else { continue }
+            let fields = Self.parseCSVLine(trimmed)
+            guard fields.count >= 2 else { continue }
+            let presetName = fields[0]
+            let partName   = fields[1]
+            let copies     = fields.count >= 3 ? (Int(fields[2]) ?? 1) : 1
+            if partsByPreset[presetName] == nil {
+                partsByPreset[presetName] = []
+                order.append(presetName)
+            }
+            partsByPreset[presetName]?.append(PresetPart(name: partName, copies: copies))
+        }
+        for name in order {
+            if let parts = partsByPreset[name], !parts.isEmpty {
+                addPreset(name: name, parts: parts)
+            }
+        }
+    }
+
+    private static func parseCSVLine(_ line: String) -> [String] {
+        var fields: [String] = []
+        var current = ""
+        var inQuotes = false
+        var i = line.startIndex
+        while i < line.endIndex {
+            let ch = line[i]
+            if ch == "\"" {
+                let next = line.index(after: i)
+                if inQuotes && next < line.endIndex && line[next] == "\"" {
+                    current.append("\"")
+                    i = line.index(after: next)
+                    continue
+                }
+                inQuotes.toggle()
+            } else if ch == "," && !inQuotes {
+                fields.append(current)
+                current = ""
+            } else {
+                current.append(ch)
+            }
+            i = line.index(after: i)
+        }
+        fields.append(current)
+        return fields
+    }
+
     // MARK: - Built-in templates
 
     static let windBandTemplate: [PresetPart] = [
@@ -3598,6 +3679,7 @@ struct CombinerPreferencesView: View {
     @State private var editingPreset: EnsemblePreset?
     @State private var newPartName: String = ""
     @State private var showingAddPreset = false
+    @State private var showingDeleteConfirm = false
 
     var body: some View {
         HSplitView {
@@ -3605,7 +3687,20 @@ struct CombinerPreferencesView: View {
             VStack(spacing: 0) {
                 List(selection: $selectedId) {
                     ForEach(presetStore.presets) { preset in
-                        Text(preset.name).tag(preset.id)
+                        Text(preset.name)
+                            .tag(preset.id)
+                            .contextMenu {
+                                Button("Duplicate") {
+                                    presetStore.duplicatePreset(preset.id)
+                                    selectedId = presetStore.selectedPresetId
+                                    editingPreset = presetStore.selectedPreset
+                                }
+                                Divider()
+                                Button("Delete…", role: .destructive) {
+                                    selectedId = preset.id
+                                    showingDeleteConfirm = true
+                                }
+                            }
                     }
                     .onMove { from, to in
                         presetStore.movePresets(from: from, to: to)
@@ -3623,17 +3718,13 @@ struct CombinerPreferencesView: View {
                     .buttonStyle(.plain)
 
                     Button {
-                        if let id = selectedId {
-                            presetStore.deletePreset(id)
-                            selectedId = presetStore.presets.first?.id
-                            editingPreset = presetStore.selectedPreset
-                        }
+                        if selectedId != nil { showingDeleteConfirm = true }
                     } label: {
                         Image(systemName: "minus")
                             .frame(width: 28, height: 24)
                     }
                     .buttonStyle(.plain)
-                    .disabled(presetStore.presets.count <= 1)
+                    .disabled(selectedId == nil)
 
                     Divider()
                         .frame(height: 16)
@@ -3675,6 +3766,39 @@ struct CombinerPreferencesView: View {
                     }())
 
                     Spacer()
+
+                    Divider()
+                        .frame(height: 16)
+                        .padding(.horizontal, 2)
+
+                    Menu {
+                        Button("Export All Presets…") {
+                            let csv = presetStore.exportCSV()
+                            let panel = NSSavePanel()
+                            panel.nameFieldStringValue = "ScoreSort Presets.csv"
+                            panel.allowedContentTypes = [.commaSeparatedText]
+                            if panel.runModal() == .OK, let url = panel.url {
+                                try? csv.write(to: url, atomically: true, encoding: .utf8)
+                            }
+                        }
+                        Button("Import Presets from CSV…") {
+                            let panel = NSOpenPanel()
+                            panel.allowedContentTypes = [.commaSeparatedText]
+                            panel.allowsMultipleSelection = false
+                            if panel.runModal() == .OK, let url = panel.url,
+                               let csv = try? String(contentsOf: url, encoding: .utf8) {
+                                presetStore.importCSV(csv)
+                                selectedId = presetStore.presets.last?.id
+                                editingPreset = presetStore.presets.last
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis.circle")
+                            .frame(width: 24, height: 24)
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .frame(width: 24)
                 }
                 .padding(.horizontal, 4)
                 .padding(.vertical, 4)
@@ -3800,6 +3924,20 @@ struct CombinerPreferencesView: View {
                 presetStore.addPreset(name: name, parts: parts)
                 selectedId = presetStore.presets.last?.id
                 editingPreset = presetStore.presets.last
+            }
+        }
+        .alert("Delete Preset?", isPresented: $showingDeleteConfirm) {
+            Button("Delete", role: .destructive) {
+                if let id = selectedId {
+                    presetStore.deletePreset(id)
+                    selectedId = presetStore.presets.first?.id
+                    editingPreset = presetStore.presets.first
+                }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            if let name = presetStore.presets.first(where: { $0.id == selectedId })?.name {
+                Text("\"\(name)\" will be permanently deleted.")
             }
         }
     }
