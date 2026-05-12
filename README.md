@@ -306,7 +306,6 @@ All orders are fully customisable in Preferences → Renamer.
 ## Known Issues & Limitations
 
 - **File naming**: Uses substring matching — very similar instrument names may occasionally need manual override
-- **Drag & drop**: Currently only supports single folder/file drops at a time
 
 ## Contributing
 
