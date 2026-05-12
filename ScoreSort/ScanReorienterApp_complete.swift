@@ -5179,32 +5179,60 @@ func splitSizes(totalPages: Int, stride: Int) -> [Int] {
     return sizes
 }
 
-/// Reads the top-level PDF outline (bookmarks) and returns a fileSizes array
-/// where each entry is the page count of the section between consecutive bookmarks.
-/// Returns nil if the document has no usable top-level bookmarks.
-func splitSizesFromBookmarks(_ document: PDFDocument) -> [Int]? {
+/// Reads the top-level PDF outline and returns fileSizes (page counts per section)
+/// and the corresponding bookmark labels, both ordered by page position.
+/// Returns nil if the document has fewer than two usable top-level bookmarks.
+func splitSizesFromBookmarks(_ document: PDFDocument) -> (sizes: [Int], labels: [String])? {
     let totalPages = document.pageCount
     guard totalPages > 0,
           let root = document.outlineRoot,
           root.numberOfChildren > 0 else { return nil }
 
-    var markers: Set<Int> = []
+    var entries: [(pageIndex: Int, label: String)] = []
     for i in 0..<root.numberOfChildren {
         guard let item = root.child(at: i),
               let page = item.destination?.page else { continue }
         let idx = document.index(for: page)
-        if idx > 0 && idx < totalPages { markers.insert(idx) }
+        guard idx < totalPages else { continue }
+        entries.append((pageIndex: idx, label: item.label ?? ""))
     }
+    entries.sort { $0.pageIndex < $1.pageIndex }
+
+    let markers = entries.compactMap { $0.pageIndex > 0 ? $0.pageIndex : nil }
     guard !markers.isEmpty else { return nil }
 
     var sizes: [Int] = []
     var prev = 0
-    for marker in markers.sorted() {
+    for marker in markers {
         sizes.append(marker - prev)
         prev = marker
     }
     sizes.append(totalPages - prev)
-    return sizes
+    return (sizes: sizes, labels: entries.map { $0.label })
+}
+
+/// Parses bookmark labels of the form "NN - Piecename - Partname" and extracts
+/// a shared base name and per-file suffixes. Returns nil if any label doesn't
+/// match the pattern or piece names are inconsistent across labels.
+func extractSplitNames(from labels: [String]) -> (baseName: String, suffixes: [String])? {
+    guard !labels.isEmpty else { return nil }
+    var pieceName: String? = nil
+    var suffixes: [String] = []
+    for label in labels {
+        let parts = label.components(separatedBy: " - ")
+        guard parts.count >= 3,
+              parts[0].allSatisfy({ $0.isNumber }) else { return nil }
+        let piece = parts[1]
+        let part = parts[2...].joined(separator: " - ")
+        if let existing = pieceName {
+            guard piece == existing else { return nil }
+        } else {
+            pieceName = piece
+        }
+        suffixes.append(part)
+    }
+    guard let baseName = pieceName, !baseName.isEmpty else { return nil }
+    return (baseName: baseName, suffixes: suffixes)
 }
 
 // MARK: - Split View
@@ -5351,17 +5379,28 @@ struct SplitView: View {
             if newValue != nil {
                 // New PDF loaded — reset the entire split flow so no state from
                 // a previous file can survive into the naming or prefix stages.
-                baseFileName = pdfManager.currentFileName ?? ""
                 isViewFocused = true
-                if let doc = newValue, let bookmarkSizes = splitSizesFromBookmarks(doc) {
-                    fileSizes = bookmarkSizes
-                } else {
-                    fileSizes = totalPages > 0 ? [totalPages] : []
-                }
                 customFileNames.removeAll()
                 previewOffset = .zero
                 skippedPages = []
                 selectedFileIndices = []
+
+                let bookmarkData = newValue.flatMap { splitSizesFromBookmarks($0) }
+                if let data = bookmarkData {
+                    fileSizes = data.sizes
+                    if let names = extractSplitNames(from: data.labels) {
+                        baseFileName = names.baseName
+                        for (i, suffix) in names.suffixes.enumerated() {
+                            customFileNames[i] = suffix
+                        }
+                    } else {
+                        baseFileName = pdfManager.currentFileName ?? ""
+                    }
+                } else {
+                    fileSizes = totalPages > 0 ? [totalPages] : []
+                    baseFileName = pdfManager.currentFileName ?? ""
+                }
+
                 // Return to the split stage if we were somewhere else
                 // (e.g. user loaded a new file straight from the summary screen).
                 if splitStage != .split { splitStage = .split }
