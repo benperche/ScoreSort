@@ -33,9 +33,9 @@ The app is designed to work closely with the macOS Finder. Usually the easiest w
 **Use-case:** You have a set of separate PDF files — one per instrument part — and want to merge them into a single combined document ready for printing all in one go.
 
 **Body:**
-Drag your files or a whole folder into the file list, then reorder with ⌘↑ / ⌘↓ or by dragging.
+Drag your files or a whole folder into the file list, then reorder with ⌘↑ / ⌘↓ or by dragging. You can also drag in image files (JPEG, PNG, TIFF etc.) and they will be converted to A4 pages in the output automatically.
 You can save your usual instrument allocations as **Ensemble Presets** (Preferences → Combiner). These can be viewed in the Presets sidebar to help you remember the normal number of parts required. You can even use the **Apply to Files** button, which will attempt to match these allocations to the filenames of the parts you have dragged in.
-Once you have set the number of parts required, you can save the combined file using **Create PDF**, or just **Open in Preview** to be able to print without saving the document.
+Once you have set the number of parts required, you can save the combined file using **Create PDF**, or just **Open in Preview** to be able to print without saving the document. The combined PDF includes a table of contents (visible in Preview's sidebar) with a bookmark for each file.
 Advanced: You can create a **Collate Set** for subsets of parts you want to print multiple times per player (select them and press **C**) so the pages are interleaved correctly for the correct page order. For example, if you need to print all percussion parts for each player in the ensemble, you can create a set of all the percussion parts, set the number of copies you need, and these will then come out of the printer in stacks ready to distribute without having to resort after printing.
 
 
@@ -71,7 +71,7 @@ Drag a folder onto the **right side** to replace the filenames of a number of fi
 **Use-case:** You have one large PDF — e.g. a complete scan of all parts bound together — and need to split it into separate instrument files.
 
 **Body:**
-Drop the PDF and use **← →** to move through pages. Press **Space** to place or remove a split marker, and **↑ ↓** to jump between the start of each output file. You can also automatically apply equally spaced markers at a certain 'stride'.
+Drop the PDF and use **← →** to move through pages. Press **Space** to place or remove a split marker, and **↑ ↓** to jump between the start of each output file. You can also automatically apply equally spaced markers at a certain 'stride'. If the PDF was created by ScoreSort's combiner, split points and file names are filled in automatically from the embedded bookmarks.
 In Step 2, name each output file (like in the Rename Files flow). Toggle **Prefix score order** to add score-order numbers automatically in Step 3 (again, like in the Rename Files flow).
 
 **Tip:** ⌘← / ⌘→ jumps to the first or last page in the split dialogue · Space toggles a split marker

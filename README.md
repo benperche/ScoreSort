@@ -7,13 +7,15 @@ A powerful macOS application for managing music PDFs with four tools for musicia
 ### 📎 PDF Combiner
 Combine multiple PDF files into a single document with flexible copying and page management.
 
-- **Drag-and-drop or browse** to add multiple PDF files
+- **Drag-and-drop or browse** to add PDF files or images (JPEG, PNG, TIFF, HEIC, BMP, GIF); multi-frame TIFFs appear as a single entry with the correct page count
+- **Add blank pages** — insert a blank A4 page at any position in the list
 - **Specify copies** for each file (great for printing multiple parts)
 - **Collate groups** — select files and press `C` to create a group whose copies are printed *interleaved*: 4 copies of [Perc 1, Perc 2, Timpani] → P1, P2, T, P1, P2, T, … ready to hand out by player
 - **Reorder files** with Move Up/Down buttons; groups always move as a unit
 - **Ensemble Presets** — save named instrument lists (Wind Band, Jazz Band, Orchestra, or your own) with per-part copy counts; drag in files, click "Apply to Files" and copy counts are set automatically
 - **Smart preset matching** — handles roman-numeral filenames (Violin I/II → matches Violin 1/2 preset parts) and single-file consolidation (one Flute.pdf against Flute 1 + Flute 2 in preset → summed copies)
 - **Smart blank pages** — automatically add blank sheets after odd-page files for double-sided printing
+- **Automatic table of contents** — the combined PDF includes bookmarks for each file, visible in Preview's sidebar; multiple copies are labelled "Filename 1/3", "Filename 2/3", etc.
 - **Open in Preview** — opens combined PDF in Preview for quick printing (⌘P)
 - **Or save to file** — create a permanent combined PDF document
 - **Selection tools** — Select All, Select None, Remove selected files
@@ -45,6 +47,7 @@ Split a large PDF — for example a complete scan of all parts bound together �
 - **Visual page preview** with keyboard navigation (including first/last page jumps)
 - **Click-to-toggle split points** directly on the page strip
 - **Auto-split by stride** — split every N pages with a single click
+- **Bookmark-aware loading** — if the PDF was produced by ScoreSort's combiner, split points and file names are pre-populated automatically from the embedded table of contents
 - **Three-step workflow** — Step 1: mark split points; Step 2: name each output file; Step 3 (optional): apply score-order prefix numbering
 - **Smart naming stage** — zoomed-in crop of each file's first page shows the instrument name corner, with a minimap overlay so you can orient yourself on the page
 - **Instrument name autocomplete** — suggestions drawn from all ensemble presets, ordered by what's most likely to come next; automatically advances to the next instrument family (e.g. "Oboe 1" after "Flute 2")
@@ -106,9 +109,10 @@ git clone https://github.com/benperche/ScoreSort.git
 
 ### PDF Combiner
 
-1. **Add PDF files**
-   - Drag and drop PDFs onto the window
+1. **Add files**
+   - Drag and drop PDFs or images (JPEG, PNG, TIFF, HEIC, BMP, GIF) onto the window
    - Or click "Add Files" to browse
+   - Click "Add Blank Page" to insert a blank A4 page after the selected file
 
 2. **Set copy counts** for each file
    - Use + / − buttons, or double-click the number to type directly

@@ -58,10 +58,11 @@ Window min size: 900×700.
 struct CombineFile: Identifiable, Equatable {
     let id: UUID          // auto-generated
     let url: URL
-    let name: String      // url.lastPathComponent (includes .pdf extension)
+    let name: String      // url.lastPathComponent (includes extension)
     let pageCount: Int
     var copies: Int       // ignored when collateGroupId is set
     var collateGroupId: UUID?   // non-nil → file belongs to a collate group
+    var isBlankPage: Bool = false  // synthetic blank A4 entry; url is unused
 }
 
 /// A named set of files whose pages are interleaved when combining.
@@ -85,7 +86,8 @@ struct CollateGroup: Identifiable, Equatable {
 #### File management methods
 | Method | Notes |
 |--------|-------|
-| `addFiles(urls:undoManager:)` | Reads PDFs via PDFKit, appends `CombineFile` with `copies=1`, no group |
+| `addFiles(urls:undoManager:)` | Accepts PDFs and images (JPEG, PNG, TIFF, HEIC, BMP, GIF). PDFs use `PDFDocument.pageCount`; images use `CGImageSourceGetCount` for frame count. Appends `CombineFile` with `copies=1`, no group. |
+| `addBlankPage(after:undoManager:)` | Inserts a synthetic blank A4 `CombineFile` (`isBlankPage=true`) after the last selected file, or at the end if nothing is selected. |
 | `removeFiles(ids:undoManager:)` | Removes files; auto-dissolves any group that drops below 2 members |
 | `updateCopies(for:copies:undoManager:)` | Clamps to min 1; applies to standalone file only |
 | `clearAll(undoManager:)` | Clears both `files` and `collateGroups` |
@@ -106,11 +108,16 @@ struct CollateGroup: Identifiable, Equatable {
 - **Group:** contributes `memberCount × group.copies` / `sumOfMemberPages × group.copies`
 
 #### PDF output
-`createCombinedPDF(to:addBlankPages:completion:)` and `openInPreview(addBlankPages:onError:)` both use a nested `addPages(from:)` helper and a single `while i < files.count` loop that detects groups:
-- **Standalone:** `for _ in 0..<file.copies { addPages(from: file) }`
-- **Group:** collect all consecutive files with the same `collateGroupId`, then `for _ in 0..<group.copies { for f in groupFiles { addPages(from: f) } }`
+`createCombinedPDF(to:addBlankPages:completion:)` and `openInPreview(addBlankPages:onError:)` both use a nested `addPages(from:copyIndex:totalCopies:)` helper and a single `while i < files.count` loop that detects groups:
+- **Standalone:** `for ci in 0..<file.copies { addPages(from: file, copyIndex: ci, totalCopies: file.copies) }`
+- **Group:** collect all consecutive files with the same `collateGroupId`, then `for ci in 0..<group.copies { for f in groupFiles { addPages(from: f, copyIndex: ci, totalCopies: group.copies) } }`
 
-Blank-page logic is unchanged: if `addBlankPages` and a file has an odd `pageCount`, a blank `PDFPage` is inserted after its pages.
+Inside `addPages(from:copyIndex:totalCopies:)`:
+- **Blank page entries** (`isBlankPage == true`): insert one A4 `PDFPage` via `createBlankPage()` and return.
+- **Image files** (extension ≠ `"pdf"`): call `pdfPages(fromImageAt:)` which uses `CGImageSource` to iterate frames, renders each onto an A4 canvas via `makeA4Page(from:)` (scaled to fit, white background, aspect ratio preserved), and returns the array of `PDFPage`s.
+- **PDF files**: load `PDFDocument(url:)`, copy pages. If `addBlankPages` and page count is odd, append a blank page.
+
+A `bookmarks` array of `(label: String, pageIndex: Int)` is accumulated during the loop. The label is the filename (without extension) for single-copy files, or `"Filename N/Total"` for multi-copy. Blank pages are not bookmarked. After all pages are inserted, a `PDFOutline` tree is built from the bookmarks array and assigned to `doc.outlineRoot`, producing a table of contents visible in Preview's sidebar.
 
 ### CombineView
 
@@ -395,12 +402,16 @@ The split state is stored as an **ordered array of page counts**, one entry per 
 @State private var customFileNames: [Int: String] = [:]  // fileIndex → suffix
 ```
 
+When a new PDF loads, `fileSizes` is pre-populated via `splitSizesFromBookmarks` if the document has a top-level outline. If the bookmark labels match the `"NN - Piecename - Partname"` pattern (as produced by ScoreSort's own combiner output), `baseFileName` and `customFileNames` are also pre-filled via `extractSplitNames`.
+
 ### Pure split functions (top-level, above `SplitView`)
 
 | Function | Purpose |
 |----------|---------|
 | `toggleSplit(in sizes: [Int], at page: Int) -> [Int]` | Returns new sizes array with split toggled at `page`. Splits mid-file or merges at a boundary. |
 | `splitSizes(totalPages: Int, stride: Int) -> [Int]` | Returns sizes array dividing `totalPages` into `stride`-sized chunks (last chunk takes remainder). |
+| `splitSizesFromBookmarks(_ document: PDFDocument) -> (sizes: [Int], labels: [String])?` | Reads the document's top-level `PDFOutline`, sorts entries by page index, and returns a `fileSizes` array and a parallel array of bookmark label strings. Returns `nil` if the document has fewer than two usable bookmarks. The first bookmark may point to page 0 (its label is included but page 0 is never a split marker). |
+| `extractSplitNames(from labels: [String]) -> (baseName: String, suffixes: [String])?` | Parses bookmark labels of the form `"NN - Piecename - Partname"` (numeric prefix, space-hyphen-space separator). Returns a shared `baseName` and per-file `suffixes` if all labels parse successfully and share the same piece name. Returns `nil` on any mismatch, falling back to the filename as base name. |
 
 ### Step 2 — `SplitNamingStageView`
 
