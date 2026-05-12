@@ -713,14 +713,24 @@ struct CombineView: View {
     }
     
     private func handleDrop(providers: [NSItemProvider]) {
+        var collected: [URL] = []
+        let group = DispatchGroup()
         for provider in providers {
+            group.enter()
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                guard let url = url else { return }
-                let expanded = Self.expandToSupportedFiles([url])
-                guard !expanded.isEmpty else { return }
-                DispatchQueue.main.async {
-                    self.combineManager.addFiles(urls: expanded, undoManager: self.undoManager)
-                }
+                if let url = url { collected.append(url) }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) {
+            guard !collected.isEmpty else { return }
+            let expanded = Self.expandToSupportedFiles(collected)
+            if expanded.isEmpty {
+                showNSAlert(title: "Unsupported File Type",
+                            message: "ScoreSort can combine PDFs and images (JPEG, PNG, TIFF, HEIC, BMP, GIF). The dropped item(s) were not recognised.",
+                            isError: true)
+            } else {
+                self.combineManager.addFiles(urls: expanded, undoManager: self.undoManager)
             }
         }
     }
@@ -3333,7 +3343,14 @@ struct BulkRenameView: View {
                    isDir.boolValue {
                     loadFromFolder(collected[0])
                 } else {
-                    loadFiles(collected.filter { $0.pathExtension.lowercased() == "pdf" })
+                    let pdfs = collected.filter { $0.pathExtension.lowercased() == "pdf" }
+                    if pdfs.isEmpty {
+                        showNSAlert(title: "Unsupported File Type",
+                                    message: "The naming stage only accepts PDF files.",
+                                    isError: true)
+                    } else {
+                        loadFiles(pdfs)
+                    }
                 }
             }
             return true
@@ -7553,15 +7570,18 @@ struct DropZoneView: View {
         )
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
             guard let provider = providers.first else { return false }
-            
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                if let url = url, url.pathExtension.lowercased() == "pdf" {
-                    DispatchQueue.main.async {
+                guard let url = url else { return }
+                DispatchQueue.main.async {
+                    if url.pathExtension.lowercased() == "pdf" {
                         pdfManager.loadPDF(from: url)
+                    } else {
+                        showNSAlert(title: "Unsupported File Type",
+                                    message: "This tab only accepts PDF files.",
+                                    isError: true)
                     }
                 }
             }
-            
             return true
         }
     }
