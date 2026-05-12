@@ -2673,14 +2673,12 @@ class CombineManager: ObservableObject {
                               y: (a4.height - drawH) / 2,
                               width: drawW, height: drawH)
 
-        let renderer = NSGraphicsContext.current
         let colorSpace = CGColorSpaceCreateDeviceRGB()
         guard let ctx = CGContext(data: nil,
                                   width: Int(a4.width), height: Int(a4.height),
                                   bitsPerComponent: 8, bytesPerRow: 0,
                                   space: colorSpace,
                                   bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
-        _ = renderer  // suppress unused warning
         ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
         ctx.fill(CGRect(origin: .zero, size: a4))
         ctx.draw(cgImage, in: drawRect)
@@ -5342,6 +5340,7 @@ struct SplitView: View {
     @State private var selectedFileIndices: Set<Int> = []
     /// Retained reference to the local NSEvent monitor that handles the delete key.
     @State private var splitViewKeyMonitor: Any?
+    @State private var bookmarkNoticeVisible = false
     @FocusState private var isViewFocused: Bool
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
@@ -5476,6 +5475,10 @@ struct SplitView: View {
                     } else {
                         baseFileName = pdfManager.currentFileName ?? ""
                     }
+                    withAnimation(.easeInOut(duration: 0.2)) { bookmarkNoticeVisible = true }
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                        withAnimation(.easeInOut(duration: 0.2)) { bookmarkNoticeVisible = false }
+                    }
                 } else {
                     fileSizes = totalPages > 0 ? [totalPages] : []
                     baseFileName = pdfManager.currentFileName ?? ""
@@ -5528,9 +5531,26 @@ struct SplitView: View {
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
-            
+
             Divider()
-            
+
+            if bookmarkNoticeVisible {
+                HStack(spacing: 8) {
+                    Image(systemName: "bookmark.fill")
+                        .foregroundColor(.accentColor)
+                    Text("Split points loaded from bookmarks")
+                        .font(.callout)
+                    Spacer()
+                    Button { withAnimation(.easeInOut(duration: 0.2)) { bookmarkNoticeVisible = false } }
+                        label: { Image(systemName: "xmark").foregroundColor(.secondary) }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+                .background(Color.accentColor.opacity(0.08))
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             // Main content area
             if let document = pdfManager.pdfDocument {
                 GeometryReader { geometry in
