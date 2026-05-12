@@ -2524,12 +2524,16 @@ class CombineManager: ObservableObject {
     func createCombinedPDF(to url: URL, addBlankPages: Bool, completion: PDFAlertHandler) {
         let doc = PDFDocument()
         var idx = 0
+        var bookmarks: [(label: String, pageIndex: Int)] = []
 
-        func addPages(from file: CombineFile) {
+        func addPages(from file: CombineFile, copyIndex: Int, totalCopies: Int) {
             if file.isBlankPage {
                 if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
                 return
             }
+            let baseName = file.name.hasSuffix(".pdf") ? String(file.name.dropLast(4)) : file.name
+            let label = totalCopies > 1 ? "\(baseName) \(copyIndex + 1)/\(totalCopies)" : baseName
+            bookmarks.append((label: label, pageIndex: idx))
             guard let src = PDFDocument(url: file.url) else { return }
             for p in 0..<src.pageCount {
                 if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
@@ -2544,12 +2548,23 @@ class CombineManager: ObservableObject {
             if let gid = files[i].collateGroupId, let group = collateGroups[gid] {
                 var groupFiles: [CombineFile] = []
                 while i < files.count && files[i].collateGroupId == gid { groupFiles.append(files[i]); i += 1 }
-                for _ in 0..<group.copies { for f in groupFiles { addPages(from: f) } }
+                for ci in 0..<group.copies { for f in groupFiles { addPages(from: f, copyIndex: ci, totalCopies: group.copies) } }
             } else {
                 let file = files[i]; i += 1
-                for _ in 0..<file.copies { addPages(from: file) }
+                for ci in 0..<file.copies { addPages(from: file, copyIndex: ci, totalCopies: file.copies) }
             }
         }
+
+        let root = PDFOutline()
+        for (label, pageIndex) in bookmarks {
+            if let page = doc.page(at: pageIndex) {
+                let item = PDFOutline()
+                item.label = label
+                item.destination = PDFDestination(page: page, at: .zero)
+                root.insertChild(item, at: root.numberOfChildren)
+            }
+        }
+        doc.outlineRoot = root
 
         if doc.write(to: url) {
             completion("PDF Created Successfully",
@@ -2562,12 +2577,16 @@ class CombineManager: ObservableObject {
     func openInPreview(addBlankPages: Bool, onError: PDFAlertHandler) {
         let doc = PDFDocument()
         var idx = 0
+        var bookmarks: [(label: String, pageIndex: Int)] = []
 
-        func addPages(from file: CombineFile) {
+        func addPages(from file: CombineFile, copyIndex: Int, totalCopies: Int) {
             if file.isBlankPage {
                 if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
                 return
             }
+            let baseName = file.name.hasSuffix(".pdf") ? String(file.name.dropLast(4)) : file.name
+            let label = totalCopies > 1 ? "\(baseName) \(copyIndex + 1)/\(totalCopies)" : baseName
+            bookmarks.append((label: label, pageIndex: idx))
             guard let src = PDFDocument(url: file.url) else { return }
             for p in 0..<src.pageCount {
                 if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
@@ -2582,12 +2601,23 @@ class CombineManager: ObservableObject {
             if let gid = files[i].collateGroupId, let group = collateGroups[gid] {
                 var groupFiles: [CombineFile] = []
                 while i < files.count && files[i].collateGroupId == gid { groupFiles.append(files[i]); i += 1 }
-                for _ in 0..<group.copies { for f in groupFiles { addPages(from: f) } }
+                for ci in 0..<group.copies { for f in groupFiles { addPages(from: f, copyIndex: ci, totalCopies: group.copies) } }
             } else {
                 let file = files[i]; i += 1
-                for _ in 0..<file.copies { addPages(from: file) }
+                for ci in 0..<file.copies { addPages(from: file, copyIndex: ci, totalCopies: file.copies) }
             }
         }
+
+        let root = PDFOutline()
+        for (label, pageIndex) in bookmarks {
+            if let page = doc.page(at: pageIndex) {
+                let item = PDFOutline()
+                item.label = label
+                item.destination = PDFDestination(page: page, at: .zero)
+                root.insertChild(item, at: root.numberOfChildren)
+            }
+        }
+        doc.outlineRoot = root
 
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedForPrint.pdf")
         guard doc.write(to: tempURL) else { onError("Error", "Failed to create temporary PDF", true); return }
