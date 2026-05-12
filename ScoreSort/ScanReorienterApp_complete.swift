@@ -5179,6 +5179,34 @@ func splitSizes(totalPages: Int, stride: Int) -> [Int] {
     return sizes
 }
 
+/// Reads the top-level PDF outline (bookmarks) and returns a fileSizes array
+/// where each entry is the page count of the section between consecutive bookmarks.
+/// Returns nil if the document has no usable top-level bookmarks.
+func splitSizesFromBookmarks(_ document: PDFDocument) -> [Int]? {
+    let totalPages = document.pageCount
+    guard totalPages > 0,
+          let root = document.outlineRoot,
+          root.numberOfChildren > 0 else { return nil }
+
+    var markers: Set<Int> = []
+    for i in 0..<root.numberOfChildren {
+        guard let item = root.child(at: i),
+              let page = item.destination?.page else { continue }
+        let idx = document.index(for: page)
+        if idx > 0 && idx < totalPages { markers.insert(idx) }
+    }
+    guard !markers.isEmpty else { return nil }
+
+    var sizes: [Int] = []
+    var prev = 0
+    for marker in markers.sorted() {
+        sizes.append(marker - prev)
+        prev = marker
+    }
+    sizes.append(totalPages - prev)
+    return sizes
+}
+
 // MARK: - Split View
 private enum SplitStage { case split, naming, prefix, summary }
 
@@ -5325,7 +5353,11 @@ struct SplitView: View {
                 // a previous file can survive into the naming or prefix stages.
                 baseFileName = pdfManager.currentFileName ?? ""
                 isViewFocused = true
-                fileSizes = totalPages > 0 ? [totalPages] : []
+                if let doc = newValue, let bookmarkSizes = splitSizesFromBookmarks(doc) {
+                    fileSizes = bookmarkSizes
+                } else {
+                    fileSizes = totalPages > 0 ? [totalPages] : []
+                }
                 customFileNames.removeAll()
                 previewOffset = .zero
                 skippedPages = []
