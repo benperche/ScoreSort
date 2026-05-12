@@ -413,7 +413,13 @@ struct CombineView: View {
                             Label("Add Files", systemImage: "plus")
                         }
                         .buttonStyle(.bordered)
-                        
+
+                        Button(action: addBlankPage) {
+                            Label("Add Blank Page", systemImage: "doc.badge.plus")
+                        }
+                        .buttonStyle(.bordered)
+                        .help("Insert a blank A4 page after the selected file (or at the end)")
+
                         Button(action: removeSelected) {
                             Label("Remove", systemImage: "minus")
                         }
@@ -780,6 +786,10 @@ struct CombineView: View {
         anchorFileId = nil
     }
 
+    private func addBlankPage() {
+        combineManager.addBlankPage(after: selectedFiles, undoManager: undoManager)
+    }
+
     private func removeSelected() {
         guard !selectedFiles.isEmpty else { return }
         let count = selectedFiles.count
@@ -1000,6 +1010,8 @@ struct CombineFileRow: View {
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .foregroundColor(file.isBlankPage ? .secondary : .primary)
+                .italic(file.isBlankPage)
                 // Indent grouped files so they visually sit under the group header
                 .padding(.leading, isGrouped ? 14 : 0)
 
@@ -1052,7 +1064,8 @@ struct CombineFileRow: View {
         .background(
             isSelected
                 ? Color.accentColor.opacity(isFocused ? 0.18 : 0.1)
-                : isUnmatched ? Color.orange.opacity(0.12) : Color.clear
+                : isUnmatched ? Color.orange.opacity(0.12)
+                : file.isBlankPage ? Color.gray.opacity(0.08) : Color.clear
         )
         .contentShape(Rectangle())
         .onTapGesture { onToggleSelect() }
@@ -2313,6 +2326,8 @@ struct CombineFile: Identifiable, Equatable {
     var copies: Int
     /// Non-nil when this file is part of a collate group.
     var collateGroupId: UUID? = nil
+    /// True for synthetic blank-page entries (url is unused).
+    var isBlankPage: Bool = false
 }
 
 // MARK: - Combine Manager
@@ -2371,6 +2386,19 @@ class CombineManager: ObservableObject {
     }
 
     // ── File management ───────────────────────────────────────────────────────
+    func addBlankPage(after selectedIDs: Set<UUID>, undoManager: UndoManager?) {
+        let bf = files; let bg = collateGroups
+        let dummy = URL(fileURLWithPath: "/dev/null")
+        let entry = CombineFile(url: dummy, name: "Blank Page", pageCount: 1, copies: 1, isBlankPage: true)
+        if let lastIdx = files.indices.last(where: { selectedIDs.contains(files[$0].id) }) {
+            files.insert(entry, at: lastIdx + 1)
+        } else {
+            files.append(entry)
+        }
+        registerUndo(undoManager: undoManager, actionName: "Add Blank Page",
+                     restoringFiles: bf, restoringGroups: bg)
+    }
+
     func addFiles(urls: [URL], undoManager: UndoManager?) {
         let bf = files; let bg = collateGroups
         for url in urls {
@@ -2498,6 +2526,10 @@ class CombineManager: ObservableObject {
         var idx = 0
 
         func addPages(from file: CombineFile) {
+            if file.isBlankPage {
+                if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
+                return
+            }
             guard let src = PDFDocument(url: file.url) else { return }
             for p in 0..<src.pageCount {
                 if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
@@ -2532,6 +2564,10 @@ class CombineManager: ObservableObject {
         var idx = 0
 
         func addPages(from file: CombineFile) {
+            if file.isBlankPage {
+                if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
+                return
+            }
             guard let src = PDFDocument(url: file.url) else { return }
             for p in 0..<src.pageCount {
                 if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
@@ -2559,7 +2595,7 @@ class CombineManager: ObservableObject {
     }
 
     private func createBlankPage() -> PDFPage? {
-        let pageRect = CGRect(x: 0, y: 0, width: 612, height: 792)
+        let pageRect = CGRect(x: 0, y: 0, width: 595, height: 842) // A4
         let blankPage = PDFPage()
         blankPage.setBounds(pageRect, for: .mediaBox)
         return blankPage
