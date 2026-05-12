@@ -854,3 +854,216 @@ struct RenumberAfterDeletionTests {
         #expect(result[0].name == "Alto Saxophone")
     }
 }
+
+// MARK: - extractSplitNames
+// Tests for the pure function that parses ScoreSort-formatted bookmark labels
+// ("NN - Piecename - Partname") into a shared base name and per-file suffixes.
+
+@Suite("extractSplitNames")
+struct ExtractSplitNamesTests {
+
+    @Test func parsesWellFormedLabels() throws {
+        let labels = ["01 - Symphony 5 - Flute", "02 - Symphony 5 - Oboe"]
+        let result = try #require(extractSplitNames(from: labels))
+        #expect(result.baseName == "Symphony 5")
+        #expect(result.suffixes == ["Flute", "Oboe"])
+    }
+
+    @Test func returnsNilForNonNumericPrefix() {
+        let labels = ["Score - Symphony 5 - Flute"]
+        #expect(extractSplitNames(from: labels) == nil)
+    }
+
+    @Test func returnsNilForFewerThanThreeParts() {
+        let labels = ["01 - Symphony 5"]
+        #expect(extractSplitNames(from: labels) == nil)
+    }
+
+    @Test func returnsNilForInconsistentPieceNames() {
+        let labels = ["01 - Symphony 5 - Flute", "02 - Concerto - Oboe"]
+        #expect(extractSplitNames(from: labels) == nil)
+    }
+
+    @Test func handlesPartNameContainingHyphen() throws {
+        // Part name itself contains " - "; should be preserved in the suffix
+        let labels = ["01 - Piece - Horn - in F"]
+        let result = try #require(extractSplitNames(from: labels))
+        #expect(result.baseName == "Piece")
+        #expect(result.suffixes == ["Horn - in F"])
+    }
+
+    @Test func returnsNilForEmptyInput() {
+        #expect(extractSplitNames(from: []) == nil)
+    }
+}
+
+// MARK: - splitSizesFromBookmarks
+// Tests for the function that reads a PDF outline and converts it to a fileSizes array.
+
+@Suite("splitSizesFromBookmarks")
+struct SplitSizesFromBookmarksTests {
+
+    /// Writes a PDF with bookmarks at the specified page indices to `url`.
+    func writePDFWithBookmarks(pages: Int, bookmarks: [(label: String, page: Int)], to url: URL) {
+        let doc = PDFDocument()
+        for i in 0..<pages { doc.insert(PDFPage(), at: i) }
+        let root = PDFOutline()
+        for entry in bookmarks {
+            guard let page = doc.page(at: entry.page) else { continue }
+            let item = PDFOutline()
+            item.label = entry.label
+            item.destination = PDFDestination(page: page, at: .zero)
+            root.insertChild(item, at: root.numberOfChildren)
+        }
+        doc.outlineRoot = root
+        doc.write(to: url)
+    }
+
+    var tempDir: URL
+
+    init() throws {
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    }
+
+    @Test func returnsCorrectSizesFromBookmarks() throws {
+        let url = tempDir.appendingPathComponent("bookmarked.pdf")
+        writePDFWithBookmarks(pages: 6,
+                              bookmarks: [(label: "A", page: 0),
+                                          (label: "B", page: 2),
+                                          (label: "C", page: 4)],
+                              to: url)
+        let doc = try #require(PDFDocument(url: url))
+        let result = try #require(splitSizesFromBookmarks(doc))
+        #expect(result.sizes == [2, 2, 2])
+        #expect(result.labels == ["A", "B", "C"])
+    }
+
+    @Test func returnsNilForDocumentWithNoOutline() throws {
+        let url = tempDir.appendingPathComponent("no_outline.pdf")
+        writePDF(pages: 4, to: url)
+        let doc = try #require(PDFDocument(url: url))
+        #expect(splitSizesFromBookmarks(doc) == nil)
+    }
+
+    @Test func returnsNilForSingleBookmarkAtPageZero() throws {
+        // Only one section — not useful for splitting
+        let url = tempDir.appendingPathComponent("one_bookmark.pdf")
+        writePDFWithBookmarks(pages: 4,
+                              bookmarks: [(label: "Only", page: 0)],
+                              to: url)
+        let doc = try #require(PDFDocument(url: url))
+        #expect(splitSizesFromBookmarks(doc) == nil)
+    }
+
+    @Test func handlesBookmarksOutOfOrder() throws {
+        // Bookmarks in reverse order in the outline — should still produce correct sizes
+        let url = tempDir.appendingPathComponent("reversed.pdf")
+        writePDFWithBookmarks(pages: 6,
+                              bookmarks: [(label: "B", page: 3),
+                                          (label: "A", page: 0)],
+                              to: url)
+        let doc = try #require(PDFDocument(url: url))
+        let result = try #require(splitSizesFromBookmarks(doc))
+        #expect(result.sizes == [3, 3])
+        #expect(result.labels == ["A", "B"])
+    }
+}
+
+// MARK: - Combine Manager — bookmarks and blank pages
+// Extends CombineManagerTests with coverage for the newer features.
+
+@Suite("Combine Manager – bookmarks and blank pages")
+struct CombineManagerBookmarkTests {
+
+    var tempDir: URL
+
+    init() throws {
+        tempDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+    }
+
+    func makeFile(name: String, pageCount: Int, copies: Int = 1) -> CombineFile {
+        CombineFile(url: URL(fileURLWithPath: "/dev/null"), name: name, pageCount: pageCount, copies: copies)
+    }
+
+    @Test func combinedPDFHasOutlineWithOneEntryPerFile() throws {
+        let urlA = tempDir.appendingPathComponent("Flute.pdf")
+        let urlB = tempDir.appendingPathComponent("Oboe.pdf")
+        writePDF(pages: 2, to: urlA)
+        writePDF(pages: 3, to: urlB)
+
+        let manager = CombineManager()
+        manager.addFiles(urls: [urlA, urlB], undoManager: nil)
+
+        let outURL = tempDir.appendingPathComponent("combined.pdf")
+        manager.createCombinedPDF(to: outURL, addBlankPages: false) { _, _, _ in }
+
+        let result = try #require(PDFDocument(url: outURL))
+        let root = try #require(result.outlineRoot)
+        #expect(root.numberOfChildren == 2)
+        #expect(root.child(at: 0)?.label == "Flute")
+        #expect(root.child(at: 1)?.label == "Oboe")
+    }
+
+    @Test func multiCopyBookmarksAreLabelledWithFraction() throws {
+        let url = tempDir.appendingPathComponent("Flute.pdf")
+        writePDF(pages: 2, to: url)
+
+        let manager = CombineManager()
+        manager.addFiles(urls: [url], undoManager: nil)
+        manager.updateCopies(for: manager.files[0].id, copies: 3, undoManager: nil)
+
+        let outURL = tempDir.appendingPathComponent("copies.pdf")
+        manager.createCombinedPDF(to: outURL, addBlankPages: false) { _, _, _ in }
+
+        let result = try #require(PDFDocument(url: outURL))
+        let root = try #require(result.outlineRoot)
+        #expect(root.numberOfChildren == 3)
+        #expect(root.child(at: 0)?.label == "Flute 1/3")
+        #expect(root.child(at: 1)?.label == "Flute 2/3")
+        #expect(root.child(at: 2)?.label == "Flute 3/3")
+    }
+
+    @Test func blankPageEntryIsNotBookmarked() throws {
+        let url = tempDir.appendingPathComponent("Flute.pdf")
+        writePDF(pages: 2, to: url)
+
+        let manager = CombineManager()
+        manager.addFiles(urls: [url], undoManager: nil)
+        manager.addBlankPage(after: [], undoManager: nil)
+
+        let outURL = tempDir.appendingPathComponent("with_blank.pdf")
+        manager.createCombinedPDF(to: outURL, addBlankPages: false) { _, _, _ in }
+
+        let result = try #require(PDFDocument(url: outURL))
+        #expect(result.pageCount == 3)
+        let root = try #require(result.outlineRoot)
+        // Only the real file gets a bookmark, not the blank page
+        #expect(root.numberOfChildren == 1)
+        #expect(root.child(at: 0)?.label == "Flute")
+    }
+
+    @Test func addBlankPageAppendsToEndWhenNothingSelected() {
+        let manager = CombineManager()
+        manager.files = [makeFile(name: "A.pdf", pageCount: 2),
+                         makeFile(name: "B.pdf", pageCount: 2)]
+        manager.addBlankPage(after: [], undoManager: nil)
+        #expect(manager.files.count == 3)
+        #expect(manager.files.last?.isBlankPage == true)
+    }
+
+    @Test func addBlankPageInsertsAfterSelectedFile() {
+        let manager = CombineManager()
+        let a = makeFile(name: "A.pdf", pageCount: 2)
+        let b = makeFile(name: "B.pdf", pageCount: 2)
+        let c = makeFile(name: "C.pdf", pageCount: 2)
+        manager.files = [a, b, c]
+        manager.addBlankPage(after: [a.id], undoManager: nil)
+        #expect(manager.files.count == 4)
+        #expect(manager.files[1].isBlankPage == true)
+        #expect(manager.files[2].name == "B.pdf")
+    }
+}
