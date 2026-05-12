@@ -695,18 +695,18 @@ struct CombineView: View {
         guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
         menuState.isPanelOpen = true
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf]
+        panel.allowedContentTypes = [.pdf, .jpeg, .png, .tiff, .bmp, .gif, .heic]
         panel.allowsMultipleSelection = true
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.canCreateDirectories = false
-        panel.title = "Select PDF Files or Folders"
-        panel.message = "Select PDF files, or select a folder to add all PDFs inside it"
+        panel.title = "Select PDF or Image Files"
+        panel.message = "Select PDF or image files, or select a folder to add all supported files inside it"
 
         panel.beginSheetModal(for: window) { response in
             self.menuState.isPanelOpen = false
             if response == .OK {
-                let expanded = Self.expandToPDFs(panel.urls)
+                let expanded = Self.expandToSupportedFiles(panel.urls)
                 self.combineManager.addFiles(urls: expanded, undoManager: self.undoManager)
             }
         }
@@ -716,7 +716,7 @@ struct CombineView: View {
         for provider in providers {
             _ = provider.loadObject(ofClass: URL.self) { url, _ in
                 guard let url = url else { return }
-                let expanded = Self.expandToPDFs([url])
+                let expanded = Self.expandToSupportedFiles([url])
                 guard !expanded.isEmpty else { return }
                 DispatchQueue.main.async {
                     self.combineManager.addFiles(urls: expanded, undoManager: self.undoManager)
@@ -725,9 +725,11 @@ struct CombineView: View {
         }
     }
 
-    /// Expands a mixed list of file and folder URLs into a flat, sorted list of PDF URLs.
-    /// Folders are enumerated recursively; non-PDF files are ignored.
-    static func expandToPDFs(_ urls: [URL]) -> [URL] {
+    static let supportedExtensions: Set<String> = ["pdf", "jpg", "jpeg", "png", "tif", "tiff", "heic", "bmp", "gif"]
+
+    /// Expands a mixed list of file and folder URLs into a flat, sorted list of supported file URLs.
+    /// Folders are enumerated recursively; unsupported files are ignored.
+    static func expandToSupportedFiles(_ urls: [URL]) -> [URL] {
         var result: [URL] = []
         let fm = FileManager.default
         for url in urls {
@@ -737,10 +739,10 @@ struct CombineView: View {
                 guard let enumerator = fm.enumerator(at: url,
                                                      includingPropertiesForKeys: [.isRegularFileKey]) else { continue }
                 for case let fileURL as URL in enumerator
-                where fileURL.pathExtension.lowercased() == "pdf" {
+                where supportedExtensions.contains(fileURL.pathExtension.lowercased()) {
                     result.append(fileURL)
                 }
-            } else if url.pathExtension.lowercased() == "pdf" {
+            } else if supportedExtensions.contains(url.pathExtension.lowercased()) {
                 result.append(url)
             }
         }
@@ -2402,8 +2404,16 @@ class CombineManager: ObservableObject {
     func addFiles(urls: [URL], undoManager: UndoManager?) {
         let bf = files; let bg = collateGroups
         for url in urls {
-            guard let document = PDFDocument(url: url) else { continue }
-            files.append(CombineFile(url: url, name: url.lastPathComponent, pageCount: document.pageCount, copies: 1))
+            let ext = url.pathExtension.lowercased()
+            if ext == "pdf" {
+                guard let document = PDFDocument(url: url) else { continue }
+                files.append(CombineFile(url: url, name: url.lastPathComponent, pageCount: document.pageCount, copies: 1))
+            } else {
+                guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { continue }
+                let frameCount = CGImageSourceGetCount(src)
+                guard frameCount > 0 else { continue }
+                files.append(CombineFile(url: url, name: url.lastPathComponent, pageCount: frameCount, copies: 1))
+            }
         }
         if files.count != bf.count {
             registerUndo(undoManager: undoManager, actionName: "Add Files",
@@ -2531,15 +2541,20 @@ class CombineManager: ObservableObject {
                 if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
                 return
             }
+            let ext = file.url.pathExtension.lowercased()
             let baseName = file.name.hasSuffix(".pdf") ? String(file.name.dropLast(4)) : file.name
             let label = totalCopies > 1 ? "\(baseName) \(copyIndex + 1)/\(totalCopies)" : baseName
             bookmarks.append((label: label, pageIndex: idx))
-            guard let src = PDFDocument(url: file.url) else { return }
-            for p in 0..<src.pageCount {
-                if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
-            }
-            if addBlankPages && src.pageCount % 2 == 1 {
-                if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
+            if ext != "pdf" {
+                for page in pdfPages(fromImageAt: file.url) { doc.insert(page, at: idx); idx += 1 }
+            } else {
+                guard let src = PDFDocument(url: file.url) else { return }
+                for p in 0..<src.pageCount {
+                    if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
+                }
+                if addBlankPages && src.pageCount % 2 == 1 {
+                    if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
+                }
             }
         }
 
@@ -2584,15 +2599,20 @@ class CombineManager: ObservableObject {
                 if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
                 return
             }
+            let ext = file.url.pathExtension.lowercased()
             let baseName = file.name.hasSuffix(".pdf") ? String(file.name.dropLast(4)) : file.name
             let label = totalCopies > 1 ? "\(baseName) \(copyIndex + 1)/\(totalCopies)" : baseName
             bookmarks.append((label: label, pageIndex: idx))
-            guard let src = PDFDocument(url: file.url) else { return }
-            for p in 0..<src.pageCount {
-                if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
-            }
-            if addBlankPages && src.pageCount % 2 == 1 {
-                if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
+            if ext != "pdf" {
+                for page in pdfPages(fromImageAt: file.url) { doc.insert(page, at: idx); idx += 1 }
+            } else {
+                guard let src = PDFDocument(url: file.url) else { return }
+                for p in 0..<src.pageCount {
+                    if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
+                }
+                if addBlankPages && src.pageCount % 2 == 1 {
+                    if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
+                }
             }
         }
 
@@ -2629,6 +2649,49 @@ class CombineManager: ObservableObject {
         let blankPage = PDFPage()
         blankPage.setBounds(pageRect, for: .mediaBox)
         return blankPage
+    }
+
+    /// Renders one frame of an image file as an A4 PDF page, scaled to fit with white background.
+    private func makeA4Page(from cgImage: CGImage) -> PDFPage? {
+        let a4 = CGSize(width: 595, height: 842)
+        let imgW = CGFloat(cgImage.width)
+        let imgH = CGFloat(cgImage.height)
+        let scale = min(a4.width / imgW, a4.height / imgH)
+        let drawW = imgW * scale
+        let drawH = imgH * scale
+        let drawRect = CGRect(x: (a4.width - drawW) / 2,
+                              y: (a4.height - drawH) / 2,
+                              width: drawW, height: drawH)
+
+        let renderer = NSGraphicsContext.current
+        let colorSpace = CGColorSpaceCreateDeviceRGB()
+        guard let ctx = CGContext(data: nil,
+                                  width: Int(a4.width), height: Int(a4.height),
+                                  bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: colorSpace,
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        _ = renderer  // suppress unused warning
+        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+        ctx.fill(CGRect(origin: .zero, size: a4))
+        ctx.draw(cgImage, in: drawRect)
+
+        guard let rendered = ctx.makeImage() else { return nil }
+        let nsImage = NSImage(cgImage: rendered, size: a4)
+        guard let page = PDFPage(image: nsImage) else { return nil }
+        page.setBounds(CGRect(origin: .zero, size: a4), for: .mediaBox)
+        return page
+    }
+
+    /// Returns all frames of an image file as A4 PDF pages.
+    private func pdfPages(fromImageAt url: URL) -> [PDFPage] {
+        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return [] }
+        var pages: [PDFPage] = []
+        for i in 0..<CGImageSourceGetCount(src) {
+            guard let cgImage = CGImageSourceCreateImageAtIndex(src, i, nil),
+                  let page = makeA4Page(from: cgImage) else { continue }
+            pages.append(page)
+        }
+        return pages
     }
 }
 
