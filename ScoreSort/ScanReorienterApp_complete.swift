@@ -5406,6 +5406,10 @@ struct SplitView: View {
     /// Set to true before programmatically loading an already-processed A3 document
     /// so the onChange handler skips the A3 detection pass.
     @State private var suppressNextA3Detection = false
+    /// True while the background A3 split is in progress; shows a loading overlay.
+    @State private var isProcessingA3 = false
+    /// Positions (indices into pageOrder) that the user has marked to skip in the reorder step.
+    @State private var a3SkippedPositions: Set<Int> = []
     @FocusState private var isViewFocused: Bool
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
@@ -5520,12 +5524,14 @@ struct SplitView: View {
                     A3PageOrderView(
                         document: doc,
                         pageOrder: $a3PageOrder,
+                        skippedPositions: $a3SkippedPositions,
                         leftFirst: a3LeftFirst,
                         onConfirm: { applyA3PageOrder() },
                         onCancel: {
                             pdfManager.clearPDF()
                             a3SplitDocument = nil
                             a3PageOrder = []
+                            a3SkippedPositions = []
                             splitStage = .split
                         }
                     )
@@ -5572,18 +5578,51 @@ struct SplitView: View {
             A3SplitChoiceView(
                 onChoose: { leftFirst in
                     guard let original = pdfManager.pdfDocument else { return }
-                    let splitDoc = splitA3Pages(original, leftFirst: leftFirst)
-                    a3SplitDocument = splitDoc
-                    a3PageOrder = Array(0..<splitDoc.pageCount)
-                    a3LeftFirst = leftFirst
                     showingA3Detection = false
-                    splitStage = .a3PageOrder
+                    isProcessingA3 = true
+                    // Run the crop-box splitting on a background thread so the
+                    // UI stays responsive on large documents.
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        let splitDoc = splitA3Pages(original, leftFirst: leftFirst)
+                        DispatchQueue.main.async {
+                            isProcessingA3 = false
+                            a3SplitDocument = splitDoc
+                            a3PageOrder = Array(0..<splitDoc.pageCount)
+                            a3SkippedPositions = []
+                            a3LeftFirst = leftFirst
+                            splitStage = .a3PageOrder
+                        }
+                    }
                 },
                 onKeepAsIs: {
                     showingA3Detection = false
                     setupSplitState()
                 }
             )
+        }
+        .overlay {
+            if isProcessingA3 {
+                ZStack {
+                    Color(NSColor.windowBackgroundColor).opacity(0.7)
+                    VStack(spacing: 16) {
+                        ProgressView()
+                            .progressViewStyle(.circular)
+                            .scaleEffect(1.3)
+                        Text("Splitting A3 pages…")
+                            .font(.headline)
+                        Text("Cutting each page down the middle.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(32)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(Color(NSColor.controlBackgroundColor))
+                            .shadow(radius: 20)
+                    )
+                }
+                .ignoresSafeArea()
+            }
         }
     }
 
@@ -6031,11 +6070,13 @@ struct SplitView: View {
     }
 
     /// Builds a reordered PDFDocument from `a3SplitDocument` using the user's chosen
-    /// `a3PageOrder`, loads it as the current document, and transitions to the split stage.
+    /// `a3PageOrder`, omitting any positions the user marked as skipped, then loads
+    /// it as the current document and transitions to the split stage.
     private func applyA3PageOrder() {
         guard let splitDoc = a3SplitDocument else { return }
         let reordered = PDFDocument()
-        for originalIndex in a3PageOrder {
+        for (position, originalIndex) in a3PageOrder.enumerated() {
+            guard !a3SkippedPositions.contains(position) else { continue }
             if let page = splitDoc.page(at: originalIndex) {
                 reordered.insert(page, at: reordered.pageCount)
             }
@@ -6044,6 +6085,7 @@ struct SplitView: View {
         // Clear A3-specific state
         a3SplitDocument = nil
         a3PageOrder = []
+        a3SkippedPositions = []
         // Pre-populate split state directly to avoid a drop-zone flash
         suppressNextA3Detection = true
         fileSizes = pageCount > 0 ? [pageCount] : []
@@ -6203,27 +6245,39 @@ struct A3SplitChoiceView: View {
 
 // MARK: - A3 Page Order View
 
-/// Step shown after A3 splitting.  Displays all resulting pages as thumbnail rows;
-/// the user can drag or use chevron buttons to reorder before continuing.
+/// Step shown after A3 splitting.  Left panel: large PDFPageView preview with
+/// keyboard navigation.  Right panel: scrollable ordered list with thumbnails,
+/// move-up/down chevrons and skip support.  Mirrors the Step 1 split interface.
 struct A3PageOrderView: View {
     let document: PDFDocument
     @Binding var pageOrder: [Int]
+    @Binding var skippedPositions: Set<Int>
     let leftFirst: Bool
     let onConfirm: () -> Void
     let onCancel: () -> Void
 
+    @State private var focusedPosition: Int = 0
+    @FocusState private var isViewFocused: Bool
+
+    private var totalPages: Int { pageOrder.count }
+    private var activeCount: Int { totalPages - skippedPositions.count }
+
+    private func sideLabel(for originalIndex: Int) -> String {
+        let isEven = originalIndex % 2 == 0
+        return (leftFirst ? isEven : !isEven) ? "Left half" : "Right half"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
-            // Header toolbar
+            // ── Header ───────────────────────────────────────────────────────
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("Reorder Pages")
                         .font(.title2)
                         .fontWeight(.semibold)
-                    Text("The A3 sheet has been split into individual A4 pages. Drag rows or use the arrows to put them in the correct reading order, then continue.")
+                    Text("← → navigate · ⌘↑ ⌘↓ move page · ⌫ skip / unskip blank page")
                         .font(.callout)
                         .foregroundColor(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
                 Button("Cancel") { onCancel() }
@@ -6234,42 +6288,194 @@ struct A3PageOrderView: View {
 
             Divider()
 
-            List {
-                ForEach(Array(pageOrder.enumerated()), id: \.offset) { position, originalIndex in
-                    A3PageOrderRow(
-                        position: position,
-                        originalIndex: originalIndex,
-                        totalPages: pageOrder.count,
-                        leftFirst: leftFirst,
-                        document: document,
-                        canMoveUp: position > 0,
-                        canMoveDown: position < pageOrder.count - 1,
-                        onMoveUp:   { pageOrder.swapAt(position, position - 1) },
-                        onMoveDown: { pageOrder.swapAt(position, position + 1) }
-                    )
-                }
-                .onMove { source, destination in
-                    pageOrder.move(fromOffsets: source, toOffset: destination)
+            // ── Main split: preview left | list right ─────────────────────────
+            GeometryReader { geometry in
+                HStack(spacing: 0) {
+
+                    // Left: large page preview
+                    VStack(spacing: 0) {
+                        let safePos = max(0, min(focusedPosition, totalPages - 1))
+                        // Metadata bar
+                        HStack(spacing: 12) {
+                            Text("Page \(safePos + 1) of \(totalPages)")
+                                .foregroundColor(.secondary)
+                            let origIdx = pageOrder[safePos]
+                            Text("Sheet \(origIdx / 2 + 1) — \(sideLabel(for: origIdx))")
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            if skippedPositions.contains(safePos) {
+                                Label("Skipped", systemImage: "slash.circle.fill")
+                                    .foregroundColor(.orange)
+                                    .font(.callout)
+                            }
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 8)
+                        .background(Color(NSColor.windowBackgroundColor))
+
+                        Divider()
+
+                        PDFPageView(
+                            page: document.page(at: pageOrder[safePos]),
+                            rotation: 0
+                        )
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .opacity(skippedPositions.contains(safePos) ? 0.3 : 1.0)
+                        .animation(.easeInOut(duration: 0.15), value: skippedPositions.contains(safePos))
+                        .padding()
+                        .contentShape(Rectangle())
+                        .onTapGesture { isViewFocused = true }
+                    }
+                    .frame(width: geometry.size.width * 0.55)
+                    .focusable()
+                    .focused($isViewFocused)
+                    .onAppear { isViewFocused = true }
+                    .onKeyPress { press in handleKey(press) }
+
+                    Divider()
+
+                    // Right: ordered page list
+                    VStack(alignment: .leading, spacing: 0) {
+                        HStack {
+                            if skippedPositions.isEmpty {
+                                Text("Page Order (\(totalPages) pages)")
+                                    .font(.headline)
+                            } else {
+                                Text("Page Order (\(activeCount) active · \(totalPages - activeCount) skipped)")
+                                    .font(.headline)
+                            }
+                            Spacer()
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 10)
+                        .background(Color(NSColor.windowBackgroundColor))
+
+                        Divider()
+
+                        ScrollViewReader { proxy in
+                            ScrollView {
+                                LazyVStack(spacing: 0) {
+                                    ForEach(Array(pageOrder.enumerated()), id: \.offset) { position, originalIndex in
+                                        let safePos = max(0, min(focusedPosition, totalPages - 1))
+                                        A3PageOrderRow(
+                                            position: position,
+                                            originalIndex: originalIndex,
+                                            totalPages: totalPages,
+                                            leftFirst: leftFirst,
+                                            document: document,
+                                            isSelected: position == safePos,
+                                            isSkipped: skippedPositions.contains(position),
+                                            canMoveUp: position > 0,
+                                            canMoveDown: position < pageOrder.count - 1,
+                                            onSelect: {
+                                                focusedPosition = position
+                                                isViewFocused = true
+                                            },
+                                            onMoveUp:     { movePageUp(at: position) },
+                                            onMoveDown:   { movePageDown(at: position) },
+                                            onToggleSkip: { toggleSkip(at: position) }
+                                        )
+                                        .id(position)
+                                        if position < pageOrder.count - 1 {
+                                            Divider().padding(.leading, 70)
+                                        }
+                                    }
+                                }
+                            }
+                            .onChange(of: focusedPosition) { _, newPos in
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    proxy.scrollTo(max(0, min(newPos, totalPages - 1)), anchor: .center)
+                                }
+                            }
+                        }
+                    }
+                    .frame(width: geometry.size.width * 0.45)
                 }
             }
-            .listStyle(.plain)
 
             Divider()
 
-            // Footer
+            // ── Footer ───────────────────────────────────────────────────────
             HStack {
-                Text("\(pageOrder.count) pages")
-                    .foregroundColor(.secondary)
+                if !skippedPositions.isEmpty {
+                    Label(
+                        "\(skippedPositions.count) page\(skippedPositions.count == 1 ? "" : "s") will be skipped",
+                        systemImage: "slash.circle"
+                    )
+                    .foregroundColor(.orange)
+                    .font(.callout)
+                }
                 Spacer()
                 Button("Continue →") { onConfirm() }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)
+                    .disabled(activeCount == 0)
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
         }
     }
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    private func movePageUp(at position: Int) {
+        guard position > 0 else { return }
+        pageOrder.swapAt(position, position - 1)
+        // Keep skip flags consistent after the swap
+        let a = skippedPositions.contains(position)
+        let b = skippedPositions.contains(position - 1)
+        if a { skippedPositions.insert(position - 1) } else { skippedPositions.remove(position - 1) }
+        if b { skippedPositions.insert(position) }     else { skippedPositions.remove(position) }
+        // Follow the moved page with the focus
+        if focusedPosition == position { focusedPosition = position - 1 }
+        else if focusedPosition == position - 1 { focusedPosition = position }
+    }
+
+    private func movePageDown(at position: Int) {
+        guard position < pageOrder.count - 1 else { return }
+        pageOrder.swapAt(position, position + 1)
+        let a = skippedPositions.contains(position)
+        let b = skippedPositions.contains(position + 1)
+        if a { skippedPositions.insert(position + 1) } else { skippedPositions.remove(position + 1) }
+        if b { skippedPositions.insert(position) }     else { skippedPositions.remove(position) }
+        if focusedPosition == position { focusedPosition = position + 1 }
+        else if focusedPosition == position + 1 { focusedPosition = position }
+    }
+
+    private func toggleSkip(at position: Int) {
+        if skippedPositions.contains(position) {
+            skippedPositions.remove(position)
+        } else {
+            skippedPositions.insert(position)
+        }
+    }
+
+    @discardableResult
+    private func handleKey(_ press: KeyPress) -> KeyPress.Result {
+        let safePos = max(0, min(focusedPosition, totalPages - 1))
+        switch press.key {
+        case .leftArrow:
+            if safePos > 0 { focusedPosition = safePos - 1 }
+            return .handled
+        case .rightArrow:
+            if safePos < totalPages - 1 { focusedPosition = safePos + 1 }
+            return .handled
+        case .upArrow where press.modifiers.contains(.command):
+            if safePos > 0 { movePageUp(at: safePos) }
+            return .handled
+        case .downArrow where press.modifiers.contains(.command):
+            if safePos < totalPages - 1 { movePageDown(at: safePos) }
+            return .handled
+        case .delete, .deleteForward:
+            toggleSkip(at: safePos)
+            return .handled
+        default:
+            return .ignored
+        }
+    }
 }
+
+// ── Row ───────────────────────────────────────────────────────────────────────
 
 struct A3PageOrderRow: View {
     let position: Int
@@ -6277,72 +6483,81 @@ struct A3PageOrderRow: View {
     let totalPages: Int
     let leftFirst: Bool
     let document: PDFDocument
+    let isSelected: Bool
+    let isSkipped: Bool
     let canMoveUp: Bool
     let canMoveDown: Bool
+    let onSelect: () -> Void
     let onMoveUp: () -> Void
     let onMoveDown: () -> Void
+    let onToggleSkip: () -> Void
 
-    private var sheetNumber: Int { originalIndex / 2 + 1 }
     private var sideLabel: String {
-        let isFirst = originalIndex % 2 == 0
-        if leftFirst {
-            return isFirst ? "Left half" : "Right half"
-        } else {
-            return isFirst ? "Right half" : "Left half"
-        }
+        let isEven = originalIndex % 2 == 0
+        return (leftFirst ? isEven : !isEven) ? "Left half" : "Right half"
     }
 
     var body: some View {
         HStack(spacing: 12) {
-            // Page thumbnail
+            // Thumbnail
             Group {
                 if let page = document.page(at: originalIndex) {
-                    let thumb = page.thumbnail(of: CGSize(width: 52, height: 74), for: .mediaBox)
+                    let thumb = page.thumbnail(of: CGSize(width: 44, height: 62), for: .mediaBox)
                     Image(nsImage: thumb)
                         .resizable()
                         .aspectRatio(contentMode: .fit)
-                        .frame(width: 52, height: 74)
+                        .frame(width: 44, height: 62)
                         .cornerRadius(3)
                         .overlay(RoundedRectangle(cornerRadius: 3)
                             .stroke(Color.secondary.opacity(0.3), lineWidth: 1))
+                        .opacity(isSkipped ? 0.35 : 1.0)
                 } else {
                     RoundedRectangle(cornerRadius: 3)
                         .fill(Color.secondary.opacity(0.1))
-                        .frame(width: 52, height: 74)
+                        .frame(width: 44, height: 62)
                 }
             }
 
             // Labels
             VStack(alignment: .leading, spacing: 3) {
-                Text("Sheet \(sheetNumber) — \(sideLabel)")
+                Text("Sheet \(originalIndex / 2 + 1) — \(sideLabel)")
                     .fontWeight(.medium)
+                    .strikethrough(isSkipped, color: .secondary)
                 Text("Page \(position + 1) of \(totalPages)")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
+            .opacity(isSkipped ? 0.5 : 1.0)
 
             Spacer()
 
+            if isSkipped {
+                Image(systemName: "slash.circle.fill")
+                    .foregroundColor(.orange)
+            }
+
             // Up / Down chevrons
-            VStack(spacing: 6) {
+            VStack(spacing: 4) {
                 Button(action: onMoveUp) {
-                    Image(systemName: "chevron.up")
-                        .frame(width: 20, height: 20)
+                    Image(systemName: "chevron.up").frame(width: 18, height: 18)
                 }
                 .buttonStyle(.plain)
                 .disabled(!canMoveUp)
                 .foregroundColor(canMoveUp ? .primary : Color.secondary.opacity(0.3))
 
                 Button(action: onMoveDown) {
-                    Image(systemName: "chevron.down")
-                        .frame(width: 20, height: 20)
+                    Image(systemName: "chevron.down").frame(width: 18, height: 18)
                 }
                 .buttonStyle(.plain)
                 .disabled(!canMoveDown)
                 .foregroundColor(canMoveDown ? .primary : Color.secondary.opacity(0.3))
             }
         }
-        .padding(.vertical, 4)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(isSelected ? Color.accentColor.opacity(0.1) : Color.clear)
+        .contentShape(Rectangle())
+        .onTapGesture { onSelect() }
     }
 }
 
