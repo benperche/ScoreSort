@@ -5316,8 +5316,59 @@ func extractSplitNames(from labels: [String]) -> (baseName: String, suffixes: [S
     return (baseName: baseName, suffixes: suffixes)
 }
 
+/// Returns true if every checked page in `doc` looks like A3 landscape
+/// (~1190 × 842 pt — twice the width of A4 portrait).
+/// Checks up to the first three pages for consistency.
+/// A4 landscape has the same √2 aspect ratio, so width > 1000 pt is used to
+/// distinguish the two formats.
+func isA3Landscape(_ doc: PDFDocument) -> Bool {
+    guard doc.pageCount > 0 else { return false }
+    let pagesToCheck = min(doc.pageCount, 3)
+    for i in 0..<pagesToCheck {
+        guard let page = doc.page(at: i) else { return false }
+        let bounds = page.bounds(for: .mediaBox)
+        let w = bounds.width, h = bounds.height
+        // A3 landscape in PDF points: ~1190 × 842. Allow ±15% for scanner variation.
+        // Width > 1000 distinguishes A3 from A4 landscape (which is only ~842 pt wide).
+        guard w > h, w > 1000, w < 1400 else { return false }
+    }
+    return true
+}
+
+/// Splits every page in `doc` into left and right halves, returning a new
+/// PDFDocument with twice as many pages.  The crop/media box of each copy is
+/// set to cover only its half so viewers render the correct region.
+/// `leftFirst == true` → left half precedes right half (normal reading order).
+func splitA3Pages(_ doc: PDFDocument, leftFirst: Bool) -> PDFDocument {
+    let result = PDFDocument()
+    for i in 0..<doc.pageCount {
+        guard let page = doc.page(at: i) else { continue }
+        let media = page.bounds(for: .mediaBox)
+        let halfWidth = media.width / 2.0
+
+        guard let leftPage  = page.copy() as? PDFPage,
+              let rightPage = page.copy() as? PDFPage else { continue }
+
+        let leftBox  = CGRect(x: media.minX,             y: media.minY,
+                              width: halfWidth,           height: media.height)
+        let rightBox = CGRect(x: media.minX + halfWidth, y: media.minY,
+                              width: halfWidth,           height: media.height)
+
+        leftPage.setBounds(leftBox,  for: .mediaBox)
+        leftPage.setBounds(leftBox,  for: .cropBox)
+        rightPage.setBounds(rightBox, for: .mediaBox)
+        rightPage.setBounds(rightBox, for: .cropBox)
+
+        let first  = leftFirst ? leftPage  : rightPage
+        let second = leftFirst ? rightPage : leftPage
+        result.insert(first,  at: result.pageCount)
+        result.insert(second, at: result.pageCount)
+    }
+    return result
+}
+
 // MARK: - Split View
-private enum SplitStage { case split, naming, prefix, summary }
+private enum SplitStage { case a3PageOrder, split, naming, prefix, summary }
 
 struct SplitView: View {
     @StateObject private var pdfManager = PDFManager()
@@ -5344,6 +5395,17 @@ struct SplitView: View {
     /// Retained reference to the local NSEvent monitor that handles the delete key.
     @State private var splitViewKeyMonitor: Any?
     @State private var bookmarkNoticeVisible = false
+    /// Controls the sheet that asks "which half is page 1?" when an A3 doc is detected.
+    @State private var showingA3Detection = false
+    /// The pre-split PDFDocument produced by `splitA3Pages`; held while the reorder step is active.
+    @State private var a3SplitDocument: PDFDocument? = nil
+    /// Page indices into `a3SplitDocument` in the user's chosen order.
+    @State private var a3PageOrder: [Int] = []
+    /// Whether left half was chosen as first (used to label pages in the reorder view).
+    @State private var a3LeftFirst: Bool = true
+    /// Set to true before programmatically loading an already-processed A3 document
+    /// so the onChange handler skips the A3 detection pass.
+    @State private var suppressNextA3Detection = false
     @FocusState private var isViewFocused: Bool
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
@@ -5453,12 +5515,27 @@ struct SplitView: View {
                         onSave: { saveSplitPDF() }
                     )
                 }
+            case .a3PageOrder:
+                if let doc = a3SplitDocument {
+                    A3PageOrderView(
+                        document: doc,
+                        pageOrder: $a3PageOrder,
+                        leftFirst: a3LeftFirst,
+                        onConfirm: { applyA3PageOrder() },
+                        onCancel: {
+                            pdfManager.clearPDF()
+                            a3SplitDocument = nil
+                            a3PageOrder = []
+                            splitStage = .split
+                        }
+                    )
+                }
             case .split:
                 splitStageBody
             }
         }
         .onChange(of: pdfManager.pdfDocument) { _, newValue in
-            if newValue != nil {
+            if let doc = newValue {
                 // New PDF loaded — reset the entire split flow so no state from
                 // a previous file can survive into the naming or prefix stages.
                 isViewFocused = true
@@ -5467,29 +5544,14 @@ struct SplitView: View {
                 skippedPages = []
                 selectedFileIndices = []
 
-                let bookmarkData = newValue.flatMap { splitSizesFromBookmarks($0) }
-                if let data = bookmarkData {
-                    fileSizes = data.sizes
-                    if let names = extractSplitNames(from: data.labels) {
-                        baseFileName = names.baseName
-                        for (i, suffix) in names.suffixes.enumerated() {
-                            customFileNames[i] = suffix
-                        }
-                    } else {
-                        baseFileName = pdfManager.currentFileName ?? ""
-                    }
-                    withAnimation(.easeInOut(duration: 0.2)) { bookmarkNoticeVisible = true }
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-                        withAnimation(.easeInOut(duration: 0.2)) { bookmarkNoticeVisible = false }
-                    }
-                } else {
-                    fileSizes = totalPages > 0 ? [totalPages] : []
-                    baseFileName = pdfManager.currentFileName ?? ""
+                // Detect A3 landscape — pause and ask the user which half is page 1,
+                // unless this load was triggered by our own A3 processing pipeline.
+                if !suppressNextA3Detection && isA3Landscape(doc) {
+                    showingA3Detection = true
+                    return
                 }
-
-                // Return to the split stage if we were somewhere else
-                // (e.g. user loaded a new file straight from the summary screen).
-                if splitStage != .split { splitStage = .split }
+                suppressNextA3Detection = false
+                setupSplitState()
             } else {
                 // PDF cleared — reset all split flow state so nothing bleeds
                 // into the next session regardless of which stage we were on.
@@ -5505,6 +5567,23 @@ struct SplitView: View {
                 skippedPages = []
                 selectedFileIndices = []
             }
+        }
+        .sheet(isPresented: $showingA3Detection) {
+            A3SplitChoiceView(
+                onChoose: { leftFirst in
+                    guard let original = pdfManager.pdfDocument else { return }
+                    let splitDoc = splitA3Pages(original, leftFirst: leftFirst)
+                    a3SplitDocument = splitDoc
+                    a3PageOrder = Array(0..<splitDoc.pageCount)
+                    a3LeftFirst = leftFirst
+                    showingA3Detection = false
+                    splitStage = .a3PageOrder
+                },
+                onKeepAsIs: {
+                    showingA3Detection = false
+                    setupSplitState()
+                }
+            )
         }
     }
 
@@ -5925,6 +6004,57 @@ struct SplitView: View {
         }
     }
 
+    /// Reads bookmarks from the currently loaded document (if any) and initialises
+    /// `fileSizes`, `baseFileName`, and `customFileNames`.  Also shows the bookmark
+    /// notice banner.  Call this whenever a new (non-A3) document finishes loading.
+    private func setupSplitState() {
+        let bookmarkData = pdfManager.pdfDocument.flatMap { splitSizesFromBookmarks($0) }
+        if let data = bookmarkData {
+            fileSizes = data.sizes
+            if let names = extractSplitNames(from: data.labels) {
+                baseFileName = names.baseName
+                for (i, suffix) in names.suffixes.enumerated() {
+                    customFileNames[i] = suffix
+                }
+            } else {
+                baseFileName = pdfManager.currentFileName ?? ""
+            }
+            withAnimation(.easeInOut(duration: 0.2)) { bookmarkNoticeVisible = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
+                withAnimation(.easeInOut(duration: 0.2)) { bookmarkNoticeVisible = false }
+            }
+        } else {
+            fileSizes = totalPages > 0 ? [totalPages] : []
+            baseFileName = pdfManager.currentFileName ?? ""
+        }
+        if splitStage != .split { splitStage = .split }
+    }
+
+    /// Builds a reordered PDFDocument from `a3SplitDocument` using the user's chosen
+    /// `a3PageOrder`, loads it as the current document, and transitions to the split stage.
+    private func applyA3PageOrder() {
+        guard let splitDoc = a3SplitDocument else { return }
+        let reordered = PDFDocument()
+        for originalIndex in a3PageOrder {
+            if let page = splitDoc.page(at: originalIndex) {
+                reordered.insert(page, at: reordered.pageCount)
+            }
+        }
+        let pageCount = reordered.pageCount
+        // Clear A3-specific state
+        a3SplitDocument = nil
+        a3PageOrder = []
+        // Pre-populate split state directly to avoid a drop-zone flash
+        suppressNextA3Detection = true
+        fileSizes = pageCount > 0 ? [pageCount] : []
+        baseFileName = pdfManager.currentFileName ?? ""
+        // Loading the document triggers onChange, which will skip A3 detection
+        // (suppressNextA3Detection is true) and call setupSplitState() — harmless
+        // since fileSizes and baseFileName are already correct.
+        pdfManager.pdfDocument = reordered
+        splitStage = .split
+    }
+
     private func applyPrefixToFolder(_ folderURL: URL, orderedItems: [PrefixItem]) {
         let sep = UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - "
 
@@ -5963,6 +6093,256 @@ struct SplitView: View {
                 splitStage = .summary
             }
         }
+    }
+}
+
+// MARK: - A3 Split Choice View
+
+/// Sheet shown when an A3-landscape PDF is detected.  The user picks which half
+/// is page 1 (left-first or right-first), or dismisses without splitting.
+struct A3SplitChoiceView: View {
+    /// Called with `true` for left-first, `false` for right-first.
+    let onChoose: (Bool) -> Void
+    let onKeepAsIs: () -> Void
+
+    var body: some View {
+        VStack(spacing: 24) {
+            Text("A3 Landscape Detected")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("This document looks like an A3 sheet with two A4 pages side by side.\nWhich half should become the first page?")
+                .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
+                .frame(maxWidth: 380)
+
+            // Visual diagram — two A4-portrait rectangles side by side
+            HStack(spacing: 0) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.accentColor.opacity(0.08))
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.accentColor.opacity(0.5), lineWidth: 1.5)
+                    VStack(spacing: 6) {
+                        Image(systemName: "1.circle.fill")
+                            .font(.title)
+                            .foregroundColor(.accentColor)
+                        Text("Left half")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .frame(width: 90, height: 126)
+
+                ZStack {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color(NSColor.controlBackgroundColor))
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                    VStack(spacing: 6) {
+                        Image(systemName: "2.circle")
+                            .font(.title)
+                            .foregroundColor(.secondary)
+                        Text("Right half")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .frame(width: 90, height: 126)
+            }
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
+                    .padding(-10)
+            )
+            .padding(14)
+
+            // Choice buttons
+            HStack(spacing: 16) {
+                Button {
+                    onChoose(true)
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.left.to.line")
+                        Text("Left half first")
+                    }
+                    .frame(width: 150)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+
+                Button {
+                    onChoose(false)
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.right.to.line")
+                        Text("Right half first")
+                    }
+                    .frame(width: 150)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.large)
+            }
+
+            Text("For saddle-stitch booklets, pages come out in sheet order — use the reorder step to fix the sequence.")
+                .font(.caption)
+                .foregroundColor(.secondary)
+                .multilineTextAlignment(.center)
+                .frame(maxWidth: 380)
+
+            Button("Keep as-is — don't split pages") {
+                onKeepAsIs()
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(.secondary)
+        }
+        .padding(36)
+        .frame(minWidth: 480)
+    }
+}
+
+// MARK: - A3 Page Order View
+
+/// Step shown after A3 splitting.  Displays all resulting pages as thumbnail rows;
+/// the user can drag or use chevron buttons to reorder before continuing.
+struct A3PageOrderView: View {
+    let document: PDFDocument
+    @Binding var pageOrder: [Int]
+    let leftFirst: Bool
+    let onConfirm: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // Header toolbar
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Reorder Pages")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Text("The A3 sheet has been split into individual A4 pages. Drag rows or use the arrows to put them in the correct reading order, then continue.")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Button("Cancel") { onCancel() }
+                    .foregroundColor(.secondary)
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
+
+            Divider()
+
+            List {
+                ForEach(Array(pageOrder.enumerated()), id: \.offset) { position, originalIndex in
+                    A3PageOrderRow(
+                        position: position,
+                        originalIndex: originalIndex,
+                        totalPages: pageOrder.count,
+                        leftFirst: leftFirst,
+                        document: document,
+                        canMoveUp: position > 0,
+                        canMoveDown: position < pageOrder.count - 1,
+                        onMoveUp:   { pageOrder.swapAt(position, position - 1) },
+                        onMoveDown: { pageOrder.swapAt(position, position + 1) }
+                    )
+                }
+                .onMove { source, destination in
+                    pageOrder.move(fromOffsets: source, toOffset: destination)
+                }
+            }
+            .listStyle(.plain)
+
+            Divider()
+
+            // Footer
+            HStack {
+                Text("\(pageOrder.count) pages")
+                    .foregroundColor(.secondary)
+                Spacer()
+                Button("Continue →") { onConfirm() }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.large)
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
+        }
+    }
+}
+
+struct A3PageOrderRow: View {
+    let position: Int
+    let originalIndex: Int
+    let totalPages: Int
+    let leftFirst: Bool
+    let document: PDFDocument
+    let canMoveUp: Bool
+    let canMoveDown: Bool
+    let onMoveUp: () -> Void
+    let onMoveDown: () -> Void
+
+    private var sheetNumber: Int { originalIndex / 2 + 1 }
+    private var sideLabel: String {
+        let isFirst = originalIndex % 2 == 0
+        if leftFirst {
+            return isFirst ? "Left half" : "Right half"
+        } else {
+            return isFirst ? "Right half" : "Left half"
+        }
+    }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            // Page thumbnail
+            Group {
+                if let page = document.page(at: originalIndex) {
+                    let thumb = page.thumbnail(of: CGSize(width: 52, height: 74), for: .mediaBox)
+                    Image(nsImage: thumb)
+                        .resizable()
+                        .aspectRatio(contentMode: .fit)
+                        .frame(width: 52, height: 74)
+                        .cornerRadius(3)
+                        .overlay(RoundedRectangle(cornerRadius: 3)
+                            .stroke(Color.secondary.opacity(0.3), lineWidth: 1))
+                } else {
+                    RoundedRectangle(cornerRadius: 3)
+                        .fill(Color.secondary.opacity(0.1))
+                        .frame(width: 52, height: 74)
+                }
+            }
+
+            // Labels
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Sheet \(sheetNumber) — \(sideLabel)")
+                    .fontWeight(.medium)
+                Text("Page \(position + 1) of \(totalPages)")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            Spacer()
+
+            // Up / Down chevrons
+            VStack(spacing: 6) {
+                Button(action: onMoveUp) {
+                    Image(systemName: "chevron.up")
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canMoveUp)
+                .foregroundColor(canMoveUp ? .primary : Color.secondary.opacity(0.3))
+
+                Button(action: onMoveDown) {
+                    Image(systemName: "chevron.down")
+                        .frame(width: 20, height: 20)
+                }
+                .buttonStyle(.plain)
+                .disabled(!canMoveDown)
+                .foregroundColor(canMoveDown ? .primary : Color.secondary.opacity(0.3))
+            }
+        }
+        .padding(.vertical, 4)
     }
 }
 
