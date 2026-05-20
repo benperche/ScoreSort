@@ -5340,6 +5340,26 @@ func isA3Landscape(_ doc: PDFDocument) -> Bool {
     return true
 }
 
+/// Broader check used for the hint banner: returns `true` when pages look landscape
+/// and have an aspect ratio close to A3 (√2 ≈ 1.414), but don't meet the strict
+/// width thresholds of `isA3Landscape` (e.g. different scanner DPI or page size).
+/// The ratio window 1.3–1.6 covers A3 at various resolutions while excluding
+/// standard-width landscape scores.
+func looksLikeA3Landscape(_ doc: PDFDocument) -> Bool {
+    guard doc.pageCount > 0 else { return false }
+    let pagesToCheck = min(doc.pageCount, 3)
+    for i in 0..<pagesToCheck {
+        guard let page = doc.page(at: i) else { return false }
+        let bounds = page.bounds(for: .mediaBox)
+        var w = bounds.width, h = bounds.height
+        if page.rotation % 180 != 0 { swap(&w, &h) }
+        guard w > h else { return false }          // must be landscape
+        let ratio = w / h
+        guard ratio >= 1.3, ratio <= 1.6 else { return false }  // ~A3/A4 proportions
+    }
+    return true
+}
+
 /// Splits every page in `doc` into left and right halves, returning a new
 /// PDFDocument with twice as many pages.  The crop/media box of each copy is
 /// set to cover only its half so viewers render the correct region.
@@ -5515,6 +5535,8 @@ struct SplitView: View {
     @State private var suppressDocumentReset = false
     /// True while background A3 splitting is in progress; shows a loading overlay.
     @State private var isProcessingA3 = false
+    /// Shows a gentle hint banner when a PDF looks like an A3 scan but didn't trigger auto-detection.
+    @State private var a3HintVisible = false
     /// Shows a brief tip banner after an A3 split loads into Step 1.
     @State private var a3SplitNoticeVisible = false
     /// Shows a brief tip banner after the first booklet fix, pointing to the per-card redo icon.
@@ -5663,6 +5685,11 @@ struct SplitView: View {
                     showingA3Detection = true
                     return
                 }
+                // If the page proportions look A3-like but the strict check didn't fire
+                // (e.g. unusual scanner DPI), show a gentle hint banner instead.
+                if !suppressNextA3Detection && looksLikeA3Landscape(doc) {
+                    withAnimation { a3HintVisible = true }
+                }
                 suppressNextA3Detection = false
                 setupSplitState()
             } else {
@@ -5682,6 +5709,7 @@ struct SplitView: View {
                 skipMode = .file
                 lastBookletOrder = nil
                 bookletRedoNoticeVisible = false
+                a3HintVisible = false
             }
         }
         .sheet(isPresented: $showingA3Detection) {
@@ -5814,6 +5842,31 @@ struct SplitView: View {
                 .padding(.horizontal)
                 .padding(.vertical, 6)
                 .background(Color.accentColor.opacity(0.08))
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
+            if a3HintVisible {
+                HStack(spacing: 8) {
+                    Image(systemName: "rectangle.split.2x1")
+                        .foregroundColor(.secondary)
+                    Text("This looks like it might be an A3 scan — each page may contain two A4 halves.")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                    Button("Split as A3…") {
+                        withAnimation { a3HintVisible = false }
+                        showingA3Detection = true
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.callout)
+                    Spacer()
+                    Button { withAnimation(.easeInOut(duration: 0.2)) { a3HintVisible = false } }
+                        label: { Image(systemName: "xmark").foregroundColor(.secondary) }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+                .background(Color(NSColor.windowBackgroundColor))
+                .overlay(Rectangle().frame(height: 1).foregroundColor(Color.secondary.opacity(0.2)), alignment: .bottom)
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 

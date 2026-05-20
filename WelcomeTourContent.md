@@ -73,6 +73,7 @@ Drag a folder onto the **right side** to replace the filenames of a number of fi
 **Body:**
 Drop the PDF and use **← →** to move through pages. Press **Space** to place or remove a split marker, and **↑ ↓** to jump between the start of each output file. You can also automatically apply equally spaced markers at a certain 'stride'. If the PDF was created by ScoreSort's combiner, split points and file names are filled in automatically from the embedded bookmarks.
 In Step 2, name each output file (like in the Rename Files flow). Toggle **Prefix score order** to add score-order numbers automatically in Step 3 (again, like in the Rename Files flow).
+For A3 scans (two A4 pages side by side), ScoreSort can automatically detect and split each page into two halves — just drag the file in and follow the prompt.
 
 **Tip:** ⌘← / ⌘→ jumps to the first or last page in the split dialogue · Space toggles a split marker
 
