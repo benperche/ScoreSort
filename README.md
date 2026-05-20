@@ -54,6 +54,10 @@ Split a large PDF — for example a complete scan of all parts bound together �
 - **Arrow-key dropdown navigation** — ↓/↑ moves through suggestions without leaving the keyboard; Return accepts, Escape dismisses
 - **Filename validation** — illegal characters (/ : \\) flagged inline before saving
 - **Base filename** shared across all output files; per-file suffix appended automatically
+- **Skip pages or whole files** — press Delete (or the Skip button) to exclude individual pages or entire output files from the saved result; toggle between page-skip and file-skip mode with the segmented control
+- **Swap with Next** — rearrange adjacent output files without changing split markers
+- **A3 landscape splitting** — if ScoreSort detects an A3 landscape scan on load, it offers to split each page into left and right halves automatically (choose which half comes first). Works correctly whether the page is stored as native landscape or as portrait with a rotation flag (e.g. after using the Rotate tab). If auto-detection doesn't fire, use **Split as A3…** in the toolbar
+- **Fix Booklet Order** — if your scan is a saddle-stitched booklet scanned sheet-by-sheet (cover first or inner-first), ScoreSort can automatically reorder the pages into reading order. Once a file segment has a page count divisible by 4, click **Fix Booklet Order** in the toolbar (or the stack icon on a file card). Large page thumbnails let you choose the correct reordering; a custom drag-to-reorder fallback is also available. After applying, the **Redo** button (⬚▶) on any matching file card applies the same order instantly
 
 ### 🔄 Page Rotator
 Rotate PDF pages with flexible options for whole-document and per-page corrections.
@@ -251,6 +255,9 @@ After:
 | `Space` | Toggle split point on current page |
 | `←` / `→` | Navigate between pages |
 | `⌘←` / `⌘→` | Jump to first / last page |
+| `↑` / `↓` | Jump to start of previous / next output file |
+| `S` | Swap current output file with the next one |
+| `⌫` | Skip / unskip current page or file (see Skip Mode toggle) |
 
 ---
 

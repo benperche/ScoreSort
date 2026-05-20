@@ -1,5 +1,5 @@
 # ScoreSort — Code Reference
-> Single file: `ScanReorienterApp_complete.swift` (~4 500 lines)
+> Single file: `ScanReorienterApp_complete.swift` (~8 500 lines)
 > Xcode project: "ScoreSort"
 
 ---
@@ -381,7 +381,7 @@ Written from built-in defaults on first launch (via `InstrumentOrders.setup()` c
 ## Tab 2 — Split PDF
 
 **Views:** `SplitView` (Step 1) → `SplitNamingStageView` (Step 2) → `SplitFileNamingRow` (one row per output file)
-**Supporting:** `SuggestionButton`, `PageInstrumentPreview`, `SplitControlsSection`
+**Supporting:** `SuggestionButton`, `PageInstrumentPreview`, `SplitControlsSection`, `A3SplitChoiceView`, `BookletOrderSheet`
 **ViewModel:** `PDFManager` (shared type, separate `@StateObject` per tab)
 
 ### Data model — `fileSizes: [Int]`
@@ -395,23 +395,94 @@ The split state is stored as an **ordered array of page counts**, one entry per 
 ### SplitView key state
 
 ```swift
-@State private var fileSizes: [Int] = []        // primary split model
-@State private var stride: Int = 2               // for auto-split
-@State private var showingNamingStage: Bool = false
+@State private var fileSizes: [Int] = []
+@State private var stride: Int = 2
+@State private var currentPage: Int = 0
 @State private var baseFileName: String = ""
-@State private var customFileNames: [Int: String] = [:]  // fileIndex → suffix
+@State private var customFileNames: [Int: String] = [:]   // fileIndex → suffix
+@State private var skippedPages: Set<Int> = []
+@State private var selectedFileIndices: Set<Int> = []
+@State private var skipMode: SkipMode = .file             // page or file skip mode
+@State private var bookletFixRequest: BookletFixRequest? = nil
+// A3 detection flags
+@State private var showingA3Detection = false
+@State private var suppressNextA3Detection = false
+@State private var suppressDocumentReset = false           // preserves split state during in-place doc replace
+@State private var isProcessingA3 = false
+@State private var a3SplitNoticeVisible = false
 ```
 
 When a new PDF loads, `fileSizes` is pre-populated via `splitSizesFromBookmarks` if the document has a top-level outline. If the bookmark labels match the `"NN - Piecename - Partname"` pattern (as produced by ScoreSort's own combiner output), `baseFileName` and `customFileNames` are also pre-filled via `extractSplitNames`.
 
-### Pure split functions (top-level, above `SplitView`)
+**`suppressDocumentReset`** — set to `true` before replacing `pdfManager.pdfDocument` in-place (page swap, booklet reorder). `onChange` returns early without resetting any split state.
+
+**`suppressNextA3Detection`** — set to `true` before loading an already-processed A3 document so `onChange` skips re-triggering the detection sheet.
+
+**`skipMode`** — defaults to `.file`; automatically set to `.page` after an A3 split (where blank pages need to be removed individually). Reset to `.file` on any fresh PDF load or clear.
+
+### SplitView methods (booklet / A3)
+
+| Method | Purpose |
+|--------|---------|
+| `swapCurrentPageWithNext()` | Rebuilds the document with the current page and the next page exchanged. Sets both suppress flags. |
+| `applyBookletOrder(pages: [Int], order: [Int])` | Rebuilds the document with the segment's pages in reading order. `order[readingPos]` = local index into `pages`. Also remaps `skippedPages` through the inverse permutation. Sets both suppress flags. |
+| `requestBookletFix()` | Reads the current file segment and sets `bookletFixRequest` to present the sheet. |
+| `canFixBookletOrder: Bool` | `true` when the current file has ≥ 4 pages and page count is divisible by 4. |
+| `handleDeleteKey()` | Respects `skipMode`: `.page` → `toggleSkipPage(currentPage)`; `.file` → `toggleSkipFiles(selectedFileIndices or current file)`. |
+
+### Pure split / A3 / booklet functions (top-level, above `SplitView`)
 
 | Function | Purpose |
 |----------|---------|
 | `toggleSplit(in sizes: [Int], at page: Int) -> [Int]` | Returns new sizes array with split toggled at `page`. Splits mid-file or merges at a boundary. |
 | `splitSizes(totalPages: Int, stride: Int) -> [Int]` | Returns sizes array dividing `totalPages` into `stride`-sized chunks (last chunk takes remainder). |
 | `splitSizesFromBookmarks(_ document: PDFDocument) -> (sizes: [Int], labels: [String])?` | Reads the document's top-level `PDFOutline`, sorts entries by page index, and returns a `fileSizes` array and a parallel array of bookmark label strings. Returns `nil` if the document has fewer than two usable bookmarks. The first bookmark may point to page 0 (its label is included but page 0 is never a split marker). |
-| `extractSplitNames(from labels: [String]) -> (baseName: String, suffixes: [String])?` | Parses bookmark labels of the form `"NN - Piecename - Partname"` (numeric prefix, space-hyphen-space separator). Returns a shared `baseName` and per-file `suffixes` if all labels parse successfully and share the same piece name. Returns `nil` on any mismatch, falling back to the filename as base name. |
+| `extractSplitNames(from labels: [String]) -> (baseName: String, suffixes: [String])?` | Parses bookmark labels of the form `"NN - Piecename - Partname"` (numeric prefix, space-hyphen-space separator). Returns a shared `baseName` and per-file `suffixes` if all labels parse successfully and share the same piece name. Returns `nil` on any mismatch. |
+| `isA3Landscape(_ doc: PDFDocument) -> Bool` | Returns `true` if the first ≤ 3 pages are all landscape, width > 1000 pt and < 1500 pt. Accounts for `page.rotation` metadata: if `rotation % 180 != 0`, width and height are swapped before measuring (so pages stored as portrait + 90°/270° rotation flag are detected correctly). |
+| `splitA3Pages(_ doc: PDFDocument, leftFirst: Bool) -> PDFDocument` | For each page, creates two copies and sets their `mediaBox`/`cropBox` to the correct native half. Uses `page.rotation` (clockwise degrees) to determine which native axis is the visual horizontal divide: 0° → split on X; 90° CW → visual left = native bottom half (split on Y); 180° → visual left = native right half; 270° CW → visual left = native top half. Vector-quality; no re-rendering. |
+| `coverFirstFrontBackOrder(n: Int) -> [Int]` | Saddle-stitch deimposition: outer cover scanned first, each sheet's front face before back. Returns a permutation where `result[readingPos] = scanPos` (0-indexed). Verified: N=4→`[1,2,3,0]`, N=8→`[1,2,5,6,7,4,3,0]`. Returns `[]` if N < 4 or N % 4 ≠ 0. |
+| `innerFirstFrontBackOrder(n: Int) -> [Int]` | Inner sheets scanned first (alternative scanning convention). Implemented as a half-rotation of `coverFirstFrontBackOrder`. Returns `[]` if N < 8 or N % 4 ≠ 0. |
+| `bookletCandidates(n: Int) -> [(label: String, description: String, order: [Int])]` | Returns candidate reorderings for an n-page segment: "Standard (cover first)" always; "Inner-first" if n ≥ 8. Each candidate's `order` is a valid permutation. |
+
+### `SplitControlsSection` layout (3 rows)
+
+| Row | Contents |
+|-----|----------|
+| 1 | Navigation: `|◀` `◀` … Page N of M / File info … `▶` `▶|` |
+| 2 | `[Add/Remove Split (Space)]` ← disabled at page 0 … `[Swap with Next (S)]` ← disabled at last page |
+| 3 | Segmented `[Skip Page ∣ Skip File]` … `[Skip/Unskip button]` — label adapts to mode and current state |
+
+`SplitControlsSection` binds `skipMode: Binding<SkipMode>` directly; the segmented control updates the parent's state in place.
+
+### A3 split workflow
+
+1. User drags in a PDF. `onChange` calls `isA3Landscape` → shows `A3SplitChoiceView` sheet.
+2. User picks "Left half first" / "Right half first". Background thread calls `splitA3Pages`. On completion, sets `skipMode = .page`, then assigns result to `pdfManager.pdfDocument` (suppress flags prevent re-detection and state reset).
+3. `a3SplitNoticeVisible` banner appears for 6 s pointing to "Swap with Next (S)".
+4. Toolbar "Fix Booklet Order" button becomes available once split markers define file segments of size divisible by 4.
+
+### Booklet reorder workflow
+
+1. User sets split markers to define each booklet as its own file segment.
+2. User navigates to a file with ≥ 4 pages (divisible by 4); toolbar "Fix Booklet Order" becomes enabled.
+3. Tapping the button creates a `BookletFixRequest` and presents `BookletOrderSheet`.
+4. Sheet shows thumbnail strips (90 × 127 pt) for each candidate reordering with radio buttons, plus a drag-to-reorder custom option.
+5. On Apply, `applyBookletOrder` replaces the document in-place (split markers and skipped-page mapping preserved).
+
+### `BookletOrderSheet`
+
+```swift
+struct BookletOrderSheet: View {
+    let request: BookletFixRequest   // fileIndex, pages: [Int], document: PDFDocument
+    let onApply: ([Int]) -> Void     // called with the chosen order permutation
+    let onCancel: () -> Void
+}
+```
+
+- Candidates generated by `bookletCandidates(n:)`.
+- Thumbnails rendered via `PDFPageView` at 90 × 127 pt.
+- Custom drag-to-reorder via `List` + `ForEach.onMove` (no `editMode` needed on macOS).
+- Apply button disabled when no valid option is selected.
 
 ### Step 2 — `SplitNamingStageView`
 
@@ -484,6 +555,13 @@ enum RotationMode { case odd, even, none }
 - **Preset apply does not interact with collate groups** — `applyPreset` sets `copies` on individual `CombineFile` entries; it ignores `collateGroupId` entirely. A grouped file can have its copies set by a preset apply, but the value is unused by the PDF output loop (which uses `group.copies` instead). Consider whether this is the desired behaviour if mixing groups and presets.
 - **Roman-numeral normalisation requires a space prefix** — `normalizeRomanNumerals` only converts ` i`/` ii`/` iii`/` iv` (word-boundary guard). This prevents false matches like "celli" → "cell1". IV is checked before I to prevent "violin iv" → "violin 1v".
 - **Collate group contiguity is maintained by `createCollateGroup`** — files are pulled together at the position of the first selected file. Nothing in the code subsequently enforces contiguity, but nothing currently breaks it either (move operations use `expandForGroups` which moves all group files together).
+- **`suppressDocumentReset` is the "in-place replace" flag** — any operation that replaces `pdfManager.pdfDocument` without wanting a full state reset (page swap, booklet reorder) must set this flag immediately before the assignment. `onChange` clears it and returns early, preserving `fileSizes`, `skippedPages`, `customFileNames`, etc.
+- **`suppressNextA3Detection` prevents A3 re-detection loops** — set before loading an already-processed document. Cleared by `onChange` after it is checked, so it is single-use.
+- **Booklet math: `order[readingPos] = scanPos`** — the permutation arrays produced by `coverFirstFrontBackOrder` and friends index *into* the file segment's pages array: `pages[order[readingPos]]` gives the absolute page index to place at `readingPos`. The formula is derived from saddle-stitch sheet geometry; verified for N=4 and N=8.
+- **`SkipMode.page` after A3 split** — because A3 scanning produces interleaved left/right halves, blank pages tend to appear one at a time rather than whole-file. Page-skip mode is therefore the more useful default after splitting.
+- **`editMode` is unavailable on macOS** — SwiftUI's `\.editMode` environment key is iOS-only. On macOS, `ForEach.onMove` inside a `List` enables drag-to-reorder natively with no extra configuration.
+- **PDF `page.rotation` is clockwise** — the PDF spec defines `Rotate` as clockwise degrees. So `rotation = 90` means 90° CW: the native top edge swings to the visual right. When splitting A3 pages with a 90° rotation flag, the visual left half corresponds to the native *bottom* half (low Y). This is counterintuitive but matches Preview.app behaviour. The inverse holds for 270°.
+- **ScoreSort's Rotate tab uses `page.rotation` metadata** — it does not geometrically transform page content. This is the standard PDF approach and is correctly handled by Preview. The consequence is that rotated pages have a portrait native mediaBox with a rotation flag, so `isA3Landscape` must swap w/h before measuring, and `splitA3Pages` must split along the Y axis rather than X.
 
 ---
 
@@ -491,7 +569,7 @@ enum RotationMode { case odd, even, none }
 
 **Target:** `ScoreSortTests` (Swift Testing framework — `@Suite` / `@Test` / `#expect`)  
 **File:** `ScoreSortTests/Music_PDF_ManagerTests.swift`  
-**Import:** `@testable import Music_PDF_Manager`
+**Import:** `@testable import ScoreSort`
 
 **Shared helper:** `writePDF(pages: Int, to: URL)` — creates a real blank-page PDF using PDFKit.
 
@@ -508,5 +586,10 @@ enum RotationMode { case odd, even, none }
 | `RomanNumeralTests` | `normalizeRomanNumerals` — no-op on plain text, I/II/III/IV conversion, IV matched before I |
 | `NumberedBaseTests` | `numberedBase(of:)` — arabic suffix, roman suffix, unnumbered returns nil |
 | `RenumberAfterDeletionTests` | `renumberAfterDeletion` — arabic survivor, roman survivor, pair untouched, capitalisation preserved |
+| `CoverFirstFrontBackOrderTests` | `coverFirstFrontBackOrder(n:)` — N=4 and N=8 known values, valid permutation for N=12/16, structural properties (first reading page always scan 1, last always scan 0), guard conditions (n<4, n%4≠0) |
+| `InnerFirstFrontBackOrderTests` | `innerFirstFrontBackOrder(n:)` — valid permutation N=8/16, differs from cover-first, empty for N=4/N%4≠0 |
+| `BookletCandidatesTests` | `bookletCandidates(n:)` — correct count (1 for N=4, 2 for N=8), valid permutations for all N, correct N=4 order, non-empty labels/descriptions |
+| `A3LandscapeDetectionTests` | `isA3Landscape(_:)` — empty doc, portrait, square, too narrow (≤1000 pt), too wide (≥1400 pt), A3 landscape, multi-page, mixed-size doc |
+| `A3PageSplittingTests` | `splitA3Pages(_:leftFirst:)` — output count doubled, half width, unchanged height, left/right crop origins, mediaBox=cropBox, empty input |
 
-**Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; UI/integration tests.
+**Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; `applyBookletOrder` state mutations; UI/integration tests.

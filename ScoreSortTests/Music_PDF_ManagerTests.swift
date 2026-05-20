@@ -1067,3 +1067,319 @@ struct CombineManagerBookmarkTests {
         #expect(manager.files[2].name == "B.pdf")
     }
 }
+
+// MARK: - Booklet Deimposition Math
+
+// Tests for coverFirstFrontBackOrder, innerFirstFrontBackOrder, and bookletCandidates.
+// These are pure functions with no dependencies on PDFKit or app state — the fastest
+// tests in the suite.
+
+@Suite("Booklet deimposition — coverFirstFrontBackOrder")
+struct CoverFirstFrontBackOrderTests {
+
+    // ── Correctness for small known cases ─────────────────────────────────
+
+    @Test("N=4 matches user-reported scan order 4-1-2-3")
+    func n4MatchesReportedOrder() {
+        // User reports: pages come out as scan[4,1,2,3].
+        // order[readingPos] = scanPos should be [1,2,3,0] so that
+        // reading[0]=scan1=page1, reading[3]=scan0=page4.
+        #expect(coverFirstFrontBackOrder(n: 4) == [1, 2, 3, 0])
+    }
+
+    @Test("N=8 produces the expected reordering")
+    func n8ExpectedOrder() {
+        #expect(coverFirstFrontBackOrder(n: 8) == [1, 2, 5, 6, 7, 4, 3, 0])
+    }
+
+    @Test("N=12 is a valid permutation")
+    func n12IsValidPermutation() {
+        let order = coverFirstFrontBackOrder(n: 12)
+        #expect(order.count == 12)
+        #expect(Set(order) == Set(0..<12))   // all indices present exactly once
+    }
+
+    @Test("N=16 is a valid permutation")
+    func n16IsValidPermutation() {
+        let order = coverFirstFrontBackOrder(n: 16)
+        #expect(order.count == 16)
+        #expect(Set(order) == Set(0..<16))
+    }
+
+    // ── Edge cases / guard conditions ─────────────────────────────────────
+
+    @Test("n=0 returns empty")
+    func n0ReturnsEmpty() {
+        #expect(coverFirstFrontBackOrder(n: 0).isEmpty)
+    }
+
+    @Test("n=3 (not a multiple of 4) returns empty")
+    func nonMultipleOf4ReturnsEmpty() {
+        #expect(coverFirstFrontBackOrder(n: 3).isEmpty)
+    }
+
+    @Test("n=2 (too small) returns empty")
+    func tooSmallReturnsEmpty() {
+        #expect(coverFirstFrontBackOrder(n: 2).isEmpty)
+    }
+
+    @Test("n=6 (multiple of 2 but not 4) returns empty")
+    func multipleOf2NotOf4ReturnsEmpty() {
+        #expect(coverFirstFrontBackOrder(n: 6).isEmpty)
+    }
+
+    // ── Structural property: page 0 in reading order always comes from scan 1 ──
+
+    @Test("Reading page 0 always comes from scan position 1 (cover right side)")
+    func firstReadingPageIsAlwaysScanPosition1() {
+        for n in stride(from: 4, through: 32, by: 4) {
+            let order = coverFirstFrontBackOrder(n: n)
+            #expect(order[0] == 1, "Failed for n=\(n)")
+        }
+    }
+
+    @Test("Last reading page always comes from scan position 0 (cover left side)")
+    func lastReadingPageIsAlwaysScanPosition0() {
+        for n in stride(from: 4, through: 32, by: 4) {
+            let order = coverFirstFrontBackOrder(n: n)
+            #expect(order[n - 1] == 0, "Failed for n=\(n)")
+        }
+    }
+}
+
+@Suite("Booklet deimposition — innerFirstFrontBackOrder")
+struct InnerFirstFrontBackOrderTests {
+
+    @Test("N=8 is a valid permutation")
+    func n8IsValidPermutation() {
+        let order = innerFirstFrontBackOrder(n: 8)
+        #expect(order.count == 8)
+        #expect(Set(order) == Set(0..<8))
+    }
+
+    @Test("N=8 differs from cover-first order")
+    func n8DiffersFromCoverFirst() {
+        let inner   = innerFirstFrontBackOrder(n: 8)
+        let cover   = coverFirstFrontBackOrder(n: 8)
+        #expect(inner != cover)
+    }
+
+    @Test("N=16 is a valid permutation")
+    func n16IsValidPermutation() {
+        let order = innerFirstFrontBackOrder(n: 16)
+        #expect(order.count == 16)
+        #expect(Set(order) == Set(0..<16))
+    }
+
+    @Test("N=4 (too small for inner-first) returns empty")
+    func n4ReturnsEmpty() {
+        #expect(innerFirstFrontBackOrder(n: 4).isEmpty)
+    }
+
+    @Test("N=7 (not a multiple of 4) returns empty")
+    func nonMultipleOf4ReturnsEmpty() {
+        #expect(innerFirstFrontBackOrder(n: 7).isEmpty)
+    }
+}
+
+@Suite("Booklet deimposition — bookletCandidates")
+struct BookletCandidatesTests {
+
+    @Test("N=4 returns exactly one candidate (inner-first requires n≥8)")
+    func n4ReturnsSingleCandidate() {
+        let candidates = bookletCandidates(n: 4)
+        #expect(candidates.count == 1)
+    }
+
+    @Test("N=8 returns two candidates")
+    func n8ReturnsTwoCandidates() {
+        let candidates = bookletCandidates(n: 8)
+        #expect(candidates.count == 2)
+    }
+
+    @Test("N=3 (not a multiple of 4) returns empty")
+    func nonMultipleReturnsEmpty() {
+        #expect(bookletCandidates(n: 3).isEmpty)
+    }
+
+    @Test("Every candidate order is a valid permutation")
+    func allOrdersAreValidPermutations() {
+        for n in [4, 8, 12, 16] {
+            for candidate in bookletCandidates(n: n) {
+                #expect(candidate.order.count == n,
+                        "Wrong length for n=\(n), candidate '\(candidate.label)'")
+                #expect(Set(candidate.order) == Set(0..<n),
+                        "Duplicate or out-of-range index for n=\(n), candidate '\(candidate.label)'")
+            }
+        }
+    }
+
+    @Test("First candidate for N=4 matches the known correct order")
+    func n4FirstCandidateIsCorrect() {
+        let candidates = bookletCandidates(n: 4)
+        #expect(candidates.first?.order == [1, 2, 3, 0])
+    }
+
+    @Test("Candidates have non-empty labels and descriptions")
+    func candidatesHaveLabelsAndDescriptions() {
+        for candidate in bookletCandidates(n: 8) {
+            #expect(!candidate.label.isEmpty)
+            #expect(!candidate.description.isEmpty)
+        }
+    }
+}
+
+// MARK: - A3 Landscape Detection
+
+// Tests for isA3Landscape(_:) — the predicate that decides whether to offer splitting.
+
+@Suite("A3 landscape detection")
+struct A3LandscapeDetectionTests {
+
+    /// Creates a PDFDocument whose pages all have the given media box dimensions.
+    private func makeDoc(width: CGFloat, height: CGFloat, pages: Int = 1) -> PDFDocument {
+        let doc = PDFDocument()
+        let bounds = CGRect(x: 0, y: 0, width: width, height: height)
+        for i in 0..<pages {
+            let p = PDFPage()
+            p.setBounds(bounds, for: .mediaBox)
+            doc.insert(p, at: i)
+        }
+        return doc
+    }
+
+    @Test("Empty document returns false")
+    func emptyDocReturnsFalse() {
+        #expect(isA3Landscape(PDFDocument()) == false)
+    }
+
+    @Test("Portrait page returns false")
+    func portraitReturnsFalse() {
+        // A4 portrait: 595 × 842
+        #expect(isA3Landscape(makeDoc(width: 595, height: 842)) == false)
+    }
+
+    @Test("Square page returns false (not landscape)")
+    func squareReturnsFalse() {
+        #expect(isA3Landscape(makeDoc(width: 800, height: 800)) == false)
+    }
+
+    @Test("Landscape but too narrow (≤ 1000 pt) returns false")
+    func tooNarrowReturnsFalse() {
+        // A4 landscape: 842 × 595 — width is only 842, below the 1000 pt threshold
+        #expect(isA3Landscape(makeDoc(width: 842, height: 595)) == false)
+    }
+
+    @Test("Landscape and too wide (≥ 1400 pt) returns false")
+    func tooWideReturnsFalse() {
+        #expect(isA3Landscape(makeDoc(width: 1500, height: 800)) == false)
+    }
+
+    @Test("A3 landscape dimensions return true")
+    func a3LandscapeReturnsTrue() {
+        // A3 landscape: ≈ 1191 × 842 pt
+        #expect(isA3Landscape(makeDoc(width: 1191, height: 842)) == true)
+    }
+
+    @Test("Multi-page A3 document returns true")
+    func multiPageA3ReturnsTrue() {
+        #expect(isA3Landscape(makeDoc(width: 1191, height: 842, pages: 4)) == true)
+    }
+
+    @Test("Mixed-size document (first page A3, rest portrait) returns false")
+    func mixedSizeReturnsFalse() {
+        // isA3Landscape checks the first 3 pages; if any fails the check it returns false.
+        let doc = PDFDocument()
+        let a3 = PDFPage(); a3.setBounds(CGRect(x: 0, y: 0, width: 1191, height: 842), for: .mediaBox)
+        let portrait = PDFPage(); portrait.setBounds(CGRect(x: 0, y: 0, width: 595, height: 842), for: .mediaBox)
+        doc.insert(a3,      at: 0)
+        doc.insert(portrait, at: 1)
+        doc.insert(portrait, at: 2)
+        #expect(isA3Landscape(doc) == false)
+    }
+}
+
+// MARK: - A3 Page Splitting
+
+// Tests for splitA3Pages(_:leftFirst:) — crop-box based splitting that produces
+// two A4-width pages from each A3 landscape page without re-rendering.
+
+@Suite("A3 page splitting")
+struct A3PageSplittingTests {
+
+    private let pageWidth:  CGFloat = 1200
+    private let pageHeight: CGFloat = 800
+
+    /// Creates a document with `count` pages of uniform A3-like dimensions.
+    private func makeA3Doc(pages count: Int) -> PDFDocument {
+        let doc = PDFDocument()
+        let bounds = CGRect(x: 0, y: 0, width: pageWidth, height: pageHeight)
+        for i in 0..<count {
+            let p = PDFPage()
+            p.setBounds(bounds, for: .mediaBox)
+            doc.insert(p, at: i)
+        }
+        return doc
+    }
+
+    @Test("Output page count is twice the input")
+    func outputPageCountDoubled() {
+        let result = splitA3Pages(makeA3Doc(pages: 3), leftFirst: true)
+        #expect(result.pageCount == 6)
+    }
+
+    @Test("Each output page is half the original width")
+    func outputPageIsHalfWidth() {
+        let result = splitA3Pages(makeA3Doc(pages: 1), leftFirst: true)
+        let p = result.page(at: 0)
+        #expect(p?.bounds(for: .mediaBox).width == pageWidth / 2)
+    }
+
+    @Test("Output page height is unchanged")
+    func outputPageHeightUnchanged() {
+        let result = splitA3Pages(makeA3Doc(pages: 1), leftFirst: true)
+        let p = result.page(at: 0)
+        #expect(p?.bounds(for: .mediaBox).height == pageHeight)
+    }
+
+    @Test("Left-first: first output page starts at x=0")
+    func leftFirstFirstPageStartsAtOrigin() {
+        let result = splitA3Pages(makeA3Doc(pages: 1), leftFirst: true)
+        let p = result.page(at: 0)
+        #expect(p?.bounds(for: .mediaBox).minX == 0)
+    }
+
+    @Test("Left-first: second output page starts at x = halfWidth")
+    func leftFirstSecondPageStartsAtHalf() {
+        let result = splitA3Pages(makeA3Doc(pages: 1), leftFirst: true)
+        let p = result.page(at: 1)
+        #expect(p?.bounds(for: .mediaBox).minX == pageWidth / 2)
+    }
+
+    @Test("Right-first: first output page starts at x = halfWidth")
+    func rightFirstFirstPageStartsAtHalf() {
+        let result = splitA3Pages(makeA3Doc(pages: 1), leftFirst: false)
+        let p = result.page(at: 0)
+        #expect(p?.bounds(for: .mediaBox).minX == pageWidth / 2)
+    }
+
+    @Test("Right-first: second output page starts at x=0")
+    func rightFirstSecondPageStartsAtOrigin() {
+        let result = splitA3Pages(makeA3Doc(pages: 1), leftFirst: false)
+        let p = result.page(at: 1)
+        #expect(p?.bounds(for: .mediaBox).minX == 0)
+    }
+
+    @Test("MediaBox and CropBox are set to the same half-page rect")
+    func mediaBoxMatchesCropBox() {
+        let result = splitA3Pages(makeA3Doc(pages: 1), leftFirst: true)
+        guard let p = result.page(at: 0) else { return }
+        #expect(p.bounds(for: .mediaBox) == p.bounds(for: .cropBox))
+    }
+
+    @Test("Empty input document produces empty output")
+    func emptyInputProducesEmptyOutput() {
+        let result = splitA3Pages(PDFDocument(), leftFirst: true)
+        #expect(result.pageCount == 0)
+    }
+}

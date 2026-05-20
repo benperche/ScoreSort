@@ -5327,10 +5327,15 @@ func isA3Landscape(_ doc: PDFDocument) -> Bool {
     for i in 0..<pagesToCheck {
         guard let page = doc.page(at: i) else { return false }
         let bounds = page.bounds(for: .mediaBox)
-        let w = bounds.width, h = bounds.height
-        // A3 landscape in PDF points: ~1190 × 842. Allow ±15% for scanner variation.
+        var w = bounds.width, h = bounds.height
+        // Many scanners store landscape pages as portrait + a 90°/270° rotation flag
+        // rather than actually embedding landscape dimensions.  Swap w/h in that case
+        // so we test the visually-correct orientation.
+        if page.rotation % 180 != 0 { swap(&w, &h) }
+        // A3 landscape in PDF points: ~1190 × 842.
         // Width > 1000 distinguishes A3 from A4 landscape (which is only ~842 pt wide).
-        guard w > h, w > 1000, w < 1400 else { return false }
+        // Upper bound 1500 gives headroom for scanners that embed slightly larger sizes.
+        guard w > h, w > 1000, w < 1500 else { return false }
     }
     return true
 }
@@ -5344,31 +5349,138 @@ func splitA3Pages(_ doc: PDFDocument, leftFirst: Bool) -> PDFDocument {
     for i in 0..<doc.pageCount {
         guard let page = doc.page(at: i) else { continue }
         let media = page.bounds(for: .mediaBox)
-        let halfWidth = media.width / 2.0
+        let rot = ((page.rotation % 360) + 360) % 360
 
-        guard let leftPage  = page.copy() as? PDFPage,
-              let rightPage = page.copy() as? PDFPage else { continue }
+        // When a page carries a rotation flag, the mediaBox is in *native* coordinates
+        // (the unrotated space). We must split along the native axis that corresponds
+        // to the visual horizontal divide.
+        //
+        //   0°  → landscape stored as landscape: split on native X axis
+        //  90°  → portrait native, rotated 90° CCW to look landscape:
+        //          visual left = native TOP half  (high Y)
+        // 180°  → landscape stored upside-down:  visual left = native RIGHT half
+        // 270°  → portrait native, rotated 270° CW to look landscape:
+        //          visual left = native BOTTOM half (low Y)
 
-        let leftBox  = CGRect(x: media.minX,             y: media.minY,
-                              width: halfWidth,           height: media.height)
-        let rightBox = CGRect(x: media.minX + halfWidth, y: media.minY,
-                              width: halfWidth,           height: media.height)
+        let nativeFirstBox: CGRect
+        let nativeSecondBox: CGRect
 
-        leftPage.setBounds(leftBox,  for: .mediaBox)
-        leftPage.setBounds(leftBox,  for: .cropBox)
-        rightPage.setBounds(rightBox, for: .mediaBox)
-        rightPage.setBounds(rightBox, for: .cropBox)
+        switch rot {
+        case 90:
+            // PDF rotation is clockwise. 90° CW: native top → visual right,
+            // so visual left = native BOTTOM half (low y).
+            let halfH = media.height / 2.0
+            let nativeTop    = CGRect(x: media.minX, y: media.minY + halfH, width: media.width, height: halfH)
+            let nativeBottom = CGRect(x: media.minX, y: media.minY,         width: media.width, height: halfH)
+            nativeFirstBox  = leftFirst ? nativeBottom : nativeTop
+            nativeSecondBox = leftFirst ? nativeTop    : nativeBottom
+        case 270:
+            // 270° CW (= 90° CCW): native top → visual left,
+            // so visual left = native TOP half (high y).
+            let halfH = media.height / 2.0
+            let nativeTop    = CGRect(x: media.minX, y: media.minY + halfH, width: media.width, height: halfH)
+            let nativeBottom = CGRect(x: media.minX, y: media.minY,         width: media.width, height: halfH)
+            nativeFirstBox  = leftFirst ? nativeTop    : nativeBottom
+            nativeSecondBox = leftFirst ? nativeBottom : nativeTop
+        case 180:
+            let halfW = media.width / 2.0
+            let nativeLeft  = CGRect(x: media.minX,         y: media.minY, width: halfW, height: media.height)
+            let nativeRight = CGRect(x: media.minX + halfW, y: media.minY, width: halfW, height: media.height)
+            // 180°: visual left → native right half
+            nativeFirstBox  = leftFirst ? nativeRight : nativeLeft
+            nativeSecondBox = leftFirst ? nativeLeft  : nativeRight
+        default: // 0° — standard landscape
+            let halfW = media.width / 2.0
+            let nativeLeft  = CGRect(x: media.minX,         y: media.minY, width: halfW, height: media.height)
+            let nativeRight = CGRect(x: media.minX + halfW, y: media.minY, width: halfW, height: media.height)
+            nativeFirstBox  = leftFirst ? nativeLeft  : nativeRight
+            nativeSecondBox = leftFirst ? nativeRight : nativeLeft
+        }
 
-        let first  = leftFirst ? leftPage  : rightPage
-        let second = leftFirst ? rightPage : leftPage
-        result.insert(first,  at: result.pageCount)
-        result.insert(second, at: result.pageCount)
+        guard let firstPage  = page.copy() as? PDFPage,
+              let secondPage = page.copy() as? PDFPage else { continue }
+        firstPage.setBounds(nativeFirstBox,   for: .mediaBox)
+        firstPage.setBounds(nativeFirstBox,   for: .cropBox)
+        secondPage.setBounds(nativeSecondBox, for: .mediaBox)
+        secondPage.setBounds(nativeSecondBox, for: .cropBox)
+        result.insert(firstPage,  at: result.pageCount)
+        result.insert(secondPage, at: result.pageCount)
     }
     return result
 }
 
 // MARK: - Split View
 private enum SplitStage { case split, naming, prefix, summary }
+
+/// Controls whether the Delete key (and the Skip button) targets a single page or
+/// the whole output file that contains the current page.
+enum SkipMode { case page, file }
+
+// MARK: - Booklet Reorder Helpers
+
+/// Saddle-stitch booklet deimposition: outer cover scanned first, front face of each
+/// sheet before its back face.  Returns an `order` array where `order[readingPos]` is
+/// the 0-based index *within the file segment* whose page should appear at that
+/// reading position.
+///
+/// Verified:  N=4 → [1,2,3,0]   N=8 → [1,2,5,6,7,4,3,0]
+func coverFirstFrontBackOrder(n: Int) -> [Int] {
+    guard n >= 4, n % 4 == 0 else { return [] }
+    var result = [Int](repeating: 0, count: n)
+    for k in 1...(n / 4) {
+        let scanBase = (k - 1) * 4
+        // Each sheet occupies 4 scan positions: [front-left, front-right, back-left, back-right]
+        // where front-left is the outer spine side.
+        result[2 * k - 2]     = scanBase + 1   // reading front page 1 → right side of front scan
+        result[2 * k - 1]     = scanBase + 2   // reading front page 2 → left side of back scan
+        result[n - 2 * k]     = scanBase + 3   // reading back page 1  → right side of back scan
+        result[n - 2 * k + 1] = scanBase + 0   // reading back page 2  → left side of front scan
+    }
+    return result
+}
+
+/// Alternative: inner sheets scanned before the outer cover (less common).
+func innerFirstFrontBackOrder(n: Int) -> [Int] {
+    guard n >= 8, n % 4 == 0 else { return [] }
+    // Rotate the scan indices by n/2 (swap first half and second half of scans).
+    return coverFirstFrontBackOrder(n: n).map { ($0 + n / 2) % n }
+}
+
+/// Returns candidate reorderings for an n-page booklet segment (n must be ≥ 4 and
+/// a multiple of 4).  Each tuple carries a display label, a short description, and
+/// the order array (`order[readingPos] = localScanIndex`).
+func bookletCandidates(n: Int) -> [(label: String, description: String, order: [Int])] {
+    guard n >= 4, n % 4 == 0 else { return [] }
+    var result: [(String, String, [Int])] = []
+
+    let standard = coverFirstFrontBackOrder(n: n)
+    result.append((
+        "Standard (cover first)",
+        "Outer cover scanned first; each sheet: front face then back face.",
+        standard
+    ))
+
+    if n >= 8 {
+        let inner = innerFirstFrontBackOrder(n: n)
+        result.append((
+            "Inner-first",
+            "Inner sheets scanned first, outer cover last.",
+            inner
+        ))
+    }
+
+    return result
+}
+
+/// A pending request to reorder the pages of one output-file segment.
+struct BookletFixRequest: Identifiable {
+    let id = UUID()
+    let fileIndex: Int
+    /// Absolute page indices (in the full document) that form this file segment, sorted.
+    let pages: [Int]
+    /// A snapshot of the document at the time the request was created.
+    let document: PDFDocument
+}
 
 struct SplitView: View {
     @StateObject private var pdfManager = PDFManager()
@@ -5405,6 +5517,16 @@ struct SplitView: View {
     @State private var isProcessingA3 = false
     /// Shows a brief tip banner after an A3 split loads into Step 1.
     @State private var a3SplitNoticeVisible = false
+    /// Shows a brief tip banner after the first booklet fix, pointing to the per-card redo icon.
+    @State private var bookletRedoNoticeVisible = false
+    /// Whether Delete / the Skip button targets the current page or the whole file.
+    /// Defaults to `.file`; set to `.page` automatically after an A3 split.
+    @State private var skipMode: SkipMode = .file
+    /// Non-nil when the "Fix Booklet Order" sheet should be presented.
+    @State private var bookletFixRequest: BookletFixRequest? = nil
+    /// The most recently applied booklet order, stored so the user can repeat it.
+    /// Tuple carries the file's page count (for eligibility check) and the order array.
+    @State private var lastBookletOrder: (n: Int, order: [Int])? = nil
     @FocusState private var isViewFocused: Bool
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
@@ -5533,6 +5655,7 @@ struct SplitView: View {
                 previewOffset = .zero
                 skippedPages = []
                 selectedFileIndices = []
+                skipMode = .file
 
                 // Detect A3 landscape — pause and ask the user which half is page 1,
                 // unless this load was triggered by our own A3 processing pipeline.
@@ -5556,6 +5679,9 @@ struct SplitView: View {
                 pendingFolderURL = nil
                 skippedPages = []
                 selectedFileIndices = []
+                skipMode = .file
+                lastBookletOrder = nil
+                bookletRedoNoticeVisible = false
             }
         }
         .sheet(isPresented: $showingA3Detection) {
@@ -5570,6 +5696,10 @@ struct SplitView: View {
                         let splitDoc = splitA3Pages(original, leftFirst: leftFirst)
                         DispatchQueue.main.async {
                             isProcessingA3 = false
+                            // Switch to page-skip mode so Delete skips individual pages,
+                            // which is more useful after an A3 split where blank pages
+                            // often need to be removed one at a time.
+                            skipMode = .page
                             suppressNextA3Detection = true
                             pdfManager.pdfDocument = splitDoc
                             // onChange fires, skips A3 re-detection, calls setupSplitState().
@@ -5585,6 +5715,23 @@ struct SplitView: View {
                     showingA3Detection = false
                     setupSplitState()
                 }
+            )
+        }
+        .sheet(item: $bookletFixRequest) { req in
+            let n = req.pages.count
+            let matchCount = fileSizes.filter { $0 == n }.count
+            BookletOrderSheet(
+                request: req,
+                matchingFileCount: matchCount,
+                onApply: { order in
+                    bookletFixRequest = nil
+                    applyBookletOrder(pages: req.pages, order: order)
+                },
+                onApplyToAll: matchCount > 1 ? { order in
+                    bookletFixRequest = nil
+                    applyBookletOrderToAllMatchingFiles(order: order, n: n)
+                } : nil,
+                onCancel: { bookletFixRequest = nil }
             )
         }
         .overlay {
@@ -5625,11 +5772,16 @@ struct SplitView: View {
                 Spacer()
                 
                 if pdfManager.pdfDocument != nil {
-                    Button(action: swapCurrentPageWithNext) {
-                        Label("Swap with Next", systemImage: "arrow.up.arrow.down")
+                    Button { showingA3Detection = true } label: {
+                        Label("Split as A3…", systemImage: "rectangle.split.2x1")
                     }
-                    .disabled(currentPage >= totalPages - 1)
-                    .help("Swap the current page with the one after it (S)")
+                    .help("Manually trigger A3 splitting — use this if auto-detection didn't fire (e.g. scanner saved landscape pages with a rotation flag)")
+
+                    Button(action: requestBookletFix) {
+                        Label("Fix Booklet Order", systemImage: "rectangle.stack")
+                    }
+                    .disabled(!canFixBookletOrder)
+                    .help("Reorder pages in the current file segment to correct booklet scanning order. Set split markers first to define file boundaries.")
 
                     Button(action: clearAllMarkers) {
                         Label("Clear All Splits", systemImage: "trash")
@@ -5682,6 +5834,23 @@ struct SplitView: View {
                 .transition(.move(edge: .top).combined(with: .opacity))
             }
 
+            if bookletRedoNoticeVisible {
+                HStack(spacing: 8) {
+                    Image(systemName: "rectangle.stack.badge.play")
+                        .foregroundColor(.accentColor)
+                    Text("Booklet order saved — tap **⬚▶** on any matching file card to apply the same order instantly")
+                        .font(.callout)
+                    Spacer()
+                    Button { withAnimation(.easeInOut(duration: 0.2)) { bookletRedoNoticeVisible = false } }
+                        label: { Image(systemName: "xmark").foregroundColor(.secondary) }
+                    .buttonStyle(.plain)
+                }
+                .padding(.horizontal)
+                .padding(.vertical, 6)
+                .background(Color.accentColor.opacity(0.08))
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
+
             // Main content area
             if let document = pdfManager.pdfDocument {
                 GeometryReader { geometry in
@@ -5695,13 +5864,15 @@ struct SplitView: View {
                                 fileSizes: fileSizes,
                                 totalPages: totalPages,
                                 skippedPages: skippedPages,
+                                skipMode: $skipMode,
                                 onToggleMarker: { toggleSplitAt(page: currentPage) },
                                 onSkipCurrentFile: {
                                     if let fi = pageToFileMapping[currentPage] {
                                         toggleSkipFiles([fi])
                                     }
                                 },
-                                onSkipCurrentPage: { toggleSkipPage(currentPage) }
+                                onSkipCurrentPage: { toggleSkipPage(currentPage) },
+                                onSwapWithNext: swapCurrentPageWithNext
                             )
 
                             Divider()
@@ -5776,6 +5947,23 @@ struct SplitView: View {
                             ScrollView {
                                 VStack(alignment: .leading, spacing: 4) {
                                     ForEach(0..<numberOfFiles, id: \.self) { fileIndex in
+                                        let filePageCount = fileIndex < fileSizes.count ? fileSizes[fileIndex] : 0
+                                        let canFix  = filePageCount >= 4 && filePageCount % 4 == 0
+                                        let canRedo = lastBookletOrder?.n == filePageCount && canFix
+                                        let bookletFixAction: (() -> Void)? = canFix ? {
+                                            let pages = pagesForFile(fileIndex)
+                                            guard let doc = pdfManager.pdfDocument else { return }
+                                            bookletFixRequest = BookletFixRequest(
+                                                fileIndex: fileIndex,
+                                                pages: pages,
+                                                document: doc
+                                            )
+                                        } : nil
+                                        let bookletRedoAction: (() -> Void)? = canRedo ? {
+                                            guard let last = lastBookletOrder else { return }
+                                            let pages = pagesForFile(fileIndex)
+                                            applyBookletOrder(pages: pages, order: last.order)
+                                        } : nil
                                         FilePreviewCard(
                                             fileIndex: fileIndex,
                                             pageToFileMapping: pageToFileMapping,
@@ -5790,7 +5978,9 @@ struct SplitView: View {
                                             onNavigate: { pageIndex in currentPage = pageIndex },
                                             onSelect: { isCmd, isShift in
                                                 handleFileSelection(fileIndex, isCmd: isCmd, isShift: isShift)
-                                            }
+                                            },
+                                            onFixBookletOrder: bookletFixAction,
+                                            onRedoBookletOrder: bookletRedoAction
                                         )
                                     }
                                 }
@@ -5930,12 +6120,19 @@ struct SplitView: View {
     }
 
     /// Called by the NSEvent monitor when Delete or Forward-Delete is pressed.
-    /// Toggles skip on the selected file cards, or the file containing the current page.
+    /// Behaviour depends on `skipMode`:
+    ///   • `.page` — toggles skip on the current page only.
+    ///   • `.file` — toggles skip on all selected file cards (or the file at the current page).
     private func handleDeleteKey() {
-        let targets = selectedFileIndices.isEmpty
-            ? Set([pageToFileMapping[currentPage]].compactMap { $0 })
-            : selectedFileIndices
-        if !targets.isEmpty { toggleSkipFiles(targets) }
+        switch skipMode {
+        case .page:
+            toggleSkipPage(currentPage)
+        case .file:
+            let targets = selectedFileIndices.isEmpty
+                ? Set([pageToFileMapping[currentPage]].compactMap { $0 })
+                : selectedFileIndices
+            if !targets.isEmpty { toggleSkipFiles(targets) }
+        }
     }
 
     /// Toggle skip on a single page.
@@ -6082,6 +6279,143 @@ struct SplitView: View {
             baseFileName = pdfManager.currentFileName ?? ""
         }
         if splitStage != .split { splitStage = .split }
+    }
+
+    /// True when the current file segment has ≥ 4 pages and a count divisible by 4,
+    /// meaning a booklet reorder is meaningful.
+    var canFixBookletOrder: Bool {
+        guard let fi = pageToFileMapping[currentPage] else { return false }
+        guard fi < fileSizes.count else { return false }
+        let n = fileSizes[fi]
+        return n >= 4 && n % 4 == 0
+    }
+
+    /// Builds a `BookletFixRequest` for the current file segment and presents the sheet.
+    private func requestBookletFix() {
+        guard let doc = pdfManager.pdfDocument,
+              let fi = pageToFileMapping[currentPage] else { return }
+        let pages = pagesForFile(fi)
+        bookletFixRequest = BookletFixRequest(fileIndex: fi, pages: pages, document: doc)
+    }
+
+    /// `true` when the last booklet order can be re-applied to the current file —
+    /// i.e. a previous order was saved AND the current file has the same page count.
+    var canRedoBookletOrder: Bool {
+        guard let last = lastBookletOrder,
+              let fi = pageToFileMapping[currentPage],
+              fi < fileSizes.count else { return false }
+        return fileSizes[fi] == last.n
+    }
+
+    /// Re-applies the last booklet order to the current file segment.
+    private func redoBookletOrder() {
+        guard let last = lastBookletOrder,
+              let fi = pageToFileMapping[currentPage] else { return }
+        let pages = pagesForFile(fi)
+        guard pages.count == last.n else { return }
+        applyBookletOrder(pages: pages, order: last.order)
+    }
+
+    /// Reorders the pages of a file segment in the loaded document without resetting
+    /// split markers or skipped-page state.
+    ///
+    /// - Parameters:
+    ///   - pages: Absolute page indices (in the full document) for the segment.
+    ///   - order: Permutation where `order[readingPos]` is the *local* index within
+    ///            `pages` that should appear at that reading position.
+    private func applyBookletOrder(pages: [Int], order: [Int]) {
+        guard let doc = pdfManager.pdfDocument else { return }
+        let newDoc = PDFDocument()
+
+        // Build the new absolute-page sequence, swapping only the segment's positions.
+        for absIdx in 0..<doc.pageCount {
+            let srcAbsIdx: Int
+            if let localIdx = pages.firstIndex(of: absIdx) {
+                // This slot belongs to the segment — use the permuted source.
+                srcAbsIdx = pages[order[localIdx]]
+            } else {
+                srcAbsIdx = absIdx
+            }
+            if let page = doc.page(at: srcAbsIdx) {
+                newDoc.insert(page, at: newDoc.pageCount)
+            }
+        }
+
+        // Update skippedPages: re-map skipped pages within the segment to their new positions.
+        var newSkipped = skippedPages
+        for absIdx in pages { newSkipped.remove(absIdx) }
+        for (newLocal, oldLocal) in order.enumerated() {
+            if skippedPages.contains(pages[oldLocal]) {
+                newSkipped.insert(pages[newLocal])
+            }
+        }
+        skippedPages = newSkipped
+
+        // On the very first fix, show a brief tip pointing to the per-card redo icon.
+        if lastBookletOrder == nil {
+            withAnimation(.easeInOut(duration: 0.2)) { bookletRedoNoticeVisible = true }
+            DispatchQueue.main.asyncAfter(deadline: .now() + 7) {
+                withAnimation(.easeInOut(duration: 0.2)) { bookletRedoNoticeVisible = false }
+            }
+        }
+
+        // Save the order so the user can repeat it with Redo.
+        lastBookletOrder = (n: pages.count, order: order)
+
+        // Replace the document while preserving all other split state.
+        suppressNextA3Detection = true
+        suppressDocumentReset   = true
+        pdfManager.pdfDocument  = newDoc
+    }
+
+    /// Applies a booklet order to **every** file segment in the document whose page
+    /// count equals `n`, in a single document rebuild pass.  This avoids the
+    /// multiple-replacement problem (each `onChange` would clear `suppressDocumentReset`
+    /// before the next call could use it).
+    private func applyBookletOrderToAllMatchingFiles(order: [Int], n: Int) {
+        guard let doc = pdfManager.pdfDocument else { return }
+        let newDoc = PDFDocument()
+        var newSkipped = skippedPages
+        var processedFiles = Set<Int>()
+
+        for absIdx in 0..<doc.pageCount {
+            guard let fi = pageToFileMapping[absIdx] else {
+                // Shouldn't normally happen, but copy the page as-is.
+                if let page = doc.page(at: absIdx) { newDoc.insert(page, at: newDoc.pageCount) }
+                continue
+            }
+
+            let filePages = pagesForFile(fi)
+
+            if filePages.count == n && !processedFiles.contains(fi) {
+                // First encounter of a matching file — insert all pages in reading order.
+                processedFiles.insert(fi)
+                for oldLocal in order {
+                    if let page = doc.page(at: filePages[oldLocal]) {
+                        newDoc.insert(page, at: newDoc.pageCount)
+                    }
+                }
+                // Remap skipped pages within this file.
+                for absPage in filePages { newSkipped.remove(absPage) }
+                for (newLocal, oldLocal) in order.enumerated() {
+                    if skippedPages.contains(filePages[oldLocal]) {
+                        newSkipped.insert(filePages[newLocal])
+                    }
+                }
+            } else if filePages.count == n {
+                // Already inserted by the block above — skip.
+                continue
+            } else {
+                // Non-matching file — copy page as-is.
+                if let page = doc.page(at: absIdx) { newDoc.insert(page, at: newDoc.pageCount) }
+            }
+        }
+
+        skippedPages = newSkipped
+        lastBookletOrder = (n: n, order: order)
+        suppressNextA3Detection = true
+        suppressDocumentReset   = true
+        pdfManager.pdfDocument  = newDoc
     }
 
     /// Swaps the current page with the next one in the loaded document, preserving
@@ -6255,6 +6589,277 @@ struct A3SplitChoiceView: View {
 }
 
 
+// MARK: - Booklet Order Sheet
+
+/// Sheet shown by "Fix Booklet Order".  Displays candidate reorderings as thumbnail
+/// strips with radio buttons, plus a drag-to-reorder custom option as a fallback.
+struct BookletOrderSheet: View {
+    let request: BookletFixRequest
+    /// Total number of files in the document with the same page count (including this one).
+    let matchingFileCount: Int
+    let onApply: ([Int]) -> Void
+    /// Non-nil when there is more than one matching file; applies the order to all of them.
+    let onApplyToAll: (([Int]) -> Void)?
+    let onCancel: () -> Void
+
+    // -1 means "custom order" is selected; 0…n-1 indexes into `candidates`.
+    @State private var selectedOption: Int = 0
+    @State private var customOrder: [Int] = []   // local indices within request.pages
+
+    private let candidates: [(label: String, description: String, order: [Int])]
+
+    init(request: BookletFixRequest,
+         matchingFileCount: Int,
+         onApply: @escaping ([Int]) -> Void,
+         onApplyToAll: (([Int]) -> Void)? = nil,
+         onCancel: @escaping () -> Void) {
+        self.request           = request
+        self.matchingFileCount = matchingFileCount
+        self.onApply           = onApply
+        self.onApplyToAll      = onApplyToAll
+        self.onCancel          = onCancel
+        self.candidates = bookletCandidates(n: request.pages.count)
+        // Custom order starts as the identity permutation.
+        _customOrder = State(initialValue: Array(0..<request.pages.count))
+    }
+
+    private var n: Int { request.pages.count }
+
+    /// Returns the page at a given local index in the current option's order.
+    private func pageForLocalIdx(_ localIdx: Int, option: Int) -> PDFPage? {
+        let order: [Int]
+        if option == -1 {
+            order = customOrder
+        } else {
+            guard option < candidates.count else { return nil }
+            order = candidates[option].order
+        }
+        guard localIdx < order.count else { return nil }
+        let absIdx = request.pages[order[localIdx]]
+        return request.document.page(at: absIdx)
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // ── Header ──────────────────────────────────────────────────────
+            VStack(spacing: 4) {
+                Text("Fix Booklet Order")
+                    .font(.title2).fontWeight(.semibold)
+                Text("File \(request.fileIndex + 1) · \(n) pages")
+                    .font(.subheadline).foregroundColor(.secondary)
+                Text("Choose a reordering that matches how the booklet was scanned, then press Apply.")
+                    .font(.caption).foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 520)
+                    .padding(.top, 2)
+            }
+            .padding(.top, 28)
+            .padding(.bottom, 16)
+            .padding(.horizontal, 28)
+
+            Divider()
+
+            // ── Options list ─────────────────────────────────────────────
+            // ScrollViewReader lets us programmatically scroll to the custom-order
+            // row when the user selects it, avoiding the confusing nested-scroll situation
+            // where the inner List absorbs scroll events and hides part of the outer sheet.
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(spacing: 20) {
+                        // Automatic candidate options
+                        ForEach(candidates.indices, id: \.self) { optIdx in
+                            BookletOptionRow(
+                                label: candidates[optIdx].label,
+                                description: candidates[optIdx].description,
+                                isSelected: selectedOption == optIdx,
+                                onSelect: { selectedOption = optIdx }
+                            ) {
+                                // Thumbnail strip for this candidate
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 8) {
+                                        ForEach(0..<n, id: \.self) { localIdx in
+                                            BookletThumbnailCell(
+                                                page: pageForLocalIdx(localIdx, option: optIdx),
+                                                label: "\(localIdx + 1)"
+                                            )
+                                        }
+                                    }
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 4)
+                                }
+                            }
+                        }
+
+                        // Custom drag-to-reorder option
+                        BookletOptionRow(
+                            label: "Custom order",
+                            description: "Drag rows to set the reading order yourself.",
+                            isSelected: selectedOption == -1,
+                            onSelect: { selectedOption = -1 }
+                        ) {
+                            if selectedOption == -1 {
+                                // Non-scrolling List: scrollDisabled lets the outer ScrollView
+                                // handle all scrolling so the inner list never steals events.
+                                // Height is exact — no inner scroll bar, no nested scroll confusion.
+                                List {
+                                    ForEach(customOrder.indices, id: \.self) { pos in
+                                        let localIdx = customOrder[pos]
+                                        HStack(spacing: 16) {
+                                            Text("\(pos + 1).")
+                                                .frame(width: 28, alignment: .trailing)
+                                                .foregroundColor(.secondary)
+                                                .font(.headline)
+                                            BookletThumbnailCell(
+                                                page: request.document.page(at: request.pages[localIdx]),
+                                                label: "Scan \(localIdx + 1)",
+                                                thumbWidth: 180, thumbHeight: 254
+                                            )
+                                            Text("Page in scan position \(localIdx + 1)")
+                                                .font(.subheadline)
+                                                .foregroundColor(.secondary)
+                                            Spacer()
+                                        }
+                                        .padding(.vertical, 8)
+                                    }
+                                    .onMove { from, to in
+                                        customOrder.move(fromOffsets: from, toOffset: to)
+                                    }
+                                }
+                                .listStyle(.plain)
+                                .scrollDisabled(true)
+                                // Each row: 254pt thumb + 20pt label + 16pt vertical padding = ~290pt
+                                .frame(height: CGFloat(n) * 290)
+                            } else {
+                                // Collapsed preview strip when not selected
+                                ScrollView(.horizontal, showsIndicators: false) {
+                                    HStack(spacing: 8) {
+                                        ForEach(customOrder.indices, id: \.self) { pos in
+                                            BookletThumbnailCell(
+                                                page: request.document.page(at: request.pages[customOrder[pos]]),
+                                                label: "\(pos + 1)"
+                                            )
+                                        }
+                                    }
+                                    .padding(.horizontal, 4)
+                                    .padding(.vertical, 4)
+                                }
+                            }
+                        }
+                        .id("customRow")
+                    }
+                    .padding(24)
+                }
+                .onChange(of: selectedOption) { _, newVal in
+                    if newVal == -1 {
+                        withAnimation(.easeInOut(duration: 0.3)) {
+                            proxy.scrollTo("customRow", anchor: .top)
+                        }
+                    }
+                }
+            }
+
+            Divider()
+
+            // ── Footer buttons ───────────────────────────────────────────
+            HStack {
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                if let applyAll = onApplyToAll {
+                    Button("Apply to All (\(matchingFileCount) files)") {
+                        let order = selectedOption == -1 ? customOrder : candidates[selectedOption].order
+                        applyAll(order)
+                    }
+                    .disabled(selectedOption >= candidates.count && selectedOption != -1)
+                    .help("Apply this reordering to all \(matchingFileCount) files with \(request.pages.count) pages")
+                }
+                Button("Apply") {
+                    let order = selectedOption == -1 ? customOrder : candidates[selectedOption].order
+                    onApply(order)
+                }
+                .buttonStyle(.borderedProminent)
+                .keyboardShortcut(.defaultAction)
+                .disabled(selectedOption >= candidates.count && selectedOption != -1)
+            }
+            .padding(.horizontal, 28)
+            .padding(.vertical, 16)
+        }
+        .frame(minWidth: 580, minHeight: 500)
+    }
+}
+
+/// A single radio-button row inside `BookletOrderSheet`.
+private struct BookletOptionRow<Content: View>: View {
+    let label: String
+    let description: String
+    let isSelected: Bool
+    let onSelect: () -> Void
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Button(action: onSelect) {
+                HStack(alignment: .top, spacing: 10) {
+                    Image(systemName: isSelected ? "circle.inset.filled" : "circle")
+                        .foregroundColor(isSelected ? .accentColor : .secondary)
+                        .font(.system(size: 16))
+                        .padding(.top, 1)
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(label).fontWeight(.medium)
+                        Text(description)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    Spacer()
+                }
+            }
+            .buttonStyle(.plain)
+
+            content()
+                .padding(.leading, 26)
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(isSelected
+                      ? Color.accentColor.opacity(0.07)
+                      : Color(NSColor.controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .stroke(isSelected ? Color.accentColor.opacity(0.4) : Color.secondary.opacity(0.15),
+                        lineWidth: isSelected ? 1.5 : 1)
+        )
+    }
+}
+
+/// A single thumbnail cell used in the booklet-order sheet.
+/// Default size ~90×127 pt for horizontal strips; pass larger values for the
+/// drag-to-reorder list where each row shows one page at full readability.
+private struct BookletThumbnailCell: View {
+    let page: PDFPage?
+    let label: String
+    var thumbWidth: CGFloat  = 90
+    var thumbHeight: CGFloat = 127
+
+    var body: some View {
+        VStack(spacing: 4) {
+            PDFPageView(page: page, rotation: 0)
+                .frame(width: thumbWidth, height: thumbHeight)
+                .background(Color.white)
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 3)
+                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
+                )
+                .shadow(color: .black.opacity(0.08), radius: 3, y: 1)
+            Text(label)
+                .font(.caption2)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
 // MARK: - Split Controls Section
 struct SplitControlsSection: View {
     @Binding var currentPage: Int
@@ -6262,9 +6867,11 @@ struct SplitControlsSection: View {
     let fileSizes: [Int]
     let totalPages: Int
     let skippedPages: Set<Int>
+    @Binding var skipMode: SkipMode
     let onToggleMarker: () -> Void
     let onSkipCurrentFile: () -> Void
     let onSkipCurrentPage: () -> Void
+    let onSwapWithNext: () -> Void
 
     /// Returns which file index the current page belongs to, and the size of that file.
     private var currentFileInfo: (fileIndex: Int, fileStart: Int, fileSize: Int)? {
@@ -6288,9 +6895,32 @@ struct SplitControlsSection: View {
         return pages.allSatisfy { skippedPages.contains($0) }
     }
 
+    /// Label for the skip/unskip button, derived from skip mode and current state.
+    private var skipButtonLabel: String {
+        switch skipMode {
+        case .page:
+            return currentPageIsSkipped ? "Un-skip Page" : "Skip Page"
+        case .file:
+            return currentFileIsFullySkipped ? "Un-skip File" : "Skip File"
+        }
+    }
+
+    private var skipButtonIcon: String {
+        switch skipMode {
+        case .page:
+            return currentPageIsSkipped ? "arrow.uturn.backward" : "trash"
+        case .file:
+            return currentFileIsFullySkipped ? "arrow.uturn.backward" : "trash"
+        }
+    }
+
+    private var skipButtonIsActive: Bool {
+        skipMode == .page ? currentPageIsSkipped : currentFileIsFullySkipped
+    }
+
     var body: some View {
-        VStack(spacing: 12) {
-            // Navigation controls
+        VStack(spacing: 10) {
+            // ── Row 1: Navigation ──────────────────────────────────────────
             HStack {
                 Button(action: firstPage) {
                     Image(systemName: "chevron.backward.to.line")
@@ -6349,42 +6979,61 @@ struct SplitControlsSection: View {
             }
             .padding(.horizontal)
 
-            // Split marker + skip controls
+            Divider()
+                .padding(.horizontal)
+
+            // ── Row 2: Split marker + Swap with Next ───────────────────────
             HStack(spacing: 12) {
                 Button(action: onToggleMarker) {
                     if splitMarkers.contains(currentPage) {
-                        Label("Remove Split (merge with previous)", systemImage: "xmark.circle")
+                        Label("Remove Split", systemImage: "xmark.circle")
                     } else {
-                        Label("Add Split Here", systemImage: "scissors")
+                        Label("Add Split Here (Space)", systemImage: "scissors")
                     }
                 }
                 .buttonStyle(.bordered)
                 .disabled(currentPage == 0)
 
-                Text("Space to toggle")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Spacer()
+
+                Button(action: onSwapWithNext) {
+                    Label("Swap with Next (S)", systemImage: "arrow.up.arrow.down")
+                }
+                .buttonStyle(.bordered)
+                .disabled(currentPage >= totalPages - 1)
+                .help("Swap the current page with the one after it")
+            }
+            .padding(.horizontal)
+
+            // ── Row 3: Skip mode toggle + Skip/Unskip button ──────────────
+            HStack(spacing: 12) {
+                Picker("", selection: $skipMode) {
+                    Text("Skip Page").tag(SkipMode.page)
+                    Text("Skip File").tag(SkipMode.file)
+                }
+                .pickerStyle(.segmented)
+                .fixedSize()
+                .help("Controls whether Delete / the Skip button skips only the current page or the entire output file")
 
                 Spacer()
 
                 Button(action: {
-                    if NSEvent.modifierFlags.contains(.command) {
-                        onSkipCurrentPage()
-                    } else {
-                        onSkipCurrentFile()
+                    switch skipMode {
+                    case .page: onSkipCurrentPage()
+                    case .file: onSkipCurrentFile()
                     }
                 }) {
-                    Label(currentFileIsFullySkipped ? "Un-skip File" : "Skip File",
-                          systemImage: currentFileIsFullySkipped ? "arrow.uturn.backward" : "trash")
-                    .foregroundColor(currentFileIsFullySkipped ? .orange : .red)
+                    Label(skipButtonLabel, systemImage: skipButtonIcon)
+                        .foregroundColor(skipButtonIsActive ? .orange : .red)
                 }
                 .buttonStyle(.bordered)
-                .help(currentFileIsFullySkipped
-                      ? "Un-skip this output file (⌘-click to un-skip just this page)"
-                      : "Skip this output file (⌘-click to skip just this page)")
+                .help(skipMode == .page
+                      ? (currentPageIsSkipped ? "Un-skip this page (Delete)" : "Skip this page (Delete)")
+                      : (currentFileIsFullySkipped ? "Un-skip this output file (Delete)" : "Skip this output file (Delete)"))
             }
+            .padding(.horizontal)
         }
-        .padding()
+        .padding(.vertical)
     }
 
     private func firstPage() { currentPage = 0 }
@@ -6415,6 +7064,10 @@ struct FilePreviewCard: View {
     let onNavigate: (Int) -> Void
     /// Called when the user clicks the card; provides Cmd and Shift modifier state.
     let onSelect: (_ isCmd: Bool, _ isShift: Bool) -> Void
+    /// Non-nil when this file's page count qualifies for booklet reordering (≥ 4, divisible by 4).
+    var onFixBookletOrder: (() -> Void)? = nil
+    /// Non-nil when a previous booklet order exists and matches this file's page count.
+    var onRedoBookletOrder: (() -> Void)? = nil
 
     var pagesInFile: [Int] {
         pageToFileMapping.filter { $0.value == fileIndex }.keys.sorted()
@@ -6484,6 +7137,24 @@ struct FilePreviewCard: View {
                 }
 
                 Spacer()
+
+                if let fixBooklet = onFixBookletOrder {
+                    Button(action: fixBooklet) {
+                        Image(systemName: "rectangle.stack")
+                            .foregroundColor(.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Fix booklet page order for this file")
+                }
+
+                if let redoBooklet = onRedoBookletOrder {
+                    Button(action: redoBooklet) {
+                        Image(systemName: "rectangle.stack.badge.play")
+                            .foregroundColor(.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Repeat the last booklet reordering on this file")
+                }
 
                 let activeCount = pagesInFile.filter { !skippedPages.contains($0) }.count
                 if isPartiallySkipped {
