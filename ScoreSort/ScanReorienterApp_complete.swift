@@ -7563,11 +7563,66 @@ private func splitSuggestionGroupKey(_ name: String) -> String {
         (["vln", "violin"], "violin"),
         (["vla", "viola"], "viola"),
         (["vlc", "cello", "violoncello"], "cello"),
+        // Euphonium / baritone clef variants — all collapse to "euphonium" / "baritone"
+        // so nextExpectedIndex can find the instrument after the last euphonium/baritone entry.
+        (["euphonium treble clef", "euphonium t.c.", "euphonium tc",
+          "euphonium bass clef",   "euphonium b.c.", "euphonium bc",
+          "euphonium", "eupho"],   "euphonium"),
+        (["baritone treble clef",  "baritone t.c.",  "baritone tc",
+          "baritone bass clef",    "baritone b.c.",  "baritone bc",
+          "baritone"], "baritone"),
     ]
     for (variants, canonical) in aliases {
         if variants.contains(base) { return canonical }
     }
     return base
+}
+
+/// Returns the natural companion for a clef-paired instrument name, preserving
+/// the exact notation style of the input.
+///
+///   "Euphonium B.C." → "Euphonium T.C."
+///   "Euphonium TC"   → "Euphonium BC"
+///   "Baritone Treble Clef" → "Baritone Bass Clef"
+///
+/// Returns `nil` if the name is not a recognised clef-paired variant.
+private func clefCompanion(for name: String) -> String? {
+    // Each tuple: (bc variant, tc variant) — both directions are handled below.
+    let pairs: [(bc: String, tc: String)] = [
+        ("Euphonium B.C.",    "Euphonium T.C."),
+        ("Euphonium BC",      "Euphonium TC"),
+        ("Euphonium Bass Clef",   "Euphonium Treble Clef"),
+        ("Baritone B.C.",     "Baritone T.C."),
+        ("Baritone BC",       "Baritone TC"),
+        ("Baritone Bass Clef",    "Baritone Treble Clef"),
+    ]
+    let lower = name.trimmingCharacters(in: .whitespaces).lowercased()
+    for pair in pairs {
+        if lower == pair.bc.lowercased() { return pair.tc }
+        if lower == pair.tc.lowercased() { return pair.bc }
+    }
+    return nil
+}
+
+/// Rewrites `name` so that its "sax"/"saxophone" word matches the style used in
+/// `reference`. E.g. if the user typed "Alto Saxophone", the cross-boundary
+/// suggestion "Tenor Sax" becomes "Tenor Saxophone".
+private func saxStyleMatch(_ name: String, toStyleOf reference: String) -> String {
+    let refLower = reference.lowercased()
+    // Detect which style the reference uses — must be a standalone word "sax"
+    // (not the start of "saxophone"), hence the word-boundary regex.
+    let usesFull  = refLower.range(of: "saxophone", options: .regularExpression) != nil
+    let usesAbbr  = !usesFull && (refLower.range(of: "\\bsax\\b", options: .regularExpression) != nil)
+    if usesFull {
+        // Expand standalone "Sax" → "Saxophone" in the result
+        return name.replacingOccurrences(of: "\\bSax\\b", with: "Saxophone",
+                                         options: [.regularExpression, .caseInsensitive])
+    } else if usesAbbr {
+        // Shorten "Saxophone" → "Sax"
+        return name.replacingOccurrences(of: "Saxophone", with: "Sax",
+                                         options: .caseInsensitive)
+    }
+    return name
 }
 
 /// Typical number of parts for common instrument families (used to detect when
@@ -7610,7 +7665,9 @@ private func splitSuggestionStartingNumberedName(
         splitSuggestionGroupKey($0) == key
     }) {
         let nextIdx = (idx + 1) % instrumentNames.count
-        let nextName = splitSuggestionBaseName(instrumentNames[nextIdx])
+        let rawNextName = splitSuggestionBaseName(instrumentNames[nextIdx])
+        // Preserve the user's preferred sax style: "Alto Saxophone" → "Tenor Saxophone" not "Tenor Sax"
+        let nextName = saxStyleMatch(rawNextName, toStyleOf: basePart)
         return "\(nextName) 1"
     }
     return nil
@@ -7777,6 +7834,10 @@ struct SplitFileNamingRow: View {
         for i in Swift.stride(from: fileIndex - 1, through: 0, by: -1) {
             let prev = (allSuffixes[i] ?? "").trimmingCharacters(in: .whitespaces)
             guard !prev.isEmpty else { continue }
+
+            // Clef companion takes priority: "Euphonium B.C." → "Euphonium T.C."
+            if let companion = clefCompanion(for: prev) { return companion }
+
             let parts = prev.components(separatedBy: " ")
             // Must have at least two tokens and last token must be a positive integer
             if parts.count >= 2, let last = parts.last, let n = Int(last), n > 0 {
@@ -7789,7 +7850,9 @@ struct SplitFileNamingRow: View {
                         instrumentNames: instrumentNames
                     )
                 } else {
-                    return "\(basePart) \(n + 1)"
+                    // Same family, next part — preserve the user's sax style
+                    let rawNext = "\(basePart) \(n + 1)"
+                    return rawNext  // basePart already uses the user's own style
                 }
             }
             break  // only consider the closest non-empty row
@@ -8066,16 +8129,25 @@ struct PrefixItem: Identifiable {
     let proposedName: String // full filename incl. .pdf, e.g. "Beethoven - Flute.pdf"
     let page: PDFPage?
     var originalURL: URL? = nil
+    /// When non-nil, overrides the auto-computed position number with this free-form string.
+    var customPrefix: String? = nil
 }
 
 /// One row in PrefixOrderStepView — shows position, thumbnail, proposed name → final name.
 private struct PrefixOrderRow: View {
     let item: PrefixItem
-    let position: Int
+    let position: Int        // auto-computed 0-based position
+    let autoPrefix: String   // what auto-numbering would produce (e.g. "00")
     let finalName: String
     let onMoveUp: (() -> Void)?
     let onMoveDown: (() -> Void)?
     var isUnmatched: Bool = false
+    var onEditPrefix: (() -> Void)? = nil  // called on double-click of the badge
+
+    private var displayPrefix: String {
+        item.customPrefix ?? autoPrefix
+    }
+    private var isCustom: Bool { item.customPrefix != nil }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -8095,12 +8167,20 @@ private struct PrefixOrderRow: View {
             }
             .padding(.leading, 8)
 
-            // Position badge
-            Text(String(format: "%02d", position))
+            // Position badge — double-click to set a custom prefix
+            Text(displayPrefix)
                 .font(.system(.body, design: .monospaced))
                 .fontWeight(.semibold)
-                .foregroundColor(.accentColor)
-                .frame(width: 30, alignment: .center)
+                .foregroundColor(isCustom ? .orange : .accentColor)
+                .frame(minWidth: 30, alignment: .center)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(isCustom ? Color.orange.opacity(0.5) : Color.clear, lineWidth: 1)
+                )
+                .help("Double-click to set a custom prefix")
+                .gesture(TapGesture(count: 2).onEnded { onEditPrefix?() })
 
             // Filenames
             VStack(alignment: .leading, spacing: 4) {
@@ -8114,7 +8194,7 @@ private struct PrefixOrderRow: View {
                     Text(finalName)
                         .font(.caption)
                         .fontWeight(.medium)
-                        .foregroundColor(.accentColor)
+                        .foregroundColor(isCustom ? .orange : .accentColor)
                         .lineLimit(1)
                 }
             }
@@ -8139,6 +8219,10 @@ struct PrefixOrderStepView: View {
     @State private var items: [PrefixItem]
     /// IDs of items whose proposed name couldn't be matched to the current instrument order.
     @State private var unmatchedIds: Set<Int>
+    /// The item whose prefix badge was double-clicked (drives the edit popover).
+    @State private var prefixEditTarget: PrefixItem? = nil
+    /// The draft prefix text being edited in the popover.
+    @State private var prefixEditDraft: String = ""
     @AppStorage("prefixSeparator") private var prefixSeparator: String = " - "
 
     init(stepLabel: String,
@@ -8159,19 +8243,23 @@ struct PrefixOrderStepView: View {
 
     // MARK: Auto-sort helpers
 
-    /// Returns items sorted by instrument order, with unmatched items first so they
-    /// are immediately visible without scrolling.
+    /// Returns items sorted by instrument order.
+    /// Score (rank 0) is pinned first → gets prefix "00".
+    /// Other matched items follow in instrument order.
+    /// Unmatched items go last (highlighted orange) so they don't displace the score.
     static func autoSorted(_ items: [PrefixItem], by order: [String]) -> [PrefixItem] {
+        var score:     [PrefixItem] = []
         var matched:   [(rank: Int, item: PrefixItem)] = []
         var unmatched: [PrefixItem] = []
         for item in items {
             if let rank = matchInstrumentOrder(in: item.proposedName, order: order) {
-                matched.append((rank, item))
+                if rank == 0 { score.append(item) }
+                else { matched.append((rank, item)) }
             } else {
                 unmatched.append(item)
             }
         }
-        return unmatched + matched.sorted { $0.rank < $1.rank }.map(\.item)
+        return score + matched.sorted { $0.rank < $1.rank }.map(\.item) + unmatched
     }
 
     /// Returns the set of item IDs whose proposed names don't match any instrument in `order`.
@@ -8179,8 +8267,12 @@ struct PrefixOrderStepView: View {
         Set(items.filter { matchInstrumentOrder(in: $0.proposedName, order: order) == nil }.map(\.id))
     }
 
+    /// The prefix string for an item — custom if set, otherwise zero-based position ("00", "01"…).
+    private func autoPrefix(at position: Int) -> String { String(format: "%02d", position) }
+
     private func prefixedName(for item: PrefixItem, at position: Int) -> String {
-        "\(String(format: "%02d", position))\(prefixSeparator)\(item.proposedName)"
+        let prefix = item.customPrefix ?? autoPrefix(at: position)
+        return "\(prefix)\(prefixSeparator)\(item.proposedName)"
     }
 
     // MARK: Body
@@ -8232,16 +8324,33 @@ struct PrefixOrderStepView: View {
             // ── File list ─────────────────────────────────────────────────
             ScrollView {
                 VStack(spacing: 0) {
-                    // ── Unmatched section ─────────────────────────────────
-                    let unmatchedItems = items.filter { unmatchedIds.contains($0.id) }
                     let matchedItems   = items.filter { !unmatchedIds.contains($0.id) }
+                    let unmatchedItems = items.filter {  unmatchedIds.contains($0.id) }
 
+                    // ── Matched section (score + auto-detected instruments) ──
+                    ForEach(matchedItems, id: \.id) { item in
+                        let position   = items.firstIndex(where: { $0.id == item.id })!
+                        let sectionIdx = matchedItems.firstIndex(where: { $0.id == item.id })!
+                        PrefixOrderRow(
+                            item: item,
+                            position: position,
+                            autoPrefix: autoPrefix(at: position),
+                            finalName: prefixedName(for: item, at: position),
+                            onMoveUp:   sectionIdx > 0                      ? { items.swapAt(position, position - 1) } : nil,
+                            onMoveDown: sectionIdx < matchedItems.count - 1 ? { items.swapAt(position, position + 1) } : nil,
+                            onEditPrefix: { prefixEditTarget = item; prefixEditDraft = item.customPrefix ?? autoPrefix(at: position) }
+                        )
+                        if item.id != matchedItems.last?.id { Divider() }
+                    }
+
+                    // ── Unmatched section (instrument not recognised) ──────
                     if !unmatchedItems.isEmpty {
+                        if !matchedItems.isEmpty { Divider() }
                         HStack(spacing: 6) {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(.orange)
                                 .font(.caption)
-                            Text("Unmatched — instrument not recognised in current order")
+                            Text("Unmatched — instrument not recognised · double-click the prefix badge to set a custom prefix")
                                 .font(.caption)
                                 .foregroundColor(.orange)
                             Spacer()
@@ -8251,48 +8360,19 @@ struct PrefixOrderStepView: View {
                         .background(Color.orange.opacity(0.10))
 
                         ForEach(unmatchedItems, id: \.id) { item in
-                            let position  = items.firstIndex(where: { $0.id == item.id })!
+                            let position   = items.firstIndex(where: { $0.id == item.id })!
                             let sectionIdx = unmatchedItems.firstIndex(where: { $0.id == item.id })!
                             PrefixOrderRow(
                                 item: item,
-                                position: position + 1,
-                                finalName: prefixedName(for: item, at: position + 1),
+                                position: position,
+                                autoPrefix: autoPrefix(at: position),
+                                finalName: prefixedName(for: item, at: position),
                                 onMoveUp:   sectionIdx > 0                        ? { items.swapAt(position, position - 1) } : nil,
                                 onMoveDown: sectionIdx < unmatchedItems.count - 1 ? { items.swapAt(position, position + 1) } : nil,
-                                isUnmatched: true
+                                isUnmatched: true,
+                                onEditPrefix: { prefixEditTarget = item; prefixEditDraft = item.customPrefix ?? autoPrefix(at: position) }
                             )
-                            Divider()
-                        }
-                    }
-
-                    // ── Matched section ───────────────────────────────────
-                    if !matchedItems.isEmpty {
-                        if !unmatchedItems.isEmpty {
-                            HStack(spacing: 6) {
-                                Image(systemName: "checkmark.circle.fill")
-                                    .foregroundColor(.secondary)
-                                    .font(.caption)
-                                Text("Matched")
-                                    .font(.caption)
-                                    .foregroundColor(.secondary)
-                                Spacer()
-                            }
-                            .padding(.horizontal, 14)
-                            .padding(.vertical, 6)
-                            .background(Color(NSColor.controlBackgroundColor))
-                        }
-
-                        ForEach(matchedItems, id: \.id) { item in
-                            let position   = items.firstIndex(where: { $0.id == item.id })!
-                            let sectionIdx = matchedItems.firstIndex(where: { $0.id == item.id })!
-                            PrefixOrderRow(
-                                item: item,
-                                position: position + 1,
-                                finalName: prefixedName(for: item, at: position + 1),
-                                onMoveUp:   sectionIdx > 0                      ? { items.swapAt(position, position - 1) } : nil,
-                                onMoveDown: sectionIdx < matchedItems.count - 1 ? { items.swapAt(position, position + 1) } : nil
-                            )
-                            if item.id != matchedItems.last?.id { Divider() }
+                            if item.id != unmatchedItems.last?.id { Divider() }
                         }
                     }
                 }
@@ -8319,6 +8399,72 @@ struct PrefixOrderStepView: View {
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
         }
+        // ── Custom prefix editor ──────────────────────────────────────────
+        .sheet(item: $prefixEditTarget) { target in
+            PrefixEditSheet(
+                fileName: target.proposedName,
+                draft: $prefixEditDraft,
+                onApply: { value in
+                    if let idx = items.firstIndex(where: { $0.id == target.id }) {
+                        items[idx].customPrefix = value.trimmingCharacters(in: .whitespaces).isEmpty ? nil : value.trimmingCharacters(in: .whitespaces)
+                    }
+                    prefixEditTarget = nil
+                },
+                onClear: {
+                    if let idx = items.firstIndex(where: { $0.id == target.id }) {
+                        items[idx].customPrefix = nil
+                    }
+                    prefixEditTarget = nil
+                },
+                onCancel: { prefixEditTarget = nil }
+            )
+        }
+    }
+}
+
+/// Small sheet for typing a free-form prefix override.
+private struct PrefixEditSheet: View {
+    let fileName: String
+    @Binding var draft: String
+    let onApply: (String) -> Void
+    let onClear: () -> Void
+    let onCancel: () -> Void
+    @FocusState private var fieldFocused: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 20) {
+            Text("Set Custom Prefix")
+                .font(.title2).fontWeight(.semibold)
+
+            Text(fileName)
+                .font(.callout)
+                .foregroundColor(.secondary)
+                .lineLimit(2)
+                .truncationMode(.middle)
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Prefix (any text — leave blank to restore auto-numbering)")
+                    .font(.caption).foregroundColor(.secondary)
+                TextField("e.g. 00, 05a, Extra", text: $draft)
+                    .textFieldStyle(.roundedBorder)
+                    .focused($fieldFocused)
+                    .onSubmit { onApply(draft) }
+            }
+
+            HStack {
+                Button("Clear (use auto)", role: .destructive, action: onClear)
+                    .buttonStyle(.bordered)
+                Spacer()
+                Button("Cancel", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("Apply") { onApply(draft) }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .frame(width: 420)
+        .onAppear { fieldFocused = true }
     }
 }
 
