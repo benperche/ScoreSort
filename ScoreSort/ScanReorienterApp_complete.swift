@@ -629,7 +629,11 @@ struct CombineView: View {
             Text("Drop PDF files here to combine")
                 .font(.title2)
                 .fontWeight(.medium)
-            
+
+            Text("Merge multiple PDFs or images into a single document ready to print in one go")
+                .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
+
             Text("or")
                 .foregroundColor(.secondary)
             
@@ -5252,7 +5256,8 @@ struct RotateView: View {
                 }
             } else {
                 // No PDF loaded - show drop zone
-                DropZoneView(pdfManager: pdfManager)
+                DropZoneView(pdfManager: pdfManager,
+                             subtitle: "Correct pages that came out sideways or upside-down after scanning")
             }
         }
         .focusable()
@@ -5911,7 +5916,7 @@ struct SplitView: View {
         VStack(spacing: 0) {
             // Top toolbar
             HStack {
-                Text("Split PDF — Step 1: Set Split Points")
+                Text(pdfManager.pdfDocument != nil ? "Split PDF — Step 1: Set Split Points" : "Split PDF")
                     .font(.title2)
                     .fontWeight(.semibold)
                 
@@ -6234,7 +6239,8 @@ struct SplitView: View {
                 }
             } else {
                 // No PDF loaded - show drop zone
-                DropZoneView(pdfManager: pdfManager)
+                DropZoneView(pdfManager: pdfManager,
+                             subtitle: "Divide a large PDF — e.g. a complete bound scan of all parts — into separate instrument files")
             }
         }
         .focused($isViewFocused)
@@ -8845,18 +8851,25 @@ struct PageCropOverview: View {
 // MARK: - Drop Zone View (Shared)
 struct DropZoneView: View {
     @ObservedObject var pdfManager: PDFManager
+    var subtitle: String? = nil
     @State private var isTargeted = false
-    
+
     var body: some View {
         VStack(spacing: 20) {
             Image(systemName: "doc.viewfinder")
                 .font(.system(size: 64))
                 .foregroundColor(isTargeted ? .accentColor : .secondary)
-            
+
             Text("Drop a PDF here")
                 .font(.title2)
                 .fontWeight(.medium)
-            
+
+            if let subtitle {
+                Text(subtitle)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondary)
+            }
+
             Text("or")
                 .foregroundColor(.secondary)
             
