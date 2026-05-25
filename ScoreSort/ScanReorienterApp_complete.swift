@@ -5843,6 +5843,9 @@ struct SplitView: View {
                     isProcessingA3 = true
                     // Run the crop-box splitting on a background thread so the
                     // UI stays responsive on large documents.
+                    // SAFETY: original is not touched on the main thread again until
+                    // the async block completes and posts back via DispatchQueue.main.async.
+                    // No mutations inside this block — read-only pass to splitA3Pages.
                     let uncheckedOriginal = Unchecked(original)
                     DispatchQueue.global(qos: .userInitiated).async {
                         let splitDoc = splitA3Pages(uncheckedOriginal.value, leftFirst: leftFirst)
@@ -8713,6 +8716,7 @@ struct PageInstrumentPreview: View {
     // Using thumbnail(of:for:) which correctly respects page rotation.
     private static func renderFullPageAsync(page: PDFPage) async -> NSImage? {
         await withCheckedContinuation { continuation in
+            // SAFETY: read-only access only (bounds + thumbnail). Do not mutate p.
             let uncheckedPage = Unchecked(page)
             DispatchQueue.global(qos: .userInitiated).async {
                 let p = uncheckedPage.value
@@ -8842,6 +8846,7 @@ struct PageCropOverview: View {
         page: PDFPage, width: CGFloat, height: CGFloat
     ) async -> NSImage? {
         await withCheckedContinuation { continuation in
+            // SAFETY: read-only access only (thumbnail). Do not mutate page.
             let uncheckedPage = Unchecked(page)
             DispatchQueue.global(qos: .utility).async {
                 let size = NSSize(width: width * 2, height: height * 2)  // 2× for retina
