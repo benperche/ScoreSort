@@ -9,7 +9,7 @@
 //
 
 import SwiftUI
-import PDFKit
+@preconcurrency import PDFKit
 import UniformTypeIdentifiers
 import Combine
 // import Sparkle  // Re-enable for DMG/direct distribution builds
@@ -5843,8 +5843,9 @@ struct SplitView: View {
                     isProcessingA3 = true
                     // Run the crop-box splitting on a background thread so the
                     // UI stays responsive on large documents.
+                    let uncheckedOriginal = Unchecked(original)
                     DispatchQueue.global(qos: .userInitiated).async {
-                        let splitDoc = splitA3Pages(original, leftFirst: leftFirst)
+                        let splitDoc = splitA3Pages(uncheckedOriginal.value, leftFirst: leftFirst)
                         DispatchQueue.main.async {
                             isProcessingA3 = false
                             // Switch to page-skip mode so Delete skips individual pages,
@@ -8712,8 +8713,9 @@ struct PageInstrumentPreview: View {
     // Using thumbnail(of:for:) which correctly respects page rotation.
     private static func renderFullPageAsync(page: PDFPage) async -> NSImage? {
         await withCheckedContinuation { continuation in
-            let p = page
+            let uncheckedPage = Unchecked(page)
             DispatchQueue.global(qos: .userInitiated).async {
+                let p = uncheckedPage.value
                 let mediaBox = p.bounds(for: .mediaBox)
                 let rotation = ((p.rotation % 360) + 360) % 360
                 let scale: CGFloat = 2.0
@@ -8840,12 +8842,24 @@ struct PageCropOverview: View {
         page: PDFPage, width: CGFloat, height: CGFloat
     ) async -> NSImage? {
         await withCheckedContinuation { continuation in
+            let uncheckedPage = Unchecked(page)
             DispatchQueue.global(qos: .utility).async {
                 let size = NSSize(width: width * 2, height: height * 2)  // 2× for retina
-                continuation.resume(returning: page.thumbnail(of: size, for: .mediaBox))
+                continuation.resume(returning: uncheckedPage.value.thumbnail(of: size, for: .mediaBox))
             }
         }
     }
+}
+
+// MARK: - Sendable utilities
+
+/// Wraps a non-Sendable value so it can be safely captured in a @Sendable closure.
+/// Use only where you can guarantee the underlying object is actually thread-safe
+/// (e.g. PDFKit types, which Apple uses from background threads despite not being
+/// formally marked Sendable).
+private final class Unchecked<T>: @unchecked Sendable {
+    let value: T
+    init(_ value: T) { self.value = value }
 }
 
 // MARK: - Drop Zone View (Shared)
