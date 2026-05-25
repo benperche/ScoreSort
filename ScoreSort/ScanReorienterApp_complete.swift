@@ -2733,56 +2733,73 @@ struct ScoreOrderSortView: View {
     @Environment(\.openSettings) private var openSettings
     @State private var selectedFileForAssignment: RenameOperation?
     @State private var isFolderTargeted = false
+    @State private var renameResult: (folderURL: URL?, names: [String])? = nil
 
     var body: some View {
-        VStack(spacing: 0) {
-            // ── Top toolbar ───────────────────────────────────────────────
-            HStack {
-                Text("Score Order Sorter")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                Spacer()
-                if renamerManager.hasContent {
-                    Toggle(isOn: Binding(
-                        get: { renamerManager.isRescanMode },
-                        set: { renamerManager.setRescanMode($0) }
-                    )) {
-                        Text("Renumber prefixed files")
-                    }
-                    .toggleStyle(.checkbox)
-                    .help("When on, files that already have a numeric prefix are renumbered along with the rest")
-                    Button(action: { openSettings() }) {
-                        Label("Preferences", systemImage: "gearshape")
-                    }
-                    Button(action: { renamerManager.clearFolder() }) {
-                        Label("Clear", systemImage: "xmark.circle.fill")
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
-                }
-            }
-            .padding()
-            .background(Color(NSColor.windowBackgroundColor))
-
-            Divider()
-
-            if renamerManager.hasContent {
-                fileListView
-                Divider()
-                bottomControlsView
-            } else {
-                folderSelectionView
-            }
-        }
-        .sheet(item: $selectedFileForAssignment) { operation in
-            ManualAssignmentView(
-                operation: operation,
-                existingNumbers: renamerManager.getExistingNumbers(),
-                onAssign: { number in
-                    renamerManager.setManualOverride(for: operation.originalName, number: number)
-                    selectedFileForAssignment = nil
+        if let result = renameResult {
+            // ── Done screen ───────────────────────────────────────────────
+            ScoreOrderRenameSummaryView(
+                renamedNames: result.names,
+                folderURL: result.folderURL,
+                onStartOver: {
+                    renameResult = nil
+                    renamerManager.clearFolder()
+                },
+                onRescan: {
+                    renameResult = nil
+                    renamerManager.scanFolder()
                 }
             )
+        } else {
+            VStack(spacing: 0) {
+                // ── Top toolbar ───────────────────────────────────────────────
+                HStack {
+                    Text("Score Order Sorter")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Spacer()
+                    if renamerManager.hasContent {
+                        Toggle(isOn: Binding(
+                            get: { renamerManager.isRescanMode },
+                            set: { renamerManager.setRescanMode($0) }
+                        )) {
+                            Text("Renumber prefixed files")
+                        }
+                        .toggleStyle(.checkbox)
+                        .help("When on, files that already have a numeric prefix are renumbered along with the rest")
+                        Button(action: { openSettings() }) {
+                            Label("Preferences", systemImage: "gearshape")
+                        }
+                        Button(action: { renamerManager.clearFolder() }) {
+                            Label("Clear", systemImage: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.secondary)
+                    }
+                }
+                .padding()
+                .background(Color(NSColor.windowBackgroundColor))
+
+                Divider()
+
+                if renamerManager.hasContent {
+                    fileListView
+                    Divider()
+                    bottomControlsView
+                } else {
+                    folderSelectionView
+                }
+            }
+            .sheet(item: $selectedFileForAssignment) { operation in
+                ManualAssignmentView(
+                    operation: operation,
+                    existingNumbers: renamerManager.getExistingNumbers(),
+                    onAssign: { number in
+                        renamerManager.setManualOverride(for: operation.originalName, number: number)
+                        selectedFileForAssignment = nil
+                    }
+                )
+            }
         }
     }
 
@@ -2920,7 +2937,11 @@ struct ScoreOrderSortView: View {
                     .font(.callout)
                     .foregroundColor(.secondary)
                 Spacer()
-                Button(action: { renamerManager.executeRename() }) {
+                Button {
+                    renamerManager.executeRename { folderURL, names in
+                        renameResult = (folderURL: folderURL, names: names)
+                    }
+                } label: {
                     Label("Rename Files", systemImage: "checkmark.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
@@ -2953,6 +2974,84 @@ struct ScoreOrderSortView: View {
             } else {
                 renamerManager.loadFiles(urls: urls)
             }
+        }
+    }
+}
+
+// MARK: - Score Order Rename Summary
+
+/// Full-screen done screen shown after the Score Order Sorter renames files.
+private struct ScoreOrderRenameSummaryView: View {
+    let renamedNames: [String]
+    let folderURL: URL?
+    let onStartOver: () -> Void
+    let onRescan: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            // ── Success header ────────────────────────────────────────────
+            VStack(spacing: 12) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 52))
+                    .foregroundColor(.green)
+                Text("Done!")
+                    .font(.title).fontWeight(.bold)
+                Text("\(renamedNames.count) file\(renamedNames.count == 1 ? "" : "s") renamed successfully.")
+                    .foregroundColor(.secondary)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.top, 36)
+            .padding(.bottom, 20)
+
+            Divider()
+
+            // ── File list ─────────────────────────────────────────────────
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    ForEach(renamedNames.indices, id: \.self) { i in
+                        HStack(spacing: 8) {
+                            Image(systemName: "doc.fill")
+                                .foregroundColor(.accentColor)
+                                .font(.caption)
+                            Text(renamedNames[i])
+                                .font(.system(.body, design: .monospaced))
+                                .lineLimit(1)
+                        }
+                        .padding(.horizontal)
+                        .padding(.vertical, 2)
+                    }
+                }
+                .padding(.vertical, 12)
+            }
+
+            Divider()
+
+            // ── Bottom bar ─────────────────────────────────────────────────
+            HStack(spacing: 12) {
+                Button(action: onStartOver) {
+                    Label("Start Over", systemImage: "arrow.uturn.left")
+                }
+                .buttonStyle(.bordered)
+
+                if let url = folderURL {
+                    Button {
+                        NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: url.path)
+                    } label: {
+                        Label("Show in Finder", systemImage: "folder")
+                    }
+                    .buttonStyle(.bordered)
+                }
+
+                Spacer()
+
+                Button(action: onRescan) {
+                    Label("Rescan Folder", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.borderedProminent)
+                .help("Rescan the folder to review or continue renaming")
+            }
+            .padding()
+            .background(Color(NSColor.windowBackgroundColor))
         }
     }
 }
@@ -4284,7 +4383,7 @@ class RenamerManager: ObservableObject {
         return (filename, nil)
     }
 
-    private func scanFolder() {
+    func scanFolder() {
         operations = []
 
         // Build the list of PDF files to process: either directly-supplied URLs
@@ -4534,39 +4633,46 @@ class RenamerManager: ObservableObject {
         return nil
     }
     
-    func executeRename() {
+    func executeRename(
+        completion: ((_ folderURL: URL?, _ renamedNames: [String]) -> Void)? = nil
+    ) {
         let toRename = operations.filter { $0.type == .rename || $0.type == .correct || $0.type == .manual }
-        
+
         guard !toRename.isEmpty else { return }
-        
+
         var successCount = 0
+        var renamedNames: [String] = []
         var errors: [String] = []
-        
+
         for operation in toRename {
             guard let newURL = operation.newURL else { continue }
-            
             do {
                 try FileManager.default.moveItem(at: operation.originalURL, to: newURL)
                 successCount += 1
+                renamedNames.append(newURL.lastPathComponent)
             } catch {
                 errors.append("\(operation.originalName): \(error.localizedDescription)")
             }
         }
-        
+
         if !errors.isEmpty {
             let errorAlert = NSAlert()
             errorAlert.messageText = "Partial Success"
             let errorList = errors.prefix(5).joined(separator: "\n")
             var message = "Renamed \(successCount) file(s), but \(errors.count) failed:\n\n\(errorList)"
-            if errors.count > 5 {
-                message += "\n... and \(errors.count - 5) more"
-            }
+            if errors.count > 5 { message += "\n... and \(errors.count - 5) more" }
             errorAlert.informativeText = message
             errorAlert.alertStyle = .warning
             errorAlert.runModal()
         }
-        
-        scanFolder()
+
+        // If a completion handler is provided, let the caller show the summary
+        // screen before rescanning (so we don't immediately wipe the result).
+        if let completion {
+            completion(folderURL, renamedNames)
+        } else {
+            scanFolder()
+        }
     }
 }
 
