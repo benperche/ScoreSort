@@ -7588,6 +7588,13 @@ struct SplitNamingStageView: View {
                 .onAppear {
                     proxy.scrollTo(0, anchor: .top)
                     hasInferredEnsemble = false
+                    // Auto-focus the first text field so arrow keys immediately
+                    // navigate suggestions rather than scrolling the ScrollView.
+                    // A short async dispatch lets SwiftUI finish laying out the
+                    // new view hierarchy before we request focus.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) {
+                        focusedField = visibleFileIndices.first
+                    }
                 }
                 .onChange(of: focusedField) { _, newValue in
                     if let field = newValue {
