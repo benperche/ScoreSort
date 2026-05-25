@@ -2767,7 +2767,10 @@ struct ScoreOrderSortView: View {
                         }
                         .toggleStyle(.checkbox)
                         .help("When on, files that already have a numeric prefix are renumbered along with the rest")
-                        Button(action: { openSettings() }) {
+                        Button {
+                            UserDefaults.standard.set("renamer", forKey: "preferredPrefsTab")
+                            openSettings()
+                        } label: {
                             Label("Preferences", systemImage: "gearshape")
                         }
                         Button(action: { renamerManager.clearFolder() }) {
@@ -3921,11 +3924,15 @@ struct PreferencesView: View {
 struct AppPreferencesView: View {
     @EnvironmentObject var renamerManager: RenamerManager
     @EnvironmentObject var presetStore: EnsemblePresetStore
+    /// Persisted so callers can request a specific tab before opening the window.
+    @AppStorage("preferredPrefsTab") private var preferredPrefsTab: String = "combiner"
+    @State private var selectedTab: String = "combiner"
 
     var body: some View {
-        TabView {
+        TabView(selection: $selectedTab) {
             CombinerPreferencesView()
                 .tabItem { Label("Combiner", systemImage: "doc.on.doc") }
+                .tag("combiner")
 
             PreferencesView(
                 ensembleType: $renamerManager.ensembleType,
@@ -3933,8 +3940,13 @@ struct AppPreferencesView: View {
                 prefixSeparator: $renamerManager.prefixSeparator
             )
             .tabItem { Label("Renamer", systemImage: "folder.badge.gearshape") }
+            .tag("renamer")
         }
         .frame(width: 680, height: 720)
+        .onAppear { selectedTab = preferredPrefsTab }
+        // Fires even when the window is already open, so deep-linking works
+        // whether the window is freshly opened or already visible.
+        .onChange(of: preferredPrefsTab) { _, newTab in selectedTab = newTab }
     }
 }
 
