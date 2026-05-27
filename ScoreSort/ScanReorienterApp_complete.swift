@@ -3655,8 +3655,11 @@ struct BulkRenameView: View {
             for provider in providers {
                 group.enter()
                 _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    if let url = url { collected.append(url) }
-                    group.leave()
+                    // Dispatch to main to avoid concurrent array mutation (race condition).
+                    DispatchQueue.main.async {
+                        if let url = url { collected.append(url) }
+                        group.leave()
+                    }
                 }
             }
             group.notify(queue: .main) {
@@ -3882,11 +3885,21 @@ struct BulkRenameView: View {
                     ? "\(baseFileName)\(sep)\(index + 1).pdf"
                     : "\(baseFileName)\(sep)\(sfx).pdf"
                 let newURL = item.url.deletingLastPathComponent().appendingPathComponent(newName)
-                do {
-                    try FileManager.default.moveItem(at: item.url, to: newURL)
-                    finalNames.append(newName)
-                } catch {
-                    errors.append(item.url.lastPathComponent)
+                var coordinatorError: NSError?
+                NSFileCoordinator().coordinate(
+                    writingItemAt: item.url, options: .forMoving,
+                    writingItemAt: newURL,   options: .forReplacing,
+                    error: &coordinatorError
+                ) { src, dst in
+                    do {
+                        try FileManager.default.moveItem(at: src, to: dst)
+                        finalNames.append(newName)
+                    } catch {
+                        errors.append("\(item.url.lastPathComponent): \(error.localizedDescription)")
+                    }
+                }
+                if let e = coordinatorError {
+                    errors.append("\(item.url.lastPathComponent): \(e.localizedDescription)")
                 }
             }
 
@@ -3917,11 +3930,21 @@ struct BulkRenameView: View {
             let finalName = "\(prefix)\(sep)\(item.proposedName)"
             let targetURL = originalURL.deletingLastPathComponent()
                                        .appendingPathComponent(finalName)
-            do {
-                try FileManager.default.moveItem(at: originalURL, to: targetURL)
-                finalNames.append(finalName)
-            } catch {
-                errors.append(item.proposedName)
+            var coordinatorError: NSError?
+            NSFileCoordinator().coordinate(
+                writingItemAt: originalURL, options: .forMoving,
+                writingItemAt: targetURL,   options: .forReplacing,
+                error: &coordinatorError
+            ) { src, dst in
+                do {
+                    try FileManager.default.moveItem(at: src, to: dst)
+                    finalNames.append(finalName)
+                } catch {
+                    errors.append("\(item.proposedName): \(error.localizedDescription)")
+                }
+            }
+            if let e = coordinatorError {
+                errors.append("\(item.proposedName): \(e.localizedDescription)")
             }
         }
 
