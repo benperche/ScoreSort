@@ -3304,6 +3304,9 @@ struct BulkRenameView: View {
     // ── Prefix step ───────────────────────────────────────────────────────
     @State private var bulkStage: BulkStage = .base
     @State private var prefixItems: [PrefixItem] = []
+    /// Incremented each time we enter the prefix stage so SwiftUI creates a fresh
+    /// PrefixOrderStepView rather than reusing the old one with stale @State.
+    @State private var prefixRoundID: Int = 0
     @State private var summaryNames: [String] = []
 
     // ── Settings ─────────────────────────────────────────────────────────
@@ -3362,6 +3365,7 @@ struct BulkRenameView: View {
                 onBack: { bulkStage = .base },
                 onApply: { orderedItems in applyPrefixAndRenameBulk(orderedItems: orderedItems) }
             )
+            .id(prefixRoundID)
         case .base:
             VStack(spacing: 0) {
                 // Header
@@ -3649,6 +3653,7 @@ struct BulkRenameView: View {
                                   page: item.document.page(at: 0),
                                   originalURL: item.url)
             }
+            prefixRoundID += 1
             bulkStage = .prefix
         } else {
             // Rename directly to the base name + suffix (no prefix step).
@@ -5641,6 +5646,9 @@ struct SplitView: View {
     /// Reset whenever a new PDF is loaded so it always starts at the instrument-name corner.
     @State private var previewOffset: CGPoint = .zero
     @State private var prefixItems: [PrefixItem] = []
+    /// Incremented each time we enter the prefix stage so SwiftUI creates a fresh
+    /// PrefixOrderStepView rather than reusing the old one with stale @State.
+    @State private var prefixRoundID: Int = 0
     @State private var summaryNames: [String] = []
     @State private var pendingFolderURL: URL? = nil
     /// Pages to omit from output. A file whose every page is in this set is treated as "fully skipped".
@@ -5763,6 +5771,7 @@ struct SplitView: View {
                         applyPrefixAndSaveSplit(orderedItems: orderedItems)
                     }
                 )
+                .id(prefixRoundID)
             case .naming:
                 if let document = pdfManager.pdfDocument {
                     SplitNamingStageView(
@@ -6375,6 +6384,7 @@ struct SplitView: View {
                 pagePos += fileSize
             }
             prefixItems = items
+            prefixRoundID += 1
             splitStage = .prefix
         } else {
             // No prefix step — show folder picker now and save directly.
