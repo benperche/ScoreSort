@@ -7222,7 +7222,7 @@ struct SplitControlsSection: View {
             Divider()
                 .padding(.horizontal)
 
-            // ── Row 2: Split marker + Re-stride ───────────────────────────
+            // ── Row 2: Split marker (left) + Re-stride (right) ────────────
             HStack(spacing: 8) {
                 Button(action: onToggleMarker) {
                     if splitMarkers.contains(currentPage) {
@@ -7233,6 +7233,9 @@ struct SplitControlsSection: View {
                 }
                 .buttonStyle(.bordered)
                 .disabled(currentPage == 0)
+                .lineLimit(1)
+
+                Spacer()
 
                 Button(action: onRestride) {
                     Label("Re-stride from Here (R)", systemImage: "arrow.clockwise")
@@ -7240,57 +7243,65 @@ struct SplitControlsSection: View {
                 .buttonStyle(.bordered)
                 .disabled(currentPage == 0 || currentPage >= totalPages - 1)
                 .help("Re-apply the current stride from this page to the end, keeping all earlier splits intact")
-
-                Spacer()
+                .lineLimit(1)
             }
             .padding(.horizontal)
 
-            // ── Row 3: Swap with Next + centred skip toggle + Skip button ──
-            HStack(spacing: 12) {
-                Button(action: onSwapWithNext) {
-                    Label("Swap with Next (S)", systemImage: "arrow.up.arrow.down")
-                }
-                .buttonStyle(.bordered)
-                .disabled(currentPage >= totalPages - 1)
-                .help("Swap the current page with the one after it")
-
-                Spacer()
-
-                // Skip mode: "Page  [toggle]  File" — compact inline toggle
-                HStack(spacing: 6) {
-                    Text("Skip:")
-                        .foregroundColor(.secondary)
-                        .font(.subheadline)
-                    Text("Page")
-                        .foregroundColor(skipMode == .page ? .primary : .secondary)
-                        .font(.subheadline)
-                    Toggle("", isOn: Binding(
-                        get: { skipMode == .file },
-                        set: { skipMode = $0 ? .file : .page }
-                    ))
-                    .toggleStyle(.switch)
-                    .labelsHidden()
-                    .help("Controls whether Delete / the Skip button targets just this page or the whole output file")
-                    Text("File")
-                        .foregroundColor(skipMode == .file ? .primary : .secondary)
-                        .font(.subheadline)
-                }
-
-                Spacer()
-
-                Button(action: {
-                    switch skipMode {
-                    case .page: onSkipCurrentPage()
-                    case .file: onSkipCurrentFile()
+            // ── Row 3: Swap (left) · skip mode toggle (centre) · Skip button (right)
+            // ZStack lets the centre widget float truly centred without fighting the
+            // edge buttons for space — neither side can squish it.
+            ZStack {
+                // Edge buttons pinned left and right
+                HStack {
+                    Button(action: onSwapWithNext) {
+                        Label("Swap with Next (S)", systemImage: "arrow.up.arrow.down")
                     }
-                }) {
-                    Label(skipButtonLabel, systemImage: skipButtonIcon)
-                        .foregroundColor(skipButtonIsActive ? .orange : .red)
+                    .buttonStyle(.bordered)
+                    .disabled(currentPage >= totalPages - 1)
+                    .help("Swap the current page with the one after it")
+                    .lineLimit(1)
+
+                    Spacer()
+
+                    Button(action: {
+                        switch skipMode {
+                        case .page: onSkipCurrentPage()
+                        case .file: onSkipCurrentFile()
+                        }
+                    }) {
+                        Label(skipButtonLabel, systemImage: skipButtonIcon)
+                            .foregroundColor(skipButtonIsActive ? .orange : .red)
+                    }
+                    .buttonStyle(.bordered)
+                    .lineLimit(1)
+                    .help(skipMode == .page
+                          ? (currentPageIsSkipped ? "Un-skip this page (Delete)" : "Skip this page (Delete)")
+                          : (currentFileIsFullySkipped ? "Un-skip this output file (Delete)" : "Skip this output file (Delete)"))
                 }
-                .buttonStyle(.bordered)
-                .help(skipMode == .page
-                      ? (currentPageIsSkipped ? "Un-skip this page (Delete)" : "Skip this page (Delete)")
-                      : (currentFileIsFullySkipped ? "Un-skip this output file (Delete)" : "Skip this output file (Delete)"))
+
+                // Skip mode widget — truly centred, fixed size so it never wraps
+                VStack(spacing: 2) {
+                    Text("Skip")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                    HStack(spacing: 5) {
+                        Text("Page")
+                            .font(.caption)
+                            .foregroundColor(skipMode == .page ? .primary : .secondary)
+                        Toggle("", isOn: Binding(
+                            get: { skipMode == .file },
+                            set: { skipMode = $0 ? .file : .page }
+                        ))
+                        .toggleStyle(.switch)
+                        .labelsHidden()
+                        .controlSize(.mini)
+                        .help("Controls whether Delete / the Skip button targets just this page or the whole output file")
+                        Text("File")
+                            .font(.caption)
+                            .foregroundColor(skipMode == .file ? .primary : .secondary)
+                    }
+                }
+                .fixedSize()
             }
             .padding(.horizontal)
         }
