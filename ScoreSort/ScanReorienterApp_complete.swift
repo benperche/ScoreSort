@@ -6062,7 +6062,8 @@ struct SplitView: View {
                                     }
                                 },
                                 onSkipCurrentPage: { toggleSkipPage(currentPage) },
-                                onSwapWithNext: swapCurrentPageWithNext
+                                onSwapWithNext: swapCurrentPageWithNext,
+                                onRestride: restrideFromCurrentPage
                             )
 
                             Divider()
@@ -7110,6 +7111,7 @@ struct SplitControlsSection: View {
     let onSkipCurrentFile: () -> Void
     let onSkipCurrentPage: () -> Void
     let onSwapWithNext: () -> Void
+    let onRestride: () -> Void
 
     /// Returns which file index the current page belongs to, and the size of that file.
     private var currentFileInfo: (fileIndex: Int, fileStart: Int, fileSize: Int)? {
@@ -7220,11 +7222,11 @@ struct SplitControlsSection: View {
             Divider()
                 .padding(.horizontal)
 
-            // ── Row 2: Split marker + Swap with Next ───────────────────────
-            HStack(spacing: 12) {
+            // ── Row 2: Split marker + Re-stride ───────────────────────────
+            HStack(spacing: 8) {
                 Button(action: onToggleMarker) {
                     if splitMarkers.contains(currentPage) {
-                        Label("Remove Split", systemImage: "xmark.circle")
+                        Label("Remove Split (Space)", systemImage: "xmark.circle")
                     } else {
                         Label("Add Split Here (Space)", systemImage: "scissors")
                     }
@@ -7232,26 +7234,47 @@ struct SplitControlsSection: View {
                 .buttonStyle(.bordered)
                 .disabled(currentPage == 0)
 
-                Spacer()
+                Button(action: onRestride) {
+                    Label("Re-stride from Here (R)", systemImage: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+                .disabled(currentPage == 0 || currentPage >= totalPages - 1)
+                .help("Re-apply the current stride from this page to the end, keeping all earlier splits intact")
 
+                Spacer()
+            }
+            .padding(.horizontal)
+
+            // ── Row 3: Swap with Next + centred skip toggle + Skip button ──
+            HStack(spacing: 12) {
                 Button(action: onSwapWithNext) {
                     Label("Swap with Next (S)", systemImage: "arrow.up.arrow.down")
                 }
                 .buttonStyle(.bordered)
                 .disabled(currentPage >= totalPages - 1)
                 .help("Swap the current page with the one after it")
-            }
-            .padding(.horizontal)
 
-            // ── Row 3: Skip mode toggle + Skip/Unskip button ──────────────
-            HStack(spacing: 12) {
-                Picker("", selection: $skipMode) {
-                    Text("Skip Page").tag(SkipMode.page)
-                    Text("Skip File").tag(SkipMode.file)
+                Spacer()
+
+                // Skip mode: "Page  [toggle]  File" — compact inline toggle
+                HStack(spacing: 6) {
+                    Text("Skip:")
+                        .foregroundColor(.secondary)
+                        .font(.subheadline)
+                    Text("Page")
+                        .foregroundColor(skipMode == .page ? .primary : .secondary)
+                        .font(.subheadline)
+                    Toggle("", isOn: Binding(
+                        get: { skipMode == .file },
+                        set: { skipMode = $0 ? .file : .page }
+                    ))
+                    .toggleStyle(.switch)
+                    .labelsHidden()
+                    .help("Controls whether Delete / the Skip button targets just this page or the whole output file")
+                    Text("File")
+                        .foregroundColor(skipMode == .file ? .primary : .secondary)
+                        .font(.subheadline)
                 }
-                .pickerStyle(.segmented)
-                .fixedSize()
-                .help("Controls whether Delete / the Skip button skips only the current page or the entire output file")
 
                 Spacer()
 
