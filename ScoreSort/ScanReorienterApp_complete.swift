@@ -2742,6 +2742,57 @@ struct ScoreOrderSortView: View {
     @State private var isListDropTargeted = false
     @State private var renameResult: (folderURL: URL?, names: [String])? = nil
 
+    // ── Selection state ───────────────────────────────────────────────────
+    /// IDs of currently-selected operations (stable across re-scans).
+    @State private var selectedIDs: Set<String> = []
+    /// Last directly-clicked operation, used as the anchor for shift+click range selection.
+    @State private var lastClickedID: String? = nil
+    /// NSEvent key-down monitor; installed while the file list is visible.
+    @State private var keyEventMonitor: Any? = nil
+
+    /// All operations in display order (undetected → detected → excluded),
+    /// used to compute shift+click ranges.
+    private var allDisplayedOps: [RenameOperation] {
+        let undetected = renamerManager.operations.filter { $0.type == .undetected }
+        let rest       = renamerManager.operations.filter { $0.type != .undetected && $0.type != .excluded }
+        let excluded   = renamerManager.operations.filter { $0.type == .excluded }
+        return undetected + rest + excluded
+    }
+
+    private func handleSelect(_ operation: RenameOperation, command: Bool, shift: Bool) {
+        if command {
+            if selectedIDs.contains(operation.id) {
+                selectedIDs.remove(operation.id)
+            } else {
+                selectedIDs.insert(operation.id)
+            }
+            lastClickedID = operation.id
+        } else if shift, let lastID = lastClickedID,
+                  let lastIdx    = allDisplayedOps.firstIndex(where: { $0.id == lastID }),
+                  let currentIdx = allDisplayedOps.firstIndex(where: { $0.id == operation.id }) {
+            let lo = min(lastIdx, currentIdx)
+            let hi = max(lastIdx, currentIdx)
+            selectedIDs.formUnion(allDisplayedOps[lo...hi].map { $0.id })
+            // Note: lastClickedID intentionally unchanged for shift+click (standard behaviour)
+        } else {
+            selectedIDs = [operation.id]
+            lastClickedID = operation.id
+        }
+    }
+
+    private func excludeSelected() {
+        let names = Set(
+            renamerManager.operations
+                .filter { selectedIDs.contains($0.id) && $0.type != .excluded }
+                .map { $0.originalName }
+        )
+        guard !names.isEmpty else { return }
+        renamerManager.setExcluded(names, excluded: true)
+        // Keep IDs selected so the user can see what moved; they'll survive the re-scan
+        // because IDs are stable. Clear lastClickedID to avoid stale range anchors.
+        lastClickedID = nil
+    }
+
     /// Other PDF files in the same folder as the currently-loaded individual files
     /// that haven't been added yet. Nil when irrelevant (folder-mode load, files
     /// span multiple folders, or there are no additional files).
@@ -2791,13 +2842,29 @@ struct ScoreOrderSortView: View {
                         }
                         .toggleStyle(.checkbox)
                         .help("When on, files that already have a numeric prefix are renumbered along with the rest")
+                        // "Don't Rename" — moves the selected files to the excluded section.
+                        // Enabled only when at least one non-excluded file is selected.
+                        let hasExcludableSelection = renamerManager.operations.contains {
+                            selectedIDs.contains($0.id) && $0.type != .excluded
+                        }
+                        Button {
+                            excludeSelected()
+                        } label: {
+                            Label("Don't Rename", systemImage: "slash.circle")
+                        }
+                        .disabled(!hasExcludableSelection)
+                        .help("Move selected files to the Don't Rename section so they are skipped")
                         Button {
                             UserDefaults.standard.set("renamer", forKey: "preferredPrefsTab")
                             openSettings()
                         } label: {
                             Label("Preferences", systemImage: "gearshape")
                         }
-                        Button(action: { renamerManager.clearFolder() }) {
+                        Button(action: {
+                            renamerManager.clearFolder()
+                            selectedIDs = []
+                            lastClickedID = nil
+                        }) {
                             Label("Clear", systemImage: "xmark.circle.fill")
                         }
                         .buttonStyle(.plain)
@@ -2811,6 +2878,25 @@ struct ScoreOrderSortView: View {
 
                 if renamerManager.hasContent {
                     fileListView
+                        .onAppear {
+                            // Install a key monitor so ⌫ excludes selected files without
+                            // needing SwiftUI focus on the list (which is unreliable for
+                            // a non-text ScrollView on macOS).
+                            keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                                // keyCode 51 = Delete/Backspace
+                                if event.keyCode == 51, !selectedIDs.isEmpty {
+                                    excludeSelected()
+                                    return nil   // consume the event
+                                }
+                                return event
+                            }
+                        }
+                        .onDisappear {
+                            if let m = keyEventMonitor {
+                                NSEvent.removeMonitor(m)
+                                keyEventMonitor = nil
+                            }
+                        }
                     Divider()
                     bottomControlsView
                 } else {
@@ -2891,7 +2977,8 @@ struct ScoreOrderSortView: View {
     // ── File list ─────────────────────────────────────────────────────────
     private var fileListView: some View {
         let undetected = renamerManager.operations.filter { $0.type == .undetected }
-        let detected   = renamerManager.operations.filter { $0.type != .undetected }
+        let detected   = renamerManager.operations.filter { $0.type != .undetected && $0.type != .excluded }
+        let excluded   = renamerManager.operations.filter { $0.type == .excluded }
         return ScrollView {
             LazyVStack(spacing: 0) {
                 // Undetected section
@@ -2910,14 +2997,18 @@ struct ScoreOrderSortView: View {
                     .background(Color.orange.opacity(0.10))
 
                     ForEach(undetected) { operation in
-                        ScoreOrderFileRow(operation: operation, isUnmatched: true) {
-                            selectedFileForAssignment = operation
-                        }
+                        ScoreOrderFileRow(
+                            operation: operation,
+                            isUnmatched: true,
+                            isSelected: selectedIDs.contains(operation.id),
+                            onDoubleClick: { selectedFileForAssignment = operation },
+                            onSelect: { cmd, shift in handleSelect(operation, command: cmd, shift: shift) }
+                        )
                         Divider()
                     }
                 }
 
-                // Detected section
+                // Detected / matched section
                 if !detected.isEmpty {
                     if !undetected.isEmpty {
                         HStack(spacing: 6) {
@@ -2935,9 +3026,45 @@ struct ScoreOrderSortView: View {
                     }
 
                     ForEach(detected) { operation in
-                        ScoreOrderFileRow(operation: operation) {
-                            selectedFileForAssignment = operation
-                        }
+                        ScoreOrderFileRow(
+                            operation: operation,
+                            isSelected: selectedIDs.contains(operation.id),
+                            onDoubleClick: { selectedFileForAssignment = operation },
+                            onSelect: { cmd, shift in handleSelect(operation, command: cmd, shift: shift) }
+                        )
+                        Divider()
+                    }
+                }
+
+                // Don't Rename section — files the user has explicitly excluded.
+                if !excluded.isEmpty {
+                    HStack(spacing: 6) {
+                        Image(systemName: "slash.circle.fill")
+                            .foregroundColor(.red)
+                            .font(.caption)
+                        Text("Won't be renamed")
+                            .font(.caption)
+                            .foregroundColor(.red)
+                        Spacer()
+                        Text("Click \(Image(systemName: "arrow.uturn.backward")) to restore a file")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                    }
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 6)
+                    .background(Color.red.opacity(0.08))
+
+                    ForEach(excluded) { operation in
+                        ScoreOrderFileRow(
+                            operation: operation,
+                            isSelected: selectedIDs.contains(operation.id),
+                            onDoubleClick: {},
+                            onSelect: { cmd, shift in handleSelect(operation, command: cmd, shift: shift) },
+                            onRestore: {
+                                renamerManager.setExcluded([operation.originalName], excluded: false)
+                                selectedIDs.remove(operation.id)
+                            }
+                        )
                         Divider()
                     }
                 }
@@ -3129,7 +3256,12 @@ private struct ScoreOrderRenameSummaryView: View {
 private struct ScoreOrderFileRow: View {
     let operation: RenameOperation
     var isUnmatched: Bool = false
+    var isSelected: Bool = false
     let onDoubleClick: () -> Void
+    /// Called on single, cmd, or shift click — passes (isCommandDown, isShiftDown).
+    let onSelect: (_ command: Bool, _ shift: Bool) -> Void
+    /// If non-nil, a restore button is shown (used for excluded rows).
+    var onRestore: (() -> Void)? = nil
     @State private var isHovered = false
 
     var body: some View {
@@ -3145,6 +3277,9 @@ private struct ScoreOrderFileRow: View {
                     case .undetected:
                         Image(systemName: "questionmark.circle.fill")
                             .foregroundColor(.orange)
+                    case .excluded:
+                        Image(systemName: "slash.circle")
+                            .foregroundColor(.red)
                     default:
                         let prefix = String(operation.newName.prefix(2))
                         Text(prefix.isEmpty ? "??" : prefix)
@@ -3158,14 +3293,15 @@ private struct ScoreOrderFileRow: View {
                 Text(operation.originalName)
                     .lineLimit(1)
                     .foregroundColor(
-                        (operation.type == .alreadyPrefixed || operation.type == .skip)
-                        ? .secondary : .primary
+                        operation.type == .excluded ? .red
+                        : (operation.type == .alreadyPrefixed || operation.type == .skip) ? .secondary
+                        : .primary
                     )
             }
             .padding(.leading, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // ── Right column: new filename or hint, status tag ────────────
+            // ── Right column: new filename or hint, status tag, restore ──
             HStack(spacing: 8) {
                 switch operation.type {
                 case .undetected:
@@ -3182,6 +3318,11 @@ private struct ScoreOrderFileRow: View {
                     Text(operation.type == .alreadyPrefixed ? "Already prefixed — will skip" : "Already correct — will skip")
                         .font(.caption)
                         .foregroundColor(.secondary)
+                        .lineLimit(1)
+                case .excluded:
+                    Text("Won't be renamed")
+                        .font(.caption)
+                        .foregroundColor(.red.opacity(0.8))
                         .lineLimit(1)
                 default:
                     if !operation.newName.isEmpty {
@@ -3200,18 +3341,33 @@ private struct ScoreOrderFileRow: View {
                 default:
                     EmptyView()
                 }
+                // Restore button for excluded rows
+                if let restore = onRestore {
+                    Button(action: restore) {
+                        Image(systemName: "arrow.uturn.backward.circle")
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundColor(.secondary)
+                    .help("Restore to rename list")
+                }
             }
             .padding(.trailing, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .padding(.vertical, 8)
         .background(
-            isHovered ? Color.accentColor.opacity(0.05)
+            isSelected ? Color.accentColor.opacity(0.15)
+            : isHovered ? Color.accentColor.opacity(0.05)
             : isUnmatched ? Color.orange.opacity(0.06)
+            : operation.type == .excluded ? Color.red.opacity(0.04)
             : Color.clear
         )
         .contentShape(Rectangle())
         .onTapGesture(count: 2) { onDoubleClick() }
+        .onTapGesture(count: 1) {
+            let flags = NSEvent.modifierFlags
+            onSelect(flags.contains(.command), flags.contains(.shift))
+        }
         .onHover { isHovered = $0 }
     }
 
@@ -4326,6 +4482,9 @@ class RenamerManager: ObservableObject {
     /// Files loaded directly (when the user drags in individual PDFs rather than a folder).
     @Published private(set) var directFiles: [URL] = []
     @Published var operations: [RenameOperation] = []
+    /// Filenames the user has explicitly excluded from renaming.
+    /// Excluded files still appear in operations with type .excluded, sorted to the bottom.
+    @Published private(set) var excludedNames: Set<String> = []
     @Published var ensembleType: EnsembleType = .band {
         didSet {
             if !hasCustomOrder {
@@ -4382,6 +4541,7 @@ class RenamerManager: ObservableObject {
         self.folderURL = url
         self.directFiles = []
         self.manualOverrides = [:]
+        self.excludedNames = []
         self.isRescanMode = false
         scanFolder()
     }
@@ -4392,6 +4552,7 @@ class RenamerManager: ObservableObject {
         self.directFiles = urls.filter { $0.pathExtension.lowercased() == "pdf" }
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         self.manualOverrides = [:]
+        self.excludedNames = []
         self.isRescanMode = false
         scanFolder()
     }
@@ -4424,11 +4585,23 @@ class RenamerManager: ObservableObject {
         scanFolder()
     }
 
+    /// Marks the given filenames as excluded (won't rename) or restores them.
+    /// Excluded files remain visible in the list, sorted to the bottom in red.
+    func setExcluded(_ names: Set<String>, excluded: Bool) {
+        if excluded {
+            excludedNames.formUnion(names)
+        } else {
+            excludedNames.subtract(names)
+        }
+        scanFolder()
+    }
+
     func clearFolder() {
         self.folderURL = nil
         self.directFiles = []
         self.operations = []
         self.manualOverrides = [:]
+        self.excludedNames = []
         self.isRescanMode = false
     }
 
@@ -4539,7 +4712,18 @@ class RenamerManager: ObservableObject {
         for fileURL in pdfFiles {
             let filename = fileURL.lastPathComponent
             let originalFilename = filename
-            
+
+            // User has explicitly excluded this file — add a no-op operation and skip.
+            if excludedNames.contains(filename) {
+                operations.append(RenameOperation(
+                    originalURL: fileURL,
+                    originalName: filename,
+                    newName: "",
+                    type: .excluded
+                ))
+                continue
+            }
+
             // Strip existing prefix for rescan mode
             let filenameWithoutPrefix: String
             if isRescanMode, let match = filename.range(of: "^\\d{2}[-_\\s]", options: .regularExpression) {
@@ -4706,8 +4890,12 @@ class RenamerManager: ObservableObject {
             operations.append(op)
         }
         
-        // Sort: undetected files first (so they are immediately visible), then by new filename
+        // Sort: excluded files last, undetected files first (so they are immediately visible), then by new filename
         operations.sort { op1, op2 in
+            let e1 = op1.type == .excluded
+            let e2 = op2.type == .excluded
+            if e1 && !e2 { return false }
+            if !e1 && e2 { return true }
             let u1 = op1.type == .undetected
             let u2 = op2.type == .undetected
             if u1 && !u2 { return true }
@@ -5148,10 +5336,13 @@ enum RenameOperationType {
     case undetected
     case correct
     case manual
+    case excluded   // User-excluded from renaming; shown in red section at bottom
 }
 
 struct RenameOperation: Identifiable {
-    let id = UUID()
+    /// Stable across re-scans: uses the standardized URL path so that
+    /// selectedIDs remain valid after scanFolder() regenerates operations.
+    let id: String
     let originalURL: URL
     let originalName: String
     let newName: String
@@ -5159,9 +5350,10 @@ struct RenameOperation: Identifiable {
     let type: RenameOperationType
     var statusOverride: String?
     var oldPrefix: String?
-    
+
     init(originalURL: URL, originalName: String, newName: String, newURL: URL? = nil,
          type: RenameOperationType, statusOverride: String? = nil, oldPrefix: String? = nil) {
+        self.id = originalURL.standardizedFileURL.path
         self.originalURL = originalURL
         self.originalName = originalName
         self.newName = newName
@@ -5193,9 +5385,11 @@ struct RenameOperation: Identifiable {
             return "Will correct"
         case .manual:
             return "Will rename (manual)"
+        case .excluded:
+            return "Won't be renamed"
         }
     }
-    
+
     var color: Color {
         switch type {
         case .rename:
@@ -5208,6 +5402,8 @@ struct RenameOperation: Identifiable {
             return Color.orange
         case .manual:
             return Color.blue
+        case .excluded:
+            return Color.red
         }
     }
 }
