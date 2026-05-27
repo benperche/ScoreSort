@@ -3051,7 +3051,7 @@ struct ScoreOrderSortView: View {
                     .padding(.vertical, 6)
                     .background(Color.red.opacity(0.08))
 
-                    ForEach(excluded) { operation in
+                    ForEach(excluded, id: \.excludedSectionID) { operation in
                         ScoreOrderFileRow(
                             operation: operation,
                             isSelected: selectedIDs.contains(operation.id),
@@ -5343,6 +5343,9 @@ struct RenameOperation: Identifiable {
     /// Stable across re-scans: uses the standardized URL path so that
     /// selectedIDs remain valid after scanFolder() regenerates operations.
     let id: String
+    /// Distinct identity for use in the excluded-section ForEach so SwiftUI
+    /// creates a fresh view rather than reusing the detected-section view.
+    var excludedSectionID: String { "excluded_\(id)" }
     let originalURL: URL
     let originalName: String
     let newName: String
