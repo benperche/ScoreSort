@@ -3298,7 +3298,7 @@ private struct ScoreOrderFileRow: View {
             .padding(.leading, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
 
-            // ── Right column: new filename or hint, status tag, restore ──
+            // ── Right column: new filename or hint, status tag ────────────
             HStack(spacing: 8) {
                 switch operation.type {
                 case .undetected:
@@ -3338,18 +3338,19 @@ private struct ScoreOrderFileRow: View {
                 default:
                     EmptyView()
                 }
-                // Restore button for excluded rows
-                if let restore = onRestore {
-                    Button(action: restore) {
-                        Label("Restore", systemImage: "arrow.uturn.backward")
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .help("Move back to the rename list")
-                }
             }
-            .padding(.trailing, 16)
             .frame(maxWidth: .infinity, alignment: .leading)
+
+            // ── Restore button — pinned to trailing edge for excluded rows ─
+            if let restore = onRestore {
+                Button(action: restore) {
+                    Label("Restore", systemImage: "arrow.uturn.backward")
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .help("Move back to the rename list")
+                .padding(.trailing, 16)
+            }
         }
         .padding(.vertical, 8)
         .background(
