@@ -1705,6 +1705,7 @@ struct ShortcutsHelpView: View {
                     shortcutRow("← / →", "Previous / next page")
                     shortcutRow("⌘← / ⌘→", "First / last page")
                     shortcutRow("Space", "Toggle split marker")
+                    shortcutRow("R", "Re-stride: apply stride from current page to end")
                     shortcutRow("↑ / ↓", "Jump between output files")
                     shortcutRow("⌫", "Toggle skip on selected output file(s)")
                 }
@@ -6112,6 +6113,9 @@ struct SplitView: View {
                                     Text("Then navigate with ← → and press **Space** to fine-tune. Pressing Space in the *middle* of a file adds a split there. Pressing Space at the *start* of a file (highlighted in orange) removes that split and merges the file with the one above.")
                                         .font(.caption)
                                         .foregroundColor(.secondary)
+                                    Text("If one part is shorter than the rest (e.g. a 3-page piccolo part in a 4-page-stride set), navigate to where the next part *should* start and press **R** to re-apply the stride from that page to the end, keeping all earlier splits intact.")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
                                 }
                             }
                             .padding(12)
@@ -6246,6 +6250,11 @@ struct SplitView: View {
                                 swapCurrentPageWithNext()
                                 return .handled
                             }
+                            // R — re-apply stride from the current page to the end
+                            if press.characters == "r" || press.characters == "R" {
+                                restrideFromCurrentPage()
+                                return .handled
+                            }
                             return .ignored
                         }
                     }
@@ -6288,6 +6297,44 @@ struct SplitView: View {
         customFileNames.removeAll()
         skippedPages = []
         selectedFileIndices = []
+    }
+
+    /// Re-applies the current stride from `currentPage` to the end of the document,
+    /// leaving all existing splits before `currentPage` untouched.
+    ///
+    /// If `currentPage` falls in the middle of an existing file segment, that segment
+    /// is trimmed to end at `currentPage` before the new stride begins.
+    ///
+    /// Example: stride = 4, fileSizes = [4, 4, 4 …], currentPage = 3
+    ///   → fileSizes becomes [3, 4, 4, 4 …]
+    private func restrideFromCurrentPage() {
+        guard currentPage > 0, totalPages > currentPage else { return }
+
+        // Walk existing fileSizes, keeping every segment that ends at or before
+        // currentPage.  If currentPage falls inside a segment, keep only the
+        // portion before currentPage (i.e. trim that segment).
+        var prefixSizes: [Int] = []
+        var pos = 0
+        for size in fileSizes {
+            let end = pos + size
+            if end <= currentPage {
+                prefixSizes.append(size)
+                pos = end
+            } else {
+                // currentPage is inside this segment (or at its very start).
+                if pos < currentPage {
+                    prefixSizes.append(currentPage - pos)
+                }
+                break
+            }
+        }
+
+        let remaining = totalPages - currentPage
+        let suffixSizes = splitSizes(totalPages: remaining, stride: stride)
+        fileSizes = prefixSizes + suffixSizes
+
+        // Clear custom names for the re-strided region; prefix names stay intact.
+        customFileNames = customFileNames.filter { $0.key < prefixSizes.count }
     }
 
     private func toggleSplitAt(page: Int) {
