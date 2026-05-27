@@ -9266,6 +9266,10 @@ struct PageCropOverview: View {
 private final class Unchecked<T>: @unchecked Sendable {
     let value: T
     init(_ value: T) { self.value = value }
+    // Explicit deinit prevents a Swift compiler crash in Release mode where
+    // EarlyPerfInliner hits an internal assertion on the synthesised deinit
+    // of a generic @unchecked Sendable class.
+    deinit {}
 }
 
 // MARK: - Drop Zone View (Shared)
