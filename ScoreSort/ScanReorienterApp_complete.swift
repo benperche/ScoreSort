@@ -2739,7 +2739,25 @@ struct ScoreOrderSortView: View {
     @Environment(\.openSettings) private var openSettings
     @State private var selectedFileForAssignment: RenameOperation?
     @State private var isFolderTargeted = false
+    @State private var isListDropTargeted = false
     @State private var renameResult: (folderURL: URL?, names: [String])? = nil
+
+    /// Other PDF files in the same folder as the currently-loaded individual files
+    /// that haven't been added yet. Nil when irrelevant (folder-mode load, files
+    /// span multiple folders, or there are no additional files).
+    private var additionalFolderFiles: [URL]? {
+        let files = renamerManager.directFiles
+        guard !files.isEmpty else { return nil }
+        let folders = Set(files.map { $0.deletingLastPathComponent().standardizedFileURL })
+        guard folders.count == 1, let folder = folders.first else { return nil }
+        let all = (try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
+        ))?.filter { $0.pathExtension.lowercased() == "pdf" } ?? []
+        let existing = Set(files.map { $0.standardizedFileURL })
+        let extra = all.filter { !existing.contains($0.standardizedFileURL) }
+        return extra.isEmpty ? nil : extra
+    }
 
     var body: some View {
         if let result = renameResult {
@@ -2923,7 +2941,47 @@ struct ScoreOrderSortView: View {
                         Divider()
                     }
                 }
+
+                // "Add more from folder" button — only when individual files were
+                // loaded and there are unchosen PDFs in the same folder.
+                if let extras = additionalFolderFiles {
+                    Button {
+                        renamerManager.addFiles(urls: extras)
+                    } label: {
+                        Label(
+                            "Add \(extras.count) more file\(extras.count == 1 ? "" : "s") from this folder",
+                            systemImage: "plus.circle"
+                        )
+                    }
+                    .buttonStyle(.bordered)
+                    .padding()
+                    .frame(maxWidth: .infinity)
+                }
             }
+        }
+        // Accept additional file drops onto the file list once files are already loaded.
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(isListDropTargeted ? Color.accentColor : Color.clear, lineWidth: 2)
+                .padding(4)
+                .allowsHitTesting(false)
+        )
+        .onDrop(of: [.fileURL], isTargeted: $isListDropTargeted) { providers in
+            var collected: [URL] = []
+            let group = DispatchGroup()
+            for provider in providers {
+                group.enter()
+                _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                    DispatchQueue.main.async {
+                        if let url = url { collected.append(url) }
+                        group.leave()
+                    }
+                }
+            }
+            group.notify(queue: .main) {
+                renamerManager.addFiles(urls: collected)
+            }
+            return true
         }
     }
 
@@ -4335,6 +4393,34 @@ class RenamerManager: ObservableObject {
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         self.manualOverrides = [:]
         self.isRescanMode = false
+        scanFolder()
+    }
+
+    /// Adds more PDF files to the current list, deduplicating against whatever
+    /// is already loaded.  If the manager is currently in folder mode, it
+    /// expands the folder's contents into `directFiles` first (so the user can
+    /// see and manipulate the full list) before merging the new URLs in.
+    func addFiles(urls: [URL]) {
+        let newPDFs = urls.filter { $0.pathExtension.lowercased() == "pdf" }
+        guard !newPDFs.isEmpty else { return }
+
+        if let folder = folderURL {
+            // Expand folder mode → direct-files mode, then append new files.
+            let existing = (try? FileManager.default.contentsOfDirectory(
+                at: folder, includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
+            ))?.filter { $0.pathExtension.lowercased() == "pdf" }
+              .sorted { $0.lastPathComponent < $1.lastPathComponent } ?? []
+            folderURL = nil
+            let existingSet = Set(existing.map { $0.standardizedFileURL })
+            let toAdd = newPDFs.filter { !existingSet.contains($0.standardizedFileURL) }
+            directFiles = (existing + toAdd).sorted { $0.lastPathComponent < $1.lastPathComponent }
+        } else {
+            let existingSet = Set(directFiles.map { $0.standardizedFileURL })
+            let toAdd = newPDFs.filter { !existingSet.contains($0.standardizedFileURL) }
+            guard !toAdd.isEmpty else { return }
+            directFiles = (directFiles + toAdd).sorted { $0.lastPathComponent < $1.lastPathComponent }
+        }
         scanFolder()
     }
 
