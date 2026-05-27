@@ -630,18 +630,19 @@ struct CombineView: View {
                 .font(.title2)
                 .fontWeight(.medium)
 
-            Text("Merge multiple PDFs or images into a single document ready to print in one go")
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
-
             Text("or")
                 .foregroundColor(.secondary)
-            
+
             Button(action: selectFiles) {
                 Label("Choose Files", systemImage: "folder")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+
+            Text("Merge multiple PDFs or images into a single document ready to print in one go")
+                .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
+                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
@@ -2820,9 +2821,6 @@ struct ScoreOrderSortView: View {
             Text("Select Files or Folder")
                 .font(.title2)
                 .fontWeight(.medium)
-            Text("Adds sequential prefixes based on detected instrument names")
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
             Text("Drag a folder or PDF files here")
                 .font(.callout)
                 .foregroundColor(isFolderTargeted ? .accentColor : .secondary)
@@ -2833,6 +2831,10 @@ struct ScoreOrderSortView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+            Text("Adds sequential prefixes based on detected instrument names")
+                .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
+                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
@@ -3408,10 +3410,6 @@ struct BulkRenameView: View {
                 .font(.title3)
                 .fontWeight(.medium)
 
-            Text("Rename a set of separate PDF part files with a\nshared base name and instrument suffixes")
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
-
             Text("Drag a folder or individual PDF files here")
                 .font(.callout)
                 .foregroundColor(isTargeted ? .accentColor : .secondary)
@@ -3424,6 +3422,11 @@ struct BulkRenameView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+
+            Text("Rename a set of separate PDF part files with a\nshared base name and instrument suffixes")
+                .multilineTextAlignment(.center)
+                .foregroundColor(.secondary)
+                .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
@@ -8973,20 +8976,21 @@ struct DropZoneView: View {
                 .font(.title2)
                 .fontWeight(.medium)
 
-            if let subtitle {
-                Text(subtitle)
-                    .multilineTextAlignment(.center)
-                    .foregroundColor(.secondary)
-            }
-
             Text("or")
                 .foregroundColor(.secondary)
-            
+
             Button(action: selectPDF) {
                 Label("Choose PDF", systemImage: "folder")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
+
+            if let subtitle {
+                Text(subtitle)
+                    .multilineTextAlignment(.center)
+                    .foregroundColor(.secondary)
+                    .padding(.top, 4)
+            }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
