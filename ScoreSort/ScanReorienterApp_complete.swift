@@ -7247,21 +7247,44 @@ struct SplitControlsSection: View {
             }
             .padding(.horizontal)
 
-            // ── Row 3: Swap (left) · skip mode toggle (centre) · Skip button (right)
-            // ZStack lets the centre widget float truly centred without fighting the
-            // edge buttons for space — neither side can squish it.
-            ZStack {
-                // Edge buttons pinned left and right
-                HStack {
-                    Button(action: onSwapWithNext) {
-                        Label("Swap with Next (S)", systemImage: "arrow.up.arrow.down")
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(currentPage >= totalPages - 1)
-                    .help("Swap the current page with the one after it")
-                    .lineLimit(1)
+            // ── Row 3: Swap (left) · skip toggle + Skip button grouped right ──
+            // The toggle is a modifier for the skip button, so they travel together
+            // as one right-aligned unit — no orphaned widget in the middle.
+            HStack(spacing: 12) {
+                Button(action: onSwapWithNext) {
+                    Label("Swap with Next (S)", systemImage: "arrow.up.arrow.down")
+                }
+                .buttonStyle(.bordered)
+                .disabled(currentPage >= totalPages - 1)
+                .help("Swap the current page with the one after it")
+                .lineLimit(1)
 
-                    Spacer()
+                Spacer()
+
+                // Skip group: mode toggle immediately left of the action button
+                HStack(spacing: 10) {
+                    VStack(spacing: 2) {
+                        Text("Skip")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        HStack(spacing: 4) {
+                            Text("Page")
+                                .font(.caption)
+                                .foregroundColor(skipMode == .page ? .primary : .secondary)
+                            Toggle("", isOn: Binding(
+                                get: { skipMode == .file },
+                                set: { skipMode = $0 ? .file : .page }
+                            ))
+                            .toggleStyle(.switch)
+                            .labelsHidden()
+                            .controlSize(.mini)
+                            .help("Controls whether Delete / the Skip button targets just this page or the whole output file")
+                            Text("File")
+                                .font(.caption)
+                                .foregroundColor(skipMode == .file ? .primary : .secondary)
+                        }
+                    }
+                    .fixedSize()
 
                     Button(action: {
                         switch skipMode {
@@ -7278,30 +7301,6 @@ struct SplitControlsSection: View {
                           ? (currentPageIsSkipped ? "Un-skip this page (Delete)" : "Skip this page (Delete)")
                           : (currentFileIsFullySkipped ? "Un-skip this output file (Delete)" : "Skip this output file (Delete)"))
                 }
-
-                // Skip mode widget — truly centred, fixed size so it never wraps
-                VStack(spacing: 2) {
-                    Text("Skip")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    HStack(spacing: 5) {
-                        Text("Page")
-                            .font(.caption)
-                            .foregroundColor(skipMode == .page ? .primary : .secondary)
-                        Toggle("", isOn: Binding(
-                            get: { skipMode == .file },
-                            set: { skipMode = $0 ? .file : .page }
-                        ))
-                        .toggleStyle(.switch)
-                        .labelsHidden()
-                        .controlSize(.mini)
-                        .help("Controls whether Delete / the Skip button targets just this page or the whole output file")
-                        Text("File")
-                            .font(.caption)
-                            .foregroundColor(skipMode == .file ? .primary : .secondary)
-                    }
-                }
-                .fixedSize()
             }
             .padding(.horizontal)
         }
