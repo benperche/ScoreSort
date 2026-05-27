@@ -3046,9 +3046,6 @@ struct ScoreOrderSortView: View {
                             .font(.caption)
                             .foregroundColor(.red)
                         Spacer()
-                        Text("Click \(Image(systemName: "arrow.uturn.backward")) to restore a file")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
                     }
                     .padding(.horizontal, 14)
                     .padding(.vertical, 6)
@@ -3058,7 +3055,7 @@ struct ScoreOrderSortView: View {
                         ScoreOrderFileRow(
                             operation: operation,
                             isSelected: selectedIDs.contains(operation.id),
-                            onDoubleClick: {},
+                            onDoubleClick: { selectedFileForAssignment = operation },
                             onSelect: { cmd, shift in handleSelect(operation, command: cmd, shift: shift) },
                             onRestore: {
                                 renamerManager.setExcluded([operation.originalName], excluded: false)
@@ -3344,11 +3341,11 @@ private struct ScoreOrderFileRow: View {
                 // Restore button for excluded rows
                 if let restore = onRestore {
                     Button(action: restore) {
-                        Image(systemName: "arrow.uturn.backward.circle")
+                        Label("Restore", systemImage: "arrow.uturn.backward")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
-                    .help("Restore to rename list")
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+                    .help("Move back to the rename list")
                 }
             }
             .padding(.trailing, 16)
@@ -4630,6 +4627,8 @@ class RenamerManager: ObservableObject {
             manualOverrides = updatedOverrides
         }
 
+        // Assigning a manual number always un-excludes the file.
+        excludedNames.remove(filename)
         manualOverrides[filename] = number
         scanFolder()
     }
