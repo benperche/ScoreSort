@@ -535,6 +535,13 @@ enum RotationMode { case odd, even, none }
 
 **`pdfFilenameError(for:) -> String?`** — returns an error string if input contains `/`, `:`, `\`, or null.
 
+**Read-only-location guards (rename permission failures)** — three free functions near `pdfFilenameError`, used by all rename/move paths to handle cloud-sync (Dropbox/Google Drive/iCloud), locked, and read-only-volume folders that are *readable but not writable*:
+- `nonWritableParentDirectories(of urls: [URL]) -> [URL]` — distinct parent dirs that fail `FileManager.isWritableFile`. Empty = all writable. Used as a pre-flight gate before attempting any move.
+- `isFilePermissionError(_ error: Error) -> Bool` — true for `NSFileWriteNoPermissionError`/`NSFileReadNoPermissionError`, POSIX `EACCES`/`EPERM`/`EROFS`, including a POSIX error nested under `NSUnderlyingErrorKey`. Used to decide whether to show friendly guidance after a move fails.
+- `readOnlyLocationMessage(folderName: String?) -> String` — the standard actionable message ("copy to Documents/Desktop, or fix Get Info → Locked / Sharing & Permissions"). Falls back to "this location" when name is nil.
+
+Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.executeRename`, and `applyPrefixAndRenameBulk` (Bulk Renamer): each pre-flights with `nonWritableParentDirectories` and aborts with the friendly message; if moves still fail and *all* failures were permission errors, it shows the friendly message instead of the raw "Partial Success" dump.
+
 **`PDFPageView: NSViewRepresentable`** — safe preview clone via `renderFullImage(from:)`.
 
 ---
@@ -591,5 +598,6 @@ enum RotationMode { case odd, even, none }
 | `BookletCandidatesTests` | `bookletCandidates(n:)` — correct count (1 for N=4, 2 for N=8), valid permutations for all N, correct N=4 order, non-empty labels/descriptions |
 | `A3LandscapeDetectionTests` | `isA3Landscape(_:)` — empty doc, portrait, square, too narrow (≤1000 pt), too wide (≥1400 pt), A3 landscape, multi-page, mixed-size doc |
 | `A3PageSplittingTests` | `splitA3Pages(_:leftFirst:)` — output count doubled, half width, unchanged height, left/right crop origins, mediaBox=cropBox, empty input |
+| `ReadOnlyLocationTests` | `nonWritableParentDirectories` (writable allowed, read-only `chmod 0555` flagged + deduped), `isFilePermissionError` (Cocoa write-no-permission, POSIX EACCES/EROFS, nested underlying POSIX, false for name-collision), `readOnlyLocationMessage` (names folder + mentions Dropbox/Documents, nil fallback) |
 
 **Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; `applyBookletOrder` state mutations; UI/integration tests.

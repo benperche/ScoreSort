@@ -3878,6 +3878,18 @@ struct BulkRenameView: View {
             // Rename directly to the base name + suffix (no prefix step).
             var errors: [String] = []
             var finalNames: [String] = []
+            var sawPermissionError = false
+
+            // Pre-flight: bail with friendly guidance if the location is read-only.
+            let unwritable = nonWritableParentDirectories(of: loadedFiles.map { $0.url })
+            if !unwritable.isEmpty {
+                showNSAlert(
+                    title: "Can’t Rename Files Here",
+                    message: readOnlyLocationMessage(folderName: unwritable.first?.lastPathComponent),
+                    isError: true
+                )
+                return
+            }
 
             for (index, item) in loadedFiles.enumerated() {
                 let sfx = suffixes[index] ?? ""
@@ -3895,10 +3907,12 @@ struct BulkRenameView: View {
                         try FileManager.default.moveItem(at: src, to: dst)
                         finalNames.append(newName)
                     } catch {
+                        if isFilePermissionError(error) { sawPermissionError = true }
                         errors.append("\(item.url.lastPathComponent): \(error.localizedDescription)")
                     }
                 }
                 if let e = coordinatorError {
+                    if isFilePermissionError(e) { sawPermissionError = true }
                     errors.append("\(item.url.lastPathComponent): \(e.localizedDescription)")
                 }
             }
@@ -3906,11 +3920,21 @@ struct BulkRenameView: View {
             if errors.isEmpty {
                 summaryNames = finalNames
                 bulkStage = .summary
+            } else if sawPermissionError && finalNames.isEmpty {
+                showNSAlert(
+                    title: "Can’t Rename Files Here",
+                    message: readOnlyLocationMessage(folderName: loadedFiles.first?.url.deletingLastPathComponent().lastPathComponent),
+                    isError: true
+                )
             } else {
                 let failed = errors.prefix(5).joined(separator: "\n")
+                var message = "Failed to rename \(errors.count) file\(errors.count == 1 ? "" : "s"):\n\(failed)"
+                if sawPermissionError {
+                    message += "\n\nSome files are in a read-only location (e.g. Dropbox, Google Drive, iCloud, or a locked folder)."
+                }
                 showNSAlert(
                     title: "Some Files Could Not Be Renamed",
-                    message: "Failed to rename \(errors.count) file\(errors.count == 1 ? "" : "s"):\n\(failed)",
+                    message: message,
                     isError: true
                 )
             }
@@ -3923,6 +3947,19 @@ struct BulkRenameView: View {
         let sep = UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - "
         var errors: [String] = []
         var finalNames: [String] = []
+        var sawPermissionError = false
+
+        // Pre-flight: bail with friendly guidance if the location is read-only.
+        let sourceURLs = orderedItems.compactMap { $0.originalURL }
+        let unwritable = nonWritableParentDirectories(of: sourceURLs)
+        if !unwritable.isEmpty {
+            showNSAlert(
+                title: "Can’t Rename Files Here",
+                message: readOnlyLocationMessage(folderName: unwritable.first?.lastPathComponent),
+                isError: true
+            )
+            return
+        }
 
         for (position, item) in orderedItems.enumerated() {
             guard let originalURL = item.originalURL else { continue }
@@ -3940,10 +3977,12 @@ struct BulkRenameView: View {
                     try FileManager.default.moveItem(at: src, to: dst)
                     finalNames.append(finalName)
                 } catch {
+                    if isFilePermissionError(error) { sawPermissionError = true }
                     errors.append("\(item.proposedName): \(error.localizedDescription)")
                 }
             }
             if let e = coordinatorError {
+                if isFilePermissionError(e) { sawPermissionError = true }
                 errors.append("\(item.proposedName): \(e.localizedDescription)")
             }
         }
@@ -3951,11 +3990,21 @@ struct BulkRenameView: View {
         if errors.isEmpty {
             summaryNames = finalNames
             bulkStage = .summary
+        } else if sawPermissionError && finalNames.isEmpty {
+            showNSAlert(
+                title: "Can’t Rename Files Here",
+                message: readOnlyLocationMessage(folderName: sourceURLs.first?.deletingLastPathComponent().lastPathComponent),
+                isError: true
+            )
         } else {
             let failed = errors.prefix(5).joined(separator: "\n")
+            var message = "Failed to rename \(errors.count) file\(errors.count == 1 ? "" : "s"):\n\(failed)"
+            if sawPermissionError {
+                message += "\n\nSome files are in a read-only location (e.g. Dropbox, Google Drive, iCloud, or a locked folder)."
+            }
             showNSAlert(
                 title: "Some Files Could Not Be Renamed",
-                message: "Failed to rename \(errors.count) file\(errors.count == 1 ? "" : "s"):\n\(failed)",
+                message: message,
                 isError: true
             )
         }
@@ -4962,9 +5011,23 @@ class RenamerManager: ObservableObject {
 
         guard !toRename.isEmpty else { return }
 
+        // Pre-flight: if the destination folder is read-only (cloud-sync placeholder,
+        // locked, or a read-only volume) every move would fail with a permission error.
+        // Catch it up front and show actionable guidance instead of a wall of failures.
+        let destinations = toRename.compactMap { $0.newURL }
+        if !nonWritableParentDirectories(of: destinations).isEmpty {
+            let alert = NSAlert()
+            alert.messageText = "Can’t Rename Files Here"
+            alert.informativeText = readOnlyLocationMessage(folderName: folderURL?.lastPathComponent)
+            alert.alertStyle = .warning
+            alert.runModal()
+            return
+        }
+
         var successCount = 0
         var renamedNames: [String] = []
         var errors: [String] = []
+        var sawPermissionError = false
 
         for operation in toRename {
             guard let newURL = operation.newURL else { continue }
@@ -4973,17 +5036,27 @@ class RenamerManager: ObservableObject {
                 successCount += 1
                 renamedNames.append(newURL.lastPathComponent)
             } catch {
+                if isFilePermissionError(error) { sawPermissionError = true }
                 errors.append("\(operation.originalName): \(error.localizedDescription)")
             }
         }
 
         if !errors.isEmpty {
             let errorAlert = NSAlert()
-            errorAlert.messageText = "Partial Success"
-            let errorList = errors.prefix(5).joined(separator: "\n")
-            var message = "Renamed \(successCount) file(s), but \(errors.count) failed:\n\n\(errorList)"
-            if errors.count > 5 { message += "\n... and \(errors.count - 5) more" }
-            errorAlert.informativeText = message
+            if sawPermissionError && successCount == 0 {
+                // All failures were permission-related — show the friendly guidance.
+                errorAlert.messageText = "Can’t Rename Files Here"
+                errorAlert.informativeText = readOnlyLocationMessage(folderName: folderURL?.lastPathComponent)
+            } else {
+                errorAlert.messageText = "Partial Success"
+                let errorList = errors.prefix(5).joined(separator: "\n")
+                var message = "Renamed \(successCount) file(s), but \(errors.count) failed:\n\n\(errorList)"
+                if errors.count > 5 { message += "\n... and \(errors.count - 5) more" }
+                if sawPermissionError {
+                    message += "\n\nSome files are in a read-only location (e.g. Dropbox, Google Drive, iCloud, or a locked folder)."
+                }
+                errorAlert.informativeText = message
+            }
             errorAlert.alertStyle = .warning
             errorAlert.runModal()
         }
@@ -7807,6 +7880,64 @@ func pdfFilenameError(for text: String) -> String? {
         return "Cannot contain / : or \\"
     }
     return nil
+}
+
+/// Returns the distinct parent directories of `urls` that the app cannot write to.
+/// Renaming is a move *within* a directory, so it needs write access to that directory.
+/// Read-only volumes, locked folders, and cloud-sync placeholders (Dropbox, Google Drive,
+/// iCloud) are commonly readable but not writable — files list fine but every rename fails.
+/// An empty result means every destination directory is writable.
+func nonWritableParentDirectories(of urls: [URL]) -> [URL] {
+    var seenPaths = Set<String>()
+    var result: [URL] = []
+    for url in urls {
+        let dir = url.deletingLastPathComponent()
+        guard seenPaths.insert(dir.path).inserted else { continue }
+        if !FileManager.default.isWritableFile(atPath: dir.path) {
+            result.append(dir)
+        }
+    }
+    return result
+}
+
+/// Detects whether a thrown file-system error is a permission / read-only-location problem
+/// (as opposed to, say, a name collision). Used to decide when to show the friendly
+/// "this location is read-only" guidance instead of a raw system error string.
+func isFilePermissionError(_ error: Error) -> Bool {
+    let ns = error as NSError
+    func isReadOnlyPOSIX(_ code: Int) -> Bool {
+        return code == Int(EACCES) || code == Int(EPERM) || code == Int(EROFS)
+    }
+    if ns.domain == NSCocoaErrorDomain {
+        if ns.code == NSFileWriteNoPermissionError || ns.code == NSFileReadNoPermissionError {
+            return true
+        }
+        if let underlying = ns.userInfo[NSUnderlyingErrorKey] as? NSError,
+           underlying.domain == NSPOSIXErrorDomain,
+           isReadOnlyPOSIX(underlying.code) {
+            return true
+        }
+    }
+    if ns.domain == NSPOSIXErrorDomain, isReadOnlyPOSIX(ns.code) {
+        return true
+    }
+    return false
+}
+
+/// Standard, actionable message shown when files can't be renamed because the location is
+/// read-only — most often a cloud-synced folder (Dropbox, Google Drive, iCloud) or a
+/// locked / read-only folder.
+func readOnlyLocationMessage(folderName: String?) -> String {
+    let place = folderName.map { "“\($0)”" } ?? "this location"
+    return """
+    ScoreSort doesn’t have permission to rename files in \(place).
+
+    This usually happens with cloud-synced folders (Dropbox, Google Drive, iCloud) or folders that are locked or read-only.
+
+    To fix it, try either:
+    • Copy the files into your Documents or Desktop folder, then drag them in from there, or
+    • In Finder, select the folder, choose File ▸ Get Info, make sure “Locked” is off, and under Sharing & Permissions set your user to “Read & Write”.
+    """
 }
 
 /// Formats a set of 0-based page indices into a compact human-readable range string.

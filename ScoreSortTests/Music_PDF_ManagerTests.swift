@@ -1383,3 +1383,80 @@ struct A3PageSplittingTests {
         #expect(result.pageCount == 0)
     }
 }
+
+// MARK: - Read-only location detection (rename permission failures)
+
+@Suite("Read-only location detection")
+struct ReadOnlyLocationTests {
+
+    /// Creates a temp directory, runs the body with it, then restores write perms and removes it.
+    private func withTempDir(_ body: (URL) -> Void) {
+        let dir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scoresort-ro-\(UUID().uuidString)")
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        defer {
+            try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path)
+            try? FileManager.default.removeItem(at: dir)
+        }
+        body(dir)
+    }
+
+    @Test("Writable folder yields no non-writable parents")
+    func writableFolderIsAllowed() {
+        withTempDir { dir in
+            let files = (0..<3).map { dir.appendingPathComponent("file\($0).pdf") }
+            #expect(nonWritableParentDirectories(of: files).isEmpty)
+        }
+    }
+
+    @Test("Read-only folder is flagged, deduplicated to one entry")
+    func readOnlyFolderIsFlagged() {
+        withTempDir { dir in
+            try? FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+            let files = (0..<3).map { dir.appendingPathComponent("file\($0).pdf") }
+            let flagged = nonWritableParentDirectories(of: files)
+            #expect(flagged.count == 1)
+            #expect(flagged.first?.path == dir.path)
+        }
+    }
+
+    @Test("isFilePermissionError true for write-no-permission Cocoa error")
+    func detectsCocoaPermissionError() {
+        let err = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteNoPermissionError)
+        #expect(isFilePermissionError(err))
+    }
+
+    @Test("isFilePermissionError true for POSIX EACCES / EROFS")
+    func detectsPOSIXPermissionError() {
+        #expect(isFilePermissionError(NSError(domain: NSPOSIXErrorDomain, code: Int(EACCES))))
+        #expect(isFilePermissionError(NSError(domain: NSPOSIXErrorDomain, code: Int(EROFS))))
+    }
+
+    @Test("isFilePermissionError true when POSIX error is nested under a Cocoa error")
+    func detectsUnderlyingPOSIXError() {
+        let underlying = NSError(domain: NSPOSIXErrorDomain, code: Int(EPERM))
+        let wrapper = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteUnknownError,
+                              userInfo: [NSUnderlyingErrorKey: underlying])
+        #expect(isFilePermissionError(wrapper))
+    }
+
+    @Test("isFilePermissionError false for a name-collision error")
+    func ignoresNonPermissionError() {
+        let err = NSError(domain: NSCocoaErrorDomain, code: NSFileWriteFileExistsError)
+        #expect(!isFilePermissionError(err))
+    }
+
+    @Test("Read-only message names the folder and mentions cloud providers")
+    func messageIsActionable() {
+        let msg = readOnlyLocationMessage(folderName: "The Moon at Midnight Charts")
+        #expect(msg.contains("The Moon at Midnight Charts"))
+        #expect(msg.contains("Dropbox"))
+        #expect(msg.contains("Documents"))
+    }
+
+    @Test("Read-only message falls back gracefully when folder name is nil")
+    func messageHandlesNilFolder() {
+        let msg = readOnlyLocationMessage(folderName: nil)
+        #expect(msg.contains("this location"))
+    }
+}
