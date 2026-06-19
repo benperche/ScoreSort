@@ -1576,3 +1576,21 @@ struct SplitNumberedSuggestionTests {
         #expect(splitSuggestionStartingNumberedName(prevSuffix: "Trombone 2", instrumentNames: names) == nil)
     }
 }
+
+// MARK: - Output dialog default directory
+
+@Suite("Output directory default")
+struct OutputDirectoryTests {
+
+    @Test("Returns the parent folder of the source file")
+    func returnsParentFolder() {
+        let src = URL(fileURLWithPath: "/Users/x/Scores/The Moon at Midnight/Full Score.pdf")
+        #expect(outputDirectory(forSourceFile: src)
+                == URL(fileURLWithPath: "/Users/x/Scores/The Moon at Midnight"))
+    }
+
+    @Test("Nil source yields nil (panel keeps its default)")
+    func nilSourceYieldsNil() {
+        #expect(outputDirectory(forSourceFile: nil) == nil)
+    }
+}

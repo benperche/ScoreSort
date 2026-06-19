@@ -540,7 +540,9 @@ enum RotationMode { case odd, even, none }
 
 **`PDFAlertHandler`** — `typealias PDFAlertHandler = (_ title: String, _ message: String, _ isError: Bool) -> Void`. All PDF save/export methods take this callback; they never show UI directly.
 
-**`PDFManager: ObservableObject`** — used by both SplitView and RotateView (separate instances).
+**`PDFManager: ObservableObject`** — used by both SplitView and RotateView (separate instances). Holds `pdfDocument`, `currentFileName`, and **`sourceURL`** (the file the user loaded, set in `loadPDF(from:)`; survives in-place `pdfDocument` rebuilds like A3 split / booklet reorder, so it outlives `PDFDocument.documentURL`).
+
+**`outputDirectory(forSourceFile:) -> URL?`** — returns a source file's parent folder (nil-safe). Every output dialog sets `panel.directoryURL` from it so saves default to the **source file's folder** rather than the last-used location: combiner save (first non-blank input file), rotate save and both splitter output-folder pickers (`pdfManager.sourceURL`). The preset CSV export is intentionally excluded (no per-document source).
 
 **`pdfFilenameError(for:) -> String?`** — returns an error string if input contains `/`, `:`, `\`, or null.
 
@@ -609,6 +611,7 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `A3PageSplittingTests` | `splitA3Pages(_:leftFirst:)` — output count doubled, half width, unchanged height, left/right crop origins, mediaBox=cropBox, empty input |
 | `ReadOnlyLocationTests` | `nonWritableParentDirectories` (writable allowed, read-only `chmod 0555` flagged + deduped), `isFilePermissionError` (Cocoa write-no-permission, POSIX EACCES/EROFS, nested underlying POSIX, false for name-collision), `readOnlyLocationMessage` (names folder + mentions Dropbox/Documents, nil fallback) |
 | `SplitEnsembleInferenceTests` | `inferredSplitSuggestionEnsemble(_:)` — flute alone → nil, bowed string → orchestra, first part sax → jazz, sax-not-first → nil, strings beat sax, leading blanks skipped, case-insensitive, ambiguous band instruments → nil, upright/double bass → nil, empty → nil |
-| `SplitNumberedSuggestionTests` | `splitSuggestionTypicalPartCount` (trumpet/cornet 3, trombone/violin 4/3, single-part = 1, unknown → 2); `splitSuggestionStartingNumberedName` cross-boundary (single-part next is bare e.g. "Bass Trombone", multi-part keeps "1", single→single bare, below typical → nil) |
+| `SplitNumberedSuggestionTests` | `splitSuggestionTypicalPartCount` (trumpet 4, cornet 3, trombone 4, violin 3, alto/tenor sax 2, single-part = 1, unknown → 2); `splitSuggestionStartingNumberedName` cross-boundary (single-part next is bare e.g. "Bass Trombone", multi-part keeps "1", single→single bare, below typical → nil) |
+| `OutputDirectoryTests` | `outputDirectory(forSourceFile:)` — parent folder of source file, nil → nil |
 
 **Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; `applyBookletOrder` state mutations; UI/integration tests.

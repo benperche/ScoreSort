@@ -883,6 +883,10 @@ struct CombineView: View {
         panel.allowedContentTypes = [.pdf]
         panel.nameFieldStringValue = "Combined.pdf"
         panel.title = "Save Combined PDF"
+        // Default to the folder of the first real input file.
+        if let firstSource = combineManager.files.first(where: { !$0.isBlankPage })?.url {
+            panel.directoryURL = outputDirectory(forSourceFile: firstSource)
+        }
 
         panel.beginSheetModal(for: window) { response in
             menuState.isPanelOpen = false
@@ -5711,7 +5715,8 @@ struct RotateView: View {
         savePanel.allowedContentTypes = [.pdf]
         savePanel.nameFieldStringValue = (pdfManager.currentFileName ?? "document") + "_rotated.pdf"
         savePanel.title = "Save Rotated PDF"
-        
+        savePanel.directoryURL = outputDirectory(forSourceFile: pdfManager.sourceURL)
+
         savePanel.begin { response in
             if response == .OK, let url = savePanel.url {
                 pdfManager.saveRotatedPDF(
@@ -6827,6 +6832,7 @@ struct SplitView: View {
             panel.canCreateDirectories = true
             panel.title = "Select Output Folder"
             panel.message = "Choose where to save the split PDF files"
+            panel.directoryURL = outputDirectory(forSourceFile: pdfManager.sourceURL)
 
             panel.begin { response in
                 guard response == .OK, let folderURL = panel.url else { return }
@@ -6871,6 +6877,7 @@ struct SplitView: View {
         panel.canCreateDirectories = true
         panel.title = "Select Output Folder"
         panel.message = "Choose where to save the split PDF files"
+        panel.directoryURL = outputDirectory(forSourceFile: pdfManager.sourceURL)
 
         panel.begin { response in
             guard response == .OK, let folderURL = panel.url else { return }
@@ -7873,6 +7880,14 @@ struct FilePreviewCard: View {
 }
 
 /// Shared validation used by SplitNamingStageView and SplitFileNamingRow.
+/// The folder a save/open output dialog should default to: the folder containing the
+/// file the user loaded, so output lands next to the source rather than the last-used
+/// location. Returns nil when there's no known source (the panel then keeps its default).
+/// Applied app-wide to every output dialog (combiner, splitter, rotator).
+func outputDirectory(forSourceFile url: URL?) -> URL? {
+    url?.deletingLastPathComponent()
+}
+
 func pdfFilenameError(for text: String) -> String? {
     guard !text.isEmpty else { return nil }
     let illegal = CharacterSet(charactersIn: "/:\\\0")
@@ -9687,20 +9702,26 @@ struct PDFPageView: NSViewRepresentable {
 class PDFManager: ObservableObject {
     @Published var pdfDocument: PDFDocument?
     @Published var currentFileName: String?
-    
+    /// The file the user loaded. Retained so output dialogs can default to its folder
+    /// (it survives in-place document rebuilds like A3 split / booklet reorder, which
+    /// replace `pdfDocument` and would otherwise drop `PDFDocument.documentURL`).
+    @Published var sourceURL: URL?
+
     func loadPDF(from url: URL) {
         guard let document = PDFDocument(url: url) else {
             print("Failed to load PDF")
             return
         }
-        
+
         self.pdfDocument = document
         self.currentFileName = url.deletingPathExtension().lastPathComponent
+        self.sourceURL = url
     }
-    
+
     func clearPDF() {
         pdfDocument = nil
         currentFileName = nil
+        sourceURL = nil
     }
     
     func saveRotatedPDF(to url: URL, baseRotation: RotationAngle, additionalRotationMode: RotationMode, additionalRotationAngle: RotationAngle, pageRotationOverrides: [Int: Int] = [:], completion: PDFAlertHandler) {
