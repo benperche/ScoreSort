@@ -7975,13 +7975,11 @@ struct SplitNamingStageView: View {
     @FocusState private var focusedField: Int?
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
+    /// Sticky across splits and launches (shared by key with SplitView / BulkRenameView).
     @AppStorage("prefixEnsembleType") private var prefixEnsembleType: EnsembleType = .band
-    /// Set once the user picks an ensemble in this stage. Persists across splits so the
-    /// choice is sticky, and stops auto-inference from overriding it on later files.
-    @AppStorage("prefixEnsembleManuallySet") private var prefixEnsembleManuallySet: Bool = false
 
-    /// Set to true once we've auto-inferred the ensemble type from the first suffix.
-    /// Prevents re-inference on subsequent edits.
+    /// Set to true once we've auto-inferred the ensemble from a high-confidence signal.
+    /// Prevents re-inference (and fighting the user) on subsequent edits this session.
     @State private var hasInferredEnsemble = false
 
     /// All file indices, excluding fully-skipped ones.
@@ -8147,12 +8145,13 @@ struct SplitNamingStageView: View {
                     }
                 }
                 .onChange(of: customFileNames) { _, newNames in
-                    // Auto-switch to Orchestra only on a high-confidence signal (a string
-                    // part anywhere in the list). Never overrides a choice the user has made
-                    // manually (which is sticky across splits), and only fires once.
-                    guard !hasInferredEnsemble, !prefixEnsembleManuallySet,
-                          let inferred = inferredSplitSuggestionEnsemble(Array(newNames.values))
-                    else { return }
+                    // Auto-switch only on a high-confidence signal (strings → orchestra,
+                    // first part a sax → jazz). Fires at most once per naming session so it
+                    // doesn't fight manual edits; a charts-with-no-signal list keeps the
+                    // sticky choice. Names are passed in file order for the "first part" test.
+                    guard !hasInferredEnsemble else { return }
+                    let ordered = newNames.sorted { $0.key < $1.key }.map { $0.value }
+                    guard let inferred = inferredSplitSuggestionEnsemble(ordered) else { return }
                     prefixEnsembleType = inferred
                     hasInferredEnsemble = true
                 }
@@ -8165,10 +8164,7 @@ struct SplitNamingStageView: View {
                 // Prefix option row
                 HStack(spacing: 12) {
                     Toggle("Prefix score order", isOn: $prefixEnabled)
-                    Picker("", selection: Binding(
-                        get: { prefixEnsembleType },
-                        set: { prefixEnsembleType = $0; prefixEnsembleManuallySet = true }
-                    )) {
+                    Picker("", selection: $prefixEnsembleType) {
                         Text("Wind Band").tag(EnsembleType.band)
                         Text("Jazz Band").tag(EnsembleType.jazz)
                         Text("Orchestra").tag(EnsembleType.orchestra)
@@ -8363,17 +8359,25 @@ private func splitSuggestionDisplayNames(_ names: [String]) -> [String] {
 
 /// Infers the most likely ensemble type from the first suffix the user types.
 /// Returns nil if no confident match is found.
-/// Infers the ensemble type from ALL of the part names entered so far, but only when
-/// there is a high-confidence signal. The first part is almost always flute (common to
-/// band and orchestra), and band vs jazz share most instruments (saxes, rhythm, drum set,
-/// electric bass all appear in modern wind bands), so the only reliable signal is the
-/// string section → orchestra. Returns nil otherwise, leaving the user's sticky choice
-/// untouched rather than guessing wrong.
-func inferredSplitSuggestionEnsemble(_ suffixes: [String]) -> EnsembleType? {
-    let stringKeywords = ["violin", "viola", "cello", "double bass", "string bass", "contrabass"]
-    for suffix in suffixes {
-        let lower = suffix.lowercased()
-        for kw in stringKeywords where lower.contains(kw) { return .orchestra }
+/// Infers the ensemble type from the part names entered so far, **in file order**, but
+/// only on a high-confidence signal — otherwise nil, leaving the user's sticky choice
+/// untouched rather than guessing wrong:
+///  • a bowed string anywhere (violin / viola / cello) → orchestra. Those never appear in
+///    band or jazz. (Double/string bass are excluded — jazz uses an upright "string bass".)
+///  • the first named part is a saxophone → jazz. Band and orchestra always lead with
+///    flute/piccolo and never put a sax first; jazz score order starts with the saxes.
+///    (Saxes *elsewhere* in the list aren't a signal — wind bands have them too.)
+/// Deliberately makes no band-vs-jazz call from otherwise-shared instruments (rhythm,
+/// drum set, electric bass all appear in modern wind bands).
+func inferredSplitSuggestionEnsemble(_ orderedSuffixes: [String]) -> EnsembleType? {
+    let lowered = orderedSuffixes.map { $0.lowercased() }
+    let stringKeywords = ["violin", "viola", "cello"]
+    for suffix in lowered {
+        for kw in stringKeywords where suffix.contains(kw) { return .orchestra }
+    }
+    if let firstNamed = lowered.first(where: { !$0.trimmingCharacters(in: .whitespaces).isEmpty }),
+       firstNamed.contains("sax") {
+        return .jazz
     }
     return nil
 }

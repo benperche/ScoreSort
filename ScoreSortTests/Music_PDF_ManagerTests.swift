@@ -1471,24 +1471,51 @@ struct SplitEnsembleInferenceTests {
         #expect(inferredSplitSuggestionEnsemble(["Flute"]) == nil)
     }
 
-    @Test("A string part anywhere in the list infers orchestra")
+    @Test("A bowed-string part anywhere in the list infers orchestra")
     func stringsInferOrchestra() {
         #expect(inferredSplitSuggestionEnsemble(["Flute", "Oboe", "Violin 1"]) == .orchestra)
         #expect(inferredSplitSuggestionEnsemble(["Cello"]) == .orchestra)
         #expect(inferredSplitSuggestionEnsemble(["Viola"]) == .orchestra)
-        #expect(inferredSplitSuggestionEnsemble(["Double Bass"]) == .orchestra)
+    }
+
+    @Test("First part a saxophone infers jazz")
+    func saxFirstInfersJazz() {
+        #expect(inferredSplitSuggestionEnsemble(["Alto Sax 1", "Tenor Sax", "Trumpet"]) == .jazz)
+        #expect(inferredSplitSuggestionEnsemble(["Baritone Saxophone"]) == .jazz)
+    }
+
+    @Test("A sax later in the list (after flute) is not a jazz signal")
+    func saxNotFirstDoesNotInferJazz() {
+        // Standard wind band: flute leads, saxes appear mid-list.
+        #expect(inferredSplitSuggestionEnsemble(["Flute", "Clarinet", "Alto Saxophone"]) == nil)
+    }
+
+    @Test("Strings win even when a sax is present")
+    func stringsTakePriorityOverSax() {
+        #expect(inferredSplitSuggestionEnsemble(["Alto Sax", "Violin 1"]) == .orchestra)
+    }
+
+    @Test("Leading blank names are skipped when finding the first part")
+    func skipsLeadingBlanks() {
+        #expect(inferredSplitSuggestionEnsemble(["", "  ", "Soprano Sax"]) == .jazz)
     }
 
     @Test("Detection is case-insensitive")
     func caseInsensitive() {
         #expect(inferredSplitSuggestionEnsemble(["VIOLIN II"]) == .orchestra)
+        #expect(inferredSplitSuggestionEnsemble(["ALTO SAX"]) == .jazz)
     }
 
-    @Test("Band/jazz instruments alone do not infer (too much overlap)")
+    @Test("Ambiguous band instruments alone do not infer")
     func ambiguousInstrumentsDoNotInfer() {
-        // Saxes, electric bass, drum set all appear in modern wind bands too.
-        #expect(inferredSplitSuggestionEnsemble(["Alto Saxophone", "Electric Bass", "Drum Set"]) == nil)
-        #expect(inferredSplitSuggestionEnsemble(["Trumpet in Bb", "Trombone", "Tuba"]) == nil)
+        // Electric bass, drum set, brass all appear in modern wind bands too.
+        #expect(inferredSplitSuggestionEnsemble(["Trumpet in Bb", "Trombone", "Electric Bass", "Drum Set"]) == nil)
+    }
+
+    @Test("Jazz upright 'string bass' / 'double bass' alone is not an orchestra signal")
+    func uprightBassIsNotOrchestra() {
+        #expect(inferredSplitSuggestionEnsemble(["Trumpet", "String Bass"]) == nil)
+        #expect(inferredSplitSuggestionEnsemble(["Double Bass"]) == nil)
     }
 
     @Test("Empty input infers nothing")

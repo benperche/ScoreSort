@@ -491,7 +491,12 @@ Full-window scrollable list of `SplitFileNamingRow` views, one per output file.
 - **`instrumentNames: [String]`** — ordered, deduplicated union of orchestra + band + jazz lists from `InstrumentOrders`, each entry `.capitalized`. Used as autocomplete source across all rows.
 - Auto-scrolls to the focused row via `.onChange(of: focusedField)` + `ScrollViewReader.scrollTo(_:anchor:.center)`.
 
-**Step 3 ensemble choice (band/jazz/orchestra) is sticky.** The segmented picker writes to `@AppStorage("prefixEnsembleType")`, so it persists across splits and launches (shared by key with `SplitView` and `BulkRenameView`). A manual pick also sets `@AppStorage("prefixEnsembleManuallySet")`, which permanently disables auto-inference so it can't override the user's choice. **Auto-inference is high-confidence only:** `inferredSplitSuggestionEnsemble(_ suffixes: [String])` scans *all* entered part names and returns `.orchestra` only when a string part (violin/viola/cello/double bass/contrabass) is present — otherwise `nil`. It deliberately does **not** guess band vs jazz: the first part is almost always flute (common to both), and saxes/rhythm/drum set/electric bass all appear in modern wind bands, so there's no reliable signal. (Earlier versions inferred from only the first suffix and matched band before ever reaching strings — flute always won, so orchestra was never detected.)
+**Step 3 ensemble choice (band/jazz/orchestra) is sticky.** The segmented picker writes to `@AppStorage("prefixEnsembleType")`, so it persists across splits and launches (shared by key with `SplitView` and `BulkRenameView`). **Auto-inference is high-confidence only** — `inferredSplitSuggestionEnsemble(_ orderedSuffixes: [String])` (names passed in file order) returns:
+- `.orchestra` if a bowed string (violin/viola/cello) appears anywhere — never present in band/jazz. ("string bass"/"double bass" are excluded: jazz uses an upright string bass.)
+- `.jazz` if the *first named part* is a saxophone — band/orchestra always lead with flute/piccolo, so sax-first means jazz. (A sax later in the list is **not** a signal — wind bands have saxes too.)
+- `nil` otherwise, leaving the sticky choice untouched.
+
+Because a plain wind-band list (flute first, no strings) triggers neither rule, no "manual lock" flag is needed — `@AppStorage` alone keeps the user's choice sticky. The `onChange(of: customFileNames)` handler fires the inference at most once per naming session (`hasInferredEnsemble`), so it won't fight manual edits, but it *can* override the displayed value when a real signal appears (e.g. strings showing up switches to orchestra). (Earlier versions inferred from only the first suffix and matched band before strings, so flute always won and orchestra was never detected.)
 
 #### `SplitFileNamingRow` autocomplete
 
@@ -601,6 +606,6 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `A3LandscapeDetectionTests` | `isA3Landscape(_:)` — empty doc, portrait, square, too narrow (≤1000 pt), too wide (≥1400 pt), A3 landscape, multi-page, mixed-size doc |
 | `A3PageSplittingTests` | `splitA3Pages(_:leftFirst:)` — output count doubled, half width, unchanged height, left/right crop origins, mediaBox=cropBox, empty input |
 | `ReadOnlyLocationTests` | `nonWritableParentDirectories` (writable allowed, read-only `chmod 0555` flagged + deduped), `isFilePermissionError` (Cocoa write-no-permission, POSIX EACCES/EROFS, nested underlying POSIX, false for name-collision), `readOnlyLocationMessage` (names folder + mentions Dropbox/Documents, nil fallback) |
-| `SplitEnsembleInferenceTests` | `inferredSplitSuggestionEnsemble(_:)` — flute alone → nil (ambiguous), any string part → orchestra, case-insensitive, band/jazz instruments alone → nil, empty → nil |
+| `SplitEnsembleInferenceTests` | `inferredSplitSuggestionEnsemble(_:)` — flute alone → nil, bowed string → orchestra, first part sax → jazz, sax-not-first → nil, strings beat sax, leading blanks skipped, case-insensitive, ambiguous band instruments → nil, upright/double bass → nil, empty → nil |
 
 **Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; `applyBookletOrder` state mutations; UI/integration tests.
