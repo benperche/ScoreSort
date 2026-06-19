@@ -1524,3 +1524,52 @@ struct SplitEnsembleInferenceTests {
         #expect(inferredSplitSuggestionEnsemble([""]) == nil)
     }
 }
+
+// MARK: - Split naming: numbered-part progression
+
+@Suite("Split numbered-part suggestions")
+struct SplitNumberedSuggestionTests {
+
+    @Test("Typical part counts for educational charts")
+    func typicalCounts() {
+        #expect(splitSuggestionTypicalPartCount("Trumpet") == 3)
+        #expect(splitSuggestionTypicalPartCount("Cornet") == 3)
+        #expect(splitSuggestionTypicalPartCount("Trombone") == 4)
+        #expect(splitSuggestionTypicalPartCount("Violin") == 3)
+        #expect(splitSuggestionTypicalPartCount("Bass Trombone") == 1)
+        #expect(splitSuggestionTypicalPartCount("Flute") == 2)
+        #expect(splitSuggestionTypicalPartCount("Tuba") == 1)
+    }
+
+    @Test("Unknown instrument falls back to 2")
+    func unknownFallsBackToTwo() {
+        #expect(splitSuggestionTypicalPartCount("Theremin") == 2)
+    }
+
+    // A minimal score-order list covering the relevant boundaries.
+    private let names = ["Trombone", "Bass Trombone", "Tuba", "Violin", "Viola"]
+
+    @Test("Crossing from the last trombone to a single-part Bass Trombone is bare (no '1')")
+    func crossToSinglePartIsBare() {
+        // Trombone typical is now 4, so "Trombone 4" rolls over to Bass Trombone.
+        let s = splitSuggestionStartingNumberedName(prevSuffix: "Trombone 4", instrumentNames: names)
+        #expect(s == "Bass Trombone")
+    }
+
+    @Test("Crossing into a multi-part instrument keeps the '1'")
+    func crossToMultiPartKeepsOne() {
+        // Bass Trombone (1) rolls over to Tuba (1) — bare — and Tuba would roll to Violin (3) → "Violin 1".
+        #expect(splitSuggestionStartingNumberedName(prevSuffix: "Tuba 1", instrumentNames: names) == "Violin 1")
+    }
+
+    @Test("Crossing from a single-part instrument to another single-part is bare")
+    func crossSingleToSingleIsBare() {
+        #expect(splitSuggestionStartingNumberedName(prevSuffix: "Bass Trombone 1", instrumentNames: names) == "Tuba")
+    }
+
+    @Test("Below the typical count does not cross the boundary")
+    func belowTypicalDoesNotCross() {
+        // "Trombone 2" is below the new typical of 4, so no cross-boundary suggestion.
+        #expect(splitSuggestionStartingNumberedName(prevSuffix: "Trombone 2", instrumentNames: names) == nil)
+    }
+}

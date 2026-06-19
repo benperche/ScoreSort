@@ -502,7 +502,9 @@ Because a plain wind-band list (flute first, no strings) triggers neither rule, 
 
 **`nextExpectedIndex: Int`** — scans rows above (nearest first) to find the last recognised instrument name, then returns `index + 1` in `instrumentNames`. Rotates suggestion list so the most likely next instrument appears first.
 
-**`numberedSuggestion: String?`** — if the nearest previous suffix ends with a space + integer (e.g. "Flute 1"), returns the incremented version ("Flute 2").
+**`numberedSuggestion: String?`** — if the nearest previous suffix ends with a space + integer (e.g. "Flute 1"), returns the next part. Within a family it increments ("Flute 1" → "Flute 2"); once the number reaches the family's typical count it crosses to the next instrument (`splitSuggestionStartingNumberedName`). Clef pairs take priority ("Euphonium B.C." → "Euphonium T.C." via `clefCompanion`).
+
+**`splitSuggestionTypicalPartCount(_:)`** — hardcoded per-family part counts that drive the cross-boundary rollover (default 2 for unlisted families). Tuned for educational charts: trumpet 3, cornet 3, trombone 4, horn 4, clarinet 3, violin 3, flute/oboe/bassoon 2, and single-part families (bass trombone, tuba, euphonium, baritone, piccolo, viola, cello, double bass, timpani, English horn, the non-alto saxes…) at 1. **Cross-boundary into a single-part family is bare** — after "Trombone 4" the suggestion is "Bass Trombone", not "Bass Trombone 1" (the `> 1` guard in `splitSuggestionStartingNumberedName`).
 
 **`suggestions: [String]`** — rotated list filtered to prefix-matches then contains-matches; prepends `numberedSuggestion` if applicable. Always ≤ 8 entries.
 
@@ -607,5 +609,6 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `A3PageSplittingTests` | `splitA3Pages(_:leftFirst:)` — output count doubled, half width, unchanged height, left/right crop origins, mediaBox=cropBox, empty input |
 | `ReadOnlyLocationTests` | `nonWritableParentDirectories` (writable allowed, read-only `chmod 0555` flagged + deduped), `isFilePermissionError` (Cocoa write-no-permission, POSIX EACCES/EROFS, nested underlying POSIX, false for name-collision), `readOnlyLocationMessage` (names folder + mentions Dropbox/Documents, nil fallback) |
 | `SplitEnsembleInferenceTests` | `inferredSplitSuggestionEnsemble(_:)` — flute alone → nil, bowed string → orchestra, first part sax → jazz, sax-not-first → nil, strings beat sax, leading blanks skipped, case-insensitive, ambiguous band instruments → nil, upright/double bass → nil, empty → nil |
+| `SplitNumberedSuggestionTests` | `splitSuggestionTypicalPartCount` (trumpet/cornet 3, trombone/violin 4/3, single-part = 1, unknown → 2); `splitSuggestionStartingNumberedName` cross-boundary (single-part next is bare e.g. "Bass Trombone", multi-part keeps "1", single→single bare, below typical → nil) |
 
 **Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; `applyBookletOrder` state mutations; UI/integration tests.

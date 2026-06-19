@@ -8296,15 +8296,15 @@ private func saxStyleMatch(_ name: String, toStyleOf reference: String) -> Strin
 
 /// Typical number of parts for common instrument families (used to detect when
 /// to cross to the next instrument in cross-boundary suggestions).
-private func splitSuggestionTypicalPartCount(_ baseName: String) -> Int {
+func splitSuggestionTypicalPartCount(_ baseName: String) -> Int {
     let key = splitSuggestionGroupKey(baseName)
     let counts: [String: Int] = [
         "flute": 2, "piccolo": 1, "oboe": 2, "english horn": 1, "bassoon": 2,
         "clarinet": 3, "bass clarinet": 1, "contrabass clarinet": 1,
         "alto saxophone": 2, "tenor saxophone": 1, "baritone saxophone": 1, "soprano saxophone": 1,
-        "cornet": 2, "trumpet": 4, "horn": 4, "trombone": 3, "bass trombone": 1,
+        "cornet": 3, "trumpet": 3, "horn": 4, "trombone": 4, "bass trombone": 1,
         "euphonium": 1, "baritone": 1, "tuba": 1,
-        "violin": 2, "viola": 1, "cello": 1, "double bass": 1,
+        "violin": 3, "viola": 1, "cello": 1, "double bass": 1,
         "percussion": 4, "timpani": 1,
     ]
     return counts[key] ?? 2
@@ -8313,7 +8313,7 @@ private func splitSuggestionTypicalPartCount(_ baseName: String) -> Int {
 /// If the previous suffix's number equals the typical part count for that family,
 /// returns "NextInstrument 1" as a cross-boundary numbered suggestion.
 /// E.g. after "Flute 2" (typical=2) → "Oboe 1" if Oboe follows Flute in the list.
-private func splitSuggestionStartingNumberedName(
+func splitSuggestionStartingNumberedName(
     prevSuffix: String,
     instrumentNames: [String]
 ) -> String? {
@@ -8337,7 +8337,9 @@ private func splitSuggestionStartingNumberedName(
         let rawNextName = splitSuggestionBaseName(instrumentNames[nextIdx])
         // Preserve the user's preferred sax style: "Alto Saxophone" → "Tenor Saxophone" not "Tenor Sax"
         let nextName = saxStyleMatch(rawNextName, toStyleOf: basePart)
-        return "\(nextName) 1"
+        // Only append "1" when the next instrument typically has more than one part.
+        // Single-part instruments (Bass Trombone, Tuba, Piccolo, …) should be bare.
+        return splitSuggestionTypicalPartCount(rawNextName) > 1 ? "\(nextName) 1" : nextName
     }
     return nil
 }
