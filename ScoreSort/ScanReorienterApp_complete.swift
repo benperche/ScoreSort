@@ -8301,8 +8301,8 @@ func splitSuggestionTypicalPartCount(_ baseName: String) -> Int {
     let counts: [String: Int] = [
         "flute": 2, "piccolo": 1, "oboe": 2, "english horn": 1, "bassoon": 2,
         "clarinet": 3, "bass clarinet": 1, "contrabass clarinet": 1,
-        "alto saxophone": 2, "tenor saxophone": 1, "baritone saxophone": 1, "soprano saxophone": 1,
-        "cornet": 3, "trumpet": 3, "horn": 4, "trombone": 4, "bass trombone": 1,
+        "alto saxophone": 2, "tenor saxophone": 2, "baritone saxophone": 1, "soprano saxophone": 1,
+        "cornet": 3, "trumpet": 4, "horn": 4, "trombone": 4, "bass trombone": 1,
         "euphonium": 1, "baritone": 1, "tuba": 1,
         "violin": 3, "viola": 1, "cello": 1, "double bass": 1,
         "percussion": 4, "timpani": 1,

@@ -1530,12 +1530,15 @@ struct SplitEnsembleInferenceTests {
 @Suite("Split numbered-part suggestions")
 struct SplitNumberedSuggestionTests {
 
-    @Test("Typical part counts for educational charts")
+    @Test("Typical part counts (educational + jazz)")
     func typicalCounts() {
-        #expect(splitSuggestionTypicalPartCount("Trumpet") == 3)
+        #expect(splitSuggestionTypicalPartCount("Trumpet") == 4)   // jazz big band
         #expect(splitSuggestionTypicalPartCount("Cornet") == 3)
         #expect(splitSuggestionTypicalPartCount("Trombone") == 4)
         #expect(splitSuggestionTypicalPartCount("Violin") == 3)
+        #expect(splitSuggestionTypicalPartCount("Tenor Saxophone") == 2)
+        #expect(splitSuggestionTypicalPartCount("Alto Saxophone") == 2)
+        #expect(splitSuggestionTypicalPartCount("Baritone Saxophone") == 1)
         #expect(splitSuggestionTypicalPartCount("Bass Trombone") == 1)
         #expect(splitSuggestionTypicalPartCount("Flute") == 2)
         #expect(splitSuggestionTypicalPartCount("Tuba") == 1)
