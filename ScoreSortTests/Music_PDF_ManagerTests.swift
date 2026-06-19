@@ -1460,3 +1460,40 @@ struct ReadOnlyLocationTests {
         #expect(msg.contains("this location"))
     }
 }
+
+// MARK: - Split-stage ensemble inference (only high-confidence: strings → orchestra)
+
+@Suite("Split ensemble inference")
+struct SplitEnsembleInferenceTests {
+
+    @Test("Flute alone is ambiguous (band vs orchestra) — no inference")
+    func fluteAloneDoesNotInfer() {
+        #expect(inferredSplitSuggestionEnsemble(["Flute"]) == nil)
+    }
+
+    @Test("A string part anywhere in the list infers orchestra")
+    func stringsInferOrchestra() {
+        #expect(inferredSplitSuggestionEnsemble(["Flute", "Oboe", "Violin 1"]) == .orchestra)
+        #expect(inferredSplitSuggestionEnsemble(["Cello"]) == .orchestra)
+        #expect(inferredSplitSuggestionEnsemble(["Viola"]) == .orchestra)
+        #expect(inferredSplitSuggestionEnsemble(["Double Bass"]) == .orchestra)
+    }
+
+    @Test("Detection is case-insensitive")
+    func caseInsensitive() {
+        #expect(inferredSplitSuggestionEnsemble(["VIOLIN II"]) == .orchestra)
+    }
+
+    @Test("Band/jazz instruments alone do not infer (too much overlap)")
+    func ambiguousInstrumentsDoNotInfer() {
+        // Saxes, electric bass, drum set all appear in modern wind bands too.
+        #expect(inferredSplitSuggestionEnsemble(["Alto Saxophone", "Electric Bass", "Drum Set"]) == nil)
+        #expect(inferredSplitSuggestionEnsemble(["Trumpet in Bb", "Trombone", "Tuba"]) == nil)
+    }
+
+    @Test("Empty input infers nothing")
+    func emptyInfersNothing() {
+        #expect(inferredSplitSuggestionEnsemble([]) == nil)
+        #expect(inferredSplitSuggestionEnsemble([""]) == nil)
+    }
+}
