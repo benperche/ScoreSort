@@ -6,6 +6,10 @@
 	objectVersion = 77;
 	objects = {
 
+/* Begin PBXBuildFile section */
+		ECC5A4011E0000000000B200 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = ECC5A4011E0000000000A100 /* Sparkle */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXContainerItemProxy section */
 		ECA918542F83C47200B6655A /* PBXContainerItemProxy */ = {
 			isa = PBXContainerItemProxy;
@@ -51,10 +55,6 @@
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
-
-/* Begin PBXBuildFile section */
-		ECC5A4011E0000000000B200 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = ECC5A4011E0000000000A100 /* Sparkle */; };
-/* End PBXBuildFile section */
 
 /* Begin PBXFrameworksBuildPhase section */
 		EC0AB4542F3DBD22004FDB87 /* Frameworks */ = {
@@ -474,6 +474,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 33H8SWK5BX;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.1;
@@ -495,6 +496,7 @@
 				CODE_SIGN_STYLE = Automatic;
 				CURRENT_PROJECT_VERSION = 3;
 				DEAD_CODE_STRIPPING = YES;
+				DEVELOPMENT_TEAM = 33H8SWK5BX;
 				GENERATE_INFOPLIST_FILE = YES;
 				MACOSX_DEPLOYMENT_TARGET = 14.0;
 				MARKETING_VERSION = 1.1;
