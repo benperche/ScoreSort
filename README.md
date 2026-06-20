@@ -316,16 +316,52 @@ All orders are fully customisable in Preferences → Renamer.
 
 ## Releasing Updates (maintainer)
 
-ScoreSort updates itself with [Sparkle](https://sparkle-project.org). The update feed (`appcast.xml`) is served by GitHub Pages from `docs/`; the app downloads are GitHub Release assets. To publish a new version:
+ScoreSort updates itself with [Sparkle](https://sparkle-project.org). The update feed (`docs/appcast.xml`) is served by GitHub Pages; the app downloads are GitHub Release assets. The EdDSA key that signs updates lives in the login Keychain (paired with `SUPublicEDKey` in `Info.plist`).
 
-1. **Bump the version** in the Xcode target: increase **Marketing Version** (e.g. `1.5`) *and* **Current Project Version** (build number — Sparkle only offers an update when the build number increases).
-2. **Archive & notarize**: Product ▸ Archive ▸ Distribute App ▸ **Direct Distribution** (Xcode notarizes and staples the app). Package it as `ScoreSort.dmg`, then notarize and `xcrun stapler staple` the DMG.
-3. **Sign the update** with Sparkle's `sign_update ScoreSort.dmg` (found under `~/Library/Developer/Xcode/DerivedData/ScoreSort-*/SourcePackages/artifacts/sparkle/Sparkle/bin/`). It prints the `sparkle:edSignature` and `length`. The signing key is already in your login Keychain.
-4. **Add an `<item>`** to [`docs/appcast.xml`](docs/appcast.xml) (a template is included), filling in version, build number, date, release-notes link, and the signature/length from step 3.
-5. **Create a GitHub Release** `vX.X` and attach `ScoreSort.dmg`.
-6. **Commit & push `docs/appcast.xml`** — existing users are then offered the update in-app.
+### One-time setup (already done — for reference)
 
-The website's download button should point at `https://github.com/benperche/ScoreSort/releases/latest/download/ScoreSort.dmg`, which always resolves to the newest release.
+- **Developer ID certificate**: Xcode ▸ Settings ▸ Accounts ▸ your team ▸ Manage Certificates ▸ ＋ ▸ *Developer ID Application*.
+- **Notarisation credentials** stored under a Keychain profile (needs an [app-specific password](https://appleid.apple.com), *not* your Apple ID password):
+  ```bash
+  xcrun notarytool store-credentials "ScoreSort-notary" \
+    --apple-id <your-apple-id-email> --team-id 33H8SWK5BX --password <app-specific-password>
+  ```
+- **Tools**: `brew install create-dmg`; Sparkle's `sign_update` ships in the resolved package (path below).
+
+### Per release
+
+1. **Bump the version** (target ▸ General, or the build settings): raise **Marketing Version** (e.g. `1.5`) *and* **Current Project Version** (the build number). Sparkle only offers an update when the **build number increases**.
+
+2. **Archive & notarise the app**: Product ▸ Archive ▸ **Distribute App** ▸ **Direct Distribution**. Xcode signs with Developer ID, notarises, and staples the app. Click **Export Notarized App** and note where you saved `ScoreSort.app`.
+
+3. **Build the DMG** (drag-to-Applications installer):
+   ```bash
+   create-dmg \
+     --volname "ScoreSort" \
+     --window-size 600 400 \
+     --icon "ScoreSort.app" 150 200 \
+     --app-drop-link 450 200 \
+     "ScoreSort.dmg" "ScoreSort.app"
+   ```
+
+4. **Notarise & staple the DMG** (so a direct website download opens without a Gatekeeper warning):
+   ```bash
+   xcrun notarytool submit ScoreSort.dmg --keychain-profile "ScoreSort-notary" --wait
+   xcrun stapler staple ScoreSort.dmg
+   ```
+
+5. **Sign the update for Sparkle** — prints `sparkle:edSignature` and `length`:
+   ```bash
+   "$(find ~/Library/Developer/Xcode/DerivedData/ScoreSort-*/SourcePackages/artifacts/sparkle/Sparkle/bin -name sign_update | head -1)" ScoreSort.dmg
+   ```
+
+6. **Update [`docs/appcast.xml`](docs/appcast.xml)**: add (or fill in) an `<item>` with the new `title`, `sparkle:version` (build number), `sparkle:shortVersionString`, `pubDate`, `releaseNotesLink`, and the `enclosure` `url`, `sparkle:edSignature`, and `length` from step 5. A template is included in the file.
+
+7. **Create a GitHub Release** tagged `vX.X`, attach `ScoreSort.dmg`, and paste the release notes (these become the `releaseNotesLink` page).
+
+8. **Commit & push `docs/appcast.xml`** — GitHub Pages serves the new feed and existing users are offered the update in-app.
+
+The website's download button should point at `https://github.com/benperche/ScoreSort/releases/latest/download/ScoreSort.dmg`, which always resolves to the newest release's `ScoreSort.dmg` asset (keep the asset filename consistent).
 
 ## Contributing
 
