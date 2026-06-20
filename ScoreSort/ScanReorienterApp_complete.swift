@@ -12,7 +12,7 @@ import SwiftUI
 @preconcurrency import PDFKit
 import UniformTypeIdentifiers
 import Combine
-// import Sparkle  // Re-enable for DMG/direct distribution builds
+import Sparkle
 
 // MARK: - App State
 class AppState: ObservableObject {
@@ -142,18 +142,18 @@ struct HelpCommands: Commands {
     }
 }
 
-// MARK: - Sparkle Updater (disabled for App Store / TestFlight builds)
-// Re-enable the class below and uncomment `import Sparkle` when building for DMG distribution.
-//
-// final class UpdaterViewModel: ObservableObject {
-//     private let updaterController: SPUStandardUpdaterController
-//     @Published var canCheckForUpdates = false
-//     init() {
-//         updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
-//         updaterController.updater.publisher(for: \.canCheckForUpdates).assign(to: &$canCheckForUpdates)
-//     }
-//     func checkForUpdates() { updaterController.updater.checkForUpdates() }
-// }
+// MARK: - Sparkle Updater (direct distribution via website / GitHub releases)
+// Drives auto-update checks against the appcast at Info.plist's SUFeedURL.
+// Not used for App Store / TestFlight builds (the Mac App Store handles updates).
+final class UpdaterViewModel: ObservableObject {
+    private let updaterController: SPUStandardUpdaterController
+    @Published var canCheckForUpdates = false
+    init() {
+        updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+        updaterController.updater.publisher(for: \.canCheckForUpdates).assign(to: &$canCheckForUpdates)
+    }
+    func checkForUpdates() { updaterController.updater.checkForUpdates() }
+}
 
 // MARK: - Main App
 @main
@@ -162,7 +162,7 @@ struct ScoreSortApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var renamerManager = RenamerManager()
     @StateObject private var presetStore = EnsemblePresetStore()
-    // @StateObject private var updaterViewModel = UpdaterViewModel()  // Re-enable for DMG builds
+    @StateObject private var updaterViewModel = UpdaterViewModel()
     @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
@@ -182,10 +182,10 @@ struct ScoreSortApp: App {
                     openWindow(id: "about")
                 }
             }
-            // CommandGroup(after: .appInfo) {  // Re-enable for DMG builds (needs Sparkle)
-            //     Button("Check for Updates\u{2026}") { updaterViewModel.checkForUpdates() }
-            //     .disabled(!updaterViewModel.canCheckForUpdates)
-            // }
+            CommandGroup(after: .appInfo) {
+                Button("Check for Updates\u{2026}") { updaterViewModel.checkForUpdates() }
+                    .disabled(!updaterViewModel.canCheckForUpdates)
+            }
             CommandGroup(replacing: .newItem) { }
             NavigateCommands(appState: appState)
             CombinerCommands(state: appState.combineMenuState)

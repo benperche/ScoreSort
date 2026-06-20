@@ -52,11 +52,16 @@
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
 
+/* Begin PBXBuildFile section */
+		ECC5A4011E0000000000B200 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = ECC5A4011E0000000000A100 /* Sparkle */; };
+/* End PBXBuildFile section */
+
 /* Begin PBXFrameworksBuildPhase section */
 		EC0AB4542F3DBD22004FDB87 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				ECC5A4011E0000000000B200 /* Sparkle in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -118,6 +123,7 @@
 			);
 			name = ScoreSort;
 			packageProductDependencies = (
+				ECC5A4011E0000000000A100 /* Sparkle */,
 			);
 			productName = "Music PDF Wrangler";
 			productReference = EC0AB4572F3DBD22004FDB87 /* ScoreSort.app */;
@@ -545,6 +551,14 @@
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		ECC5A4011E0000000000A100 /* Sparkle */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = EC6D77992FA4651500D41227 /* XCRemoteSwiftPackageReference "Sparkle" */;
+			productName = Sparkle;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = EC0AB44F2F3DBD22004FDB87 /* Project object */;
 }
