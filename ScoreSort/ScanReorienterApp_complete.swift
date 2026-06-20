@@ -1815,9 +1815,9 @@ struct WelcomeTourPage {
             title: "Combine PDFs",
             useCase: "You have separate PDF files — one per instrument part — and want to merge them into a single document, ready to print all in one go.",
             bodyParagraphs: [
-                "Drag your files (or a whole folder) into the app, then reorder files with **⌘↑ / ⌘↓**. ",
+                "Drag your files (or a whole folder) into the app, then reorder with **⌘↑ / ⌘↓** or by dragging. You can also drag in **images** (JPEG, PNG, TIFF…) — each becomes an A4 page — and insert a blank sheet anywhere with **Add Blank Page**. Set how many copies of each part you need with the stepper beside it.",
                 "You can save your usual instrument allocations as **Ensemble Presets** in Preferences. These can be viewed in the Presets sidebar to help you remember the normal number of parts required. Use **Apply to Files** to attempt to automatically match your preset allocations to your filenames.",
-                "When ready, click **Create PDF** to save the combined file, or **Open in Preview** to print directly without saving a new document.",
+                "When ready, click **Create PDF** to save the combined file, or **Open in Preview** to print directly without saving. The combined PDF includes a clickable **table of contents** (one bookmark per file), shown in Preview's sidebar.",
                 "**Advanced: Collate Sets:** Select a group of parts and press **C** to interleave their pages in the output document. Ideal where you have a number of parts required for multiple players, for example in a percussion section — each player's copies will print together in a ready-to-distribute stack."
             ],
             tipText: "⌫ removes selected files · ⌘Z undoes any change · ⌘↑ / ⌘↓ reorders",
@@ -1865,9 +1865,10 @@ struct WelcomeTourPage {
             useCase: "You have one large PDF — e.g. a complete scan of all parts bound together — and need to split it into separate instrument files.",
             bodyParagraphs: [
                 "Drop the PDF and use **← →** to move through pages. Press **Space** to toggle a split marker, and **↑ ↓** to jump to the first page of each output file. Equally-spaced markers can be placed automatically using the **stride** control. Once you have entered your split markers, you can also choose to skip certain sections of the PDF in the output using your **Delete** key.",
-                "In Step 2, name each output file — the same flow as Rename Files. Toggle **Prefix score order** to add score-order numbers automatically in Step 3."
+                "In Step 2, name each output file — the same flow as Rename Files. Toggle **Prefix score order** to add score-order numbers automatically in Step 3.",
+                "**A3 & booklet scans:** Drop an A3 scan (two A4 pages side-by-side) and ScoreSort offers to split every sheet down the middle into separate pages. If a booklet was scanned out of reading order, put each booklet in its own split, then use **Fix Booklet Order** to restore the page order automatically — or **Swap with Next (S)** to nudge individual pages."
             ],
-            tipText: "⌘← / ⌘→ jumps to the first or last page · Space toggles a split marker · Delete skips the selected file",
+            tipText: "Space toggles a split marker · S swaps a page with the next · Delete skips a page or file · ⌘← / ⌘→ jumps to first / last page",
             imageName: "tour-splitter"
         ),
 
@@ -1890,18 +1891,30 @@ struct WelcomeTourPage {
 
 // MARK: - Welcome Tour View
 
+/// Reports the natural height of the current tour page so the card can hug its content.
+private struct TourContentHeightKey: PreferenceKey {
+    static var defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
 struct WelcomeTourView: View {
     var onDismiss: () -> Void
 
     @State private var currentPage = 0
     @State private var goingForward = true
+    @State private var contentHeight: CGFloat = 0
 
     private let pages = WelcomeTourPage.all
+    /// The card hugs each page's content up to this height, then scrolls — so a short
+    /// page (like the welcome page) isn't stretched to the full window height.
+    private let maxContentHeight: CGFloat = 600
 
     var body: some View {
         VStack(spacing: 0) {
 
-            // ── Scrollable content ────────────────────────────────────────
+            // ── Content: card hugs the page's height, scrolling past the cap ──
             ScrollView(.vertical, showsIndicators: false) {
                 TourPageContentView(page: pages[currentPage])
                     .id(currentPage)
@@ -1911,7 +1924,14 @@ struct WelcomeTourView: View {
                         removal:   .move(edge: goingForward ? .leading : .trailing)
                                     .combined(with: .opacity)
                     ))
+                    .background(GeometryReader { proxy in
+                        Color.clear.preference(key: TourContentHeightKey.self,
+                                               value: proxy.size.height)
+                    })
             }
+            .frame(height: min(max(contentHeight, 1), maxContentHeight))
+            .onPreferenceChange(TourContentHeightKey.self) { contentHeight = $0 }
+            .animation(.easeInOut(duration: 0.25), value: contentHeight)
 
             Divider()
 
