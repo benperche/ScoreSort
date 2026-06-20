@@ -7,14 +7,16 @@
         <language>en</language>
 
         <item>
-            <title>Version 1.1</title>
-            <sparkle:version>2</sparkle:version>
-            <sparkle:shortVersionString>1.1</sparkle:shortVersionString>
+            <title>Version 1.5</title>
+            <sparkle:version>7</sparkle:version>
+            <sparkle:shortVersionString>1.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
-            <pubDate>Fri, 02 May 2025 12:00:00 +1000</pubDate>
-            <sparkle:releaseNotesLink>https://github.com/benperche/ScoreSort/releases/tag/v1.1</sparkle:releaseNotesLink>
+            <pubDate>Sat, 20 Jun 2026 11:00:00 +1000</pubDate>
+            <sparkle:releaseNotesLink>https://github.com/benperche/ScoreSort/releases/tag/v1.5</sparkle:releaseNotesLink>
+            <!-- TODO before publishing: run `sign_update ScoreSort.dmg` and paste its
+                 sparkle:edSignature and length below (replace both placeholders). -->
             <enclosure
-                url="https://github.com/benperche/ScoreSort/releases/download/v1.1/ScoreSort.dmg"
+                url="https://github.com/benperche/ScoreSort/releases/download/v1.5/ScoreSort.dmg"
                 sparkle:edSignature="SIGNATURE_FROM_SIGN_UPDATE"
                 length="FILE_SIZE_IN_BYTES"
                 type="application/octet-stream"/>

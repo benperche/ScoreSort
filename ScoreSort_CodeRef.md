@@ -615,3 +615,32 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `OutputDirectoryTests` | `outputDirectory(forSourceFile:)` — parent folder of source file, nil → nil |
 
 **Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; `applyBookletOrder` state mutations; UI/integration tests.
+
+---
+
+## Releasing & Sparkle Auto-Updates
+
+ScoreSort ships via **direct distribution** (GitHub Releases) with **Sparkle 2** auto-updates. Not App Store / TestFlight.
+
+### How it's wired
+- **Sparkle package**: `XCRemoteSwiftPackageReference` to `sparkle-project/Sparkle` (up-to-next-major from 2.9.1). The product is linked to the **ScoreSort** target (`packageProductDependencies` + a `PBXBuildFile` in the app's Frameworks phase). If updates ever stop building with "no such module Sparkle", that link is what's missing.
+- **Code**: `import Sparkle`; `UpdaterViewModel` (wraps `SPUStandardUpdaterController`); injected as `@StateObject` on `ScoreSortApp`; **Check for Updates…** menu item via `CommandGroup(after: .appInfo)`. To build an App Store/TestFlight variant, comment these back out (Sparkle must not ship in MAS builds).
+- **Info.plist**: `SUFeedURL = https://benperche.github.io/ScoreSort/appcast.xml`, `SUPublicEDKey = 6Dj8WlfDC/fWZMetFfw7XObJTa9fOsyXGuHDpxjYFYY=`.
+- **Appcast**: `docs/appcast.xml`, served by **GitHub Pages** from the repo's `docs/` folder. Downloads (DMGs) are **GitHub Release assets**.
+- **Signing key**: the EdDSA **private key lives in the login Keychain** (paired with `SUPublicEDKey`). Verify with `generate_keys -p` (prints the public key — must equal `SUPublicEDKey`). Sparkle CLI tools (`sign_update`, `generate_keys`, `generate_appcast`) are in the resolved package artifacts: `~/Library/Developer/Xcode/DerivedData/ScoreSort-*/SourcePackages/artifacts/sparkle/Sparkle/bin/`.
+
+### How updates are detected
+Sparkle compares each appcast item's `sparkle:version` (= **CFBundleVersion** / `CURRENT_PROJECT_VERSION`) against the running build. **`CURRENT_PROJECT_VERSION` must strictly increase every release** or no update is offered. `MARKETING_VERSION` is the user-visible `1.x` string (`sparkle:shortVersionString`).
+
+### Release checklist (per version)
+1. Bump **`MARKETING_VERSION`** and **`CURRENT_PROJECT_VERSION`** (build number — must increase) in both Debug/Release configs.
+2. Xcode: Product ▸ Archive ▸ Distribute App ▸ **Direct Distribution** (notarizes + staples the `.app`).
+3. Build a `ScoreSort.dmg` containing the notarized app; notarize + `xcrun stapler staple` the DMG.
+4. Sign the DMG: `sign_update ScoreSort.dmg` → copy the `sparkle:edSignature` and `length`.
+5. Add an `<item>` to `docs/appcast.xml` (template is in the file): `title`, `sparkle:version` (build no.), `sparkle:shortVersionString`, `pubDate`, `releaseNotesLink` (the GitHub release tag URL), and `enclosure` (`url` = release asset, `sparkle:edSignature`, `length`).
+6. Create GitHub Release `vX.X`, attach `ScoreSort.dmg` (asset name must match the enclosure URL).
+7. Commit + push `docs/appcast.xml` → Pages serves the new feed → existing users are offered the update.
+
+**Stable download URL** (for the website's button): `https://github.com/benperche/ScoreSort/releases/latest/download/ScoreSort.dmg` always resolves to the newest release's asset.
+
+**Gotchas:** keep the asset filename consistent (`ScoreSort.dmg`); an appcast item with a wrong `length`/`edSignature` makes Sparkle reject the update; un-notarized updates still install but re-trigger Gatekeeper's warning on each update.

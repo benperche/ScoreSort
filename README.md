@@ -314,6 +314,19 @@ All orders are fully customisable in Preferences → Renamer.
 
 - **File naming**: Uses substring matching — very similar instrument names may occasionally need manual override
 
+## Releasing Updates (maintainer)
+
+ScoreSort updates itself with [Sparkle](https://sparkle-project.org). The update feed (`appcast.xml`) is served by GitHub Pages from `docs/`; the app downloads are GitHub Release assets. To publish a new version:
+
+1. **Bump the version** in the Xcode target: increase **Marketing Version** (e.g. `1.5`) *and* **Current Project Version** (build number — Sparkle only offers an update when the build number increases).
+2. **Archive & notarize**: Product ▸ Archive ▸ Distribute App ▸ **Direct Distribution** (Xcode notarizes and staples the app). Package it as `ScoreSort.dmg`, then notarize and `xcrun stapler staple` the DMG.
+3. **Sign the update** with Sparkle's `sign_update ScoreSort.dmg` (found under `~/Library/Developer/Xcode/DerivedData/ScoreSort-*/SourcePackages/artifacts/sparkle/Sparkle/bin/`). It prints the `sparkle:edSignature` and `length`. The signing key is already in your login Keychain.
+4. **Add an `<item>`** to [`docs/appcast.xml`](docs/appcast.xml) (a template is included), filling in version, build number, date, release-notes link, and the signature/length from step 3.
+5. **Create a GitHub Release** `vX.X` and attach `ScoreSort.dmg`.
+6. **Commit & push `docs/appcast.xml`** — existing users are then offered the update in-app.
+
+The website's download button should point at `https://github.com/benperche/ScoreSort/releases/latest/download/ScoreSort.dmg`, which always resolves to the newest release.
+
 ## Contributing
 
 Contributions are welcome! Please feel free to submit a Pull Request. For major changes, please open an issue first to discuss what you would like to change.
