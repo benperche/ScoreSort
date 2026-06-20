@@ -187,6 +187,7 @@ struct ScanFolderTests {
 
     // Creates a minimal valid-ish PDF file at the given filename.
     // PDFKit won't choke — the renamer only cares about filenames, not content.
+    @discardableResult
     func makePDFFile(named name: String) throws -> URL {
         let url = tempDir.appendingPathComponent(name)
         let minimalPDF = "%PDF-1.4\n%%EOF\n"

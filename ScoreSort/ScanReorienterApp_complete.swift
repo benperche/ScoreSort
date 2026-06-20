@@ -5429,7 +5429,10 @@ struct InstrumentOrders {
     ]
 }
 
-enum RenameOperationType {
+// `nonisolated` so its (implicit) Equatable conformance isn't main-actor-isolated under
+// the target's default MainActor isolation — otherwise comparing `.type` from a
+// nonisolated context (e.g. the test target) warns and would error in Swift 6.
+nonisolated enum RenameOperationType {
     case rename
     case skip
     case alreadyPrefixed
