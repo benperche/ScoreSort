@@ -1586,8 +1586,9 @@ struct OutputDirectoryTests {
     @Test("Returns the parent folder of the source file")
     func returnsParentFolder() {
         let src = URL(fileURLWithPath: "/Users/x/Scores/The Moon at Midnight/Full Score.pdf")
-        #expect(outputDirectory(forSourceFile: src)
-                == URL(fileURLWithPath: "/Users/x/Scores/The Moon at Midnight"))
+        // Compare paths, not URLs: deletingLastPathComponent() yields a directory URL with
+        // a trailing slash, which isn't == a URL(fileURLWithPath:) of the same folder.
+        #expect(outputDirectory(forSourceFile: src)?.path == "/Users/x/Scores/The Moon at Midnight")
     }
 
     @Test("Nil source yields nil (panel keeps its default)")
