@@ -172,10 +172,9 @@ struct ScoreSortApp: App {
                 .environmentObject(renamerManager)
                 .environmentObject(presetStore)
         }
-        // ── Screenshot size ───────────────────────────────────────────────────
-        // Uncomment the line below when taking App Store screenshots (1280×800).
-        // Re-comment it before shipping so users can freely resize the window.
-        // .defaultSize(width: 1280, height: 800)
+        // Default window size on first launch. Users can resize freely and the size is
+        // then remembered. (Temporarily set to 1280×800 when taking App Store screenshots.)
+        .defaultSize(width: 940, height: 800)
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About ScoreSort") {
@@ -1915,23 +1914,28 @@ struct WelcomeTourView: View {
         VStack(spacing: 0) {
 
             // ── Content: card hugs the page's height, scrolling past the cap ──
-            ScrollView(.vertical, showsIndicators: false) {
-                TourPageContentView(page: pages[currentPage])
-                    .id(currentPage)
-                    .transition(.asymmetric(
-                        insertion: .move(edge: goingForward ? .trailing : .leading)
-                                    .combined(with: .opacity),
-                        removal:   .move(edge: goingForward ? .leading : .trailing)
-                                    .combined(with: .opacity)
-                    ))
-                    .background(GeometryReader { proxy in
-                        Color.clear.preference(key: TourContentHeightKey.self,
-                                               value: proxy.size.height)
-                    })
+            ScrollViewReader { proxy in
+                ScrollView(.vertical, showsIndicators: false) {
+                    TourPageContentView(page: pages[currentPage])
+                        .id(currentPage)
+                        .transition(.asymmetric(
+                            insertion: .move(edge: goingForward ? .trailing : .leading)
+                                        .combined(with: .opacity),
+                            removal:   .move(edge: goingForward ? .leading : .trailing)
+                                        .combined(with: .opacity)
+                        ))
+                        .background(GeometryReader { geo in
+                            Color.clear.preference(key: TourContentHeightKey.self,
+                                                   value: geo.size.height)
+                        })
+                }
+                .frame(height: min(max(contentHeight, 1), maxContentHeight))
+                .onPreferenceChange(TourContentHeightKey.self) { contentHeight = $0 }
+                .onChange(of: currentPage) { _, newValue in
+                    proxy.scrollTo(newValue, anchor: .top)   // reset to top on each page change
+                }
+                .animation(.easeInOut(duration: 0.25), value: contentHeight)
             }
-            .frame(height: min(max(contentHeight, 1), maxContentHeight))
-            .onPreferenceChange(TourContentHeightKey.self) { contentHeight = $0 }
-            .animation(.easeInOut(duration: 0.25), value: contentHeight)
 
             Divider()
 
