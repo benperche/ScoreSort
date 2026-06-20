@@ -13,12 +13,10 @@
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <pubDate>Sat, 20 Jun 2026 11:00:00 +1000</pubDate>
             <sparkle:releaseNotesLink>https://github.com/benperche/ScoreSort/releases/tag/v1.5</sparkle:releaseNotesLink>
-            <!-- TODO before publishing: run `sign_update ScoreSort.dmg` and paste its
-                 sparkle:edSignature and length below (replace both placeholders). -->
             <enclosure
                 url="https://github.com/benperche/ScoreSort/releases/download/v1.5/ScoreSort.dmg"
-                sparkle:edSignature="SIGNATURE_FROM_SIGN_UPDATE"
-                length="FILE_SIZE_IN_BYTES"
+                sparkle:edSignature="pvfcyN9+TtdQb9HrT67Aw3zugQkgmE8VKpcgNU+QAXPHSgknGrgCSAOr+fFUmpX8nM4miL1lBvyS6M9DskHiCg=="
+                length="6991963"
                 type="application/octet-stream"/>
         </item>
 
