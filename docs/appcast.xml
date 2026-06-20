@@ -12,7 +12,14 @@
             <sparkle:shortVersionString>1.5.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <pubDate>Sat, 20 Jun 2026 13:45:00 +1000</pubDate>
-            <sparkle:releaseNotesLink>https://github.com/benperche/ScoreSort/releases/tag/v1.5.1</sparkle:releaseNotesLink>
+            <description><![CDATA[
+                <h2>ScoreSort 1.5.1</h2>
+                <p>A small polish update:</p>
+                <ul>
+                    <li><b>Expanded the Welcome Tour</b> — clearer guidance for combining (images, blank pages, table of contents) and splitting, including A3 sheet splitting and booklet reordering.</li>
+                    <li><b>Tidied the default window size</b> and minor UI refinements.</li>
+                </ul>
+            ]]></description>
             <enclosure
                 url="https://github.com/benperche/ScoreSort/releases/download/v1.5.1/ScoreSort.dmg"
                 sparkle:edSignature="I1cGo3XDdC19xsl6wPaTZXmOXFIUBRmaKjwGACVT74QCBIkNjo9fEAXjsTdRSKg+3CI5qp1bQtypK4nvn/MCDw=="
