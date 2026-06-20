@@ -7,6 +7,25 @@
         <language>en</language>
 
         <item>
+            <title>Version 1.5.2</title>
+            <sparkle:version>9</sparkle:version>
+            <sparkle:shortVersionString>1.5.2</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <pubDate>Sat, 20 Jun 2026 23:01:00 +1000</pubDate>
+            <description><![CDATA[
+                <h2>ScoreSort 1.5.2</h2>
+                <p>Reliability fix: automatic updates now install correctly. (Earlier
+                versions couldn't complete an in-app update — please update manually this
+                once, and future updates will be automatic.)</p>
+            ]]></description>
+            <enclosure
+                url="https://github.com/benperche/ScoreSort/releases/download/v1.5.2/ScoreSort.dmg"
+                sparkle:edSignature="4/LjOr+wl3EpUYpxQL0PjHGqLdkP/OoaxcHwv5EgCEIVs1YgtZKu6gZGg7TNJlN0uuk+cyTdnkPzvDp0CWC1BA=="
+                length="6893829"
+                type="application/octet-stream"/>
+        </item>
+
+        <item>
             <title>Version 1.5.1</title>
             <sparkle:version>8</sparkle:version>
             <sparkle:shortVersionString>1.5.1</sparkle:shortVersionString>
