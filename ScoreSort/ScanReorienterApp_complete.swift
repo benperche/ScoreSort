@@ -147,12 +147,37 @@ struct HelpCommands: Commands {
 // Not used for App Store / TestFlight builds (the Mac App Store handles updates).
 final class UpdaterViewModel: ObservableObject {
     private let updaterController: SPUStandardUpdaterController
+    private var updaterStarted = false
     @Published var canCheckForUpdates = false
     init() {
-        updaterController = SPUStandardUpdaterController(startingUpdater: true, updaterDelegate: nil, userDriverDelegate: nil)
+        // Don't show Sparkle's "check for updates automatically?" permission prompt on
+        // the very first launch — it greets brand-new users before they've used the app.
+        // We defer *starting* the updater (which is what triggers the scheduled check and
+        // the prompt) until the second launch. Manual "Check for Updates…" still works on
+        // first launch via checkForUpdates(), which starts the updater on demand.
+        let defaults = UserDefaults.standard
+        let launchCount = defaults.integer(forKey: "appLaunchCount") + 1
+        defaults.set(launchCount, forKey: "appLaunchCount")
+        let startNow = launchCount >= 2
+
+        // Pass startingUpdater: false so we control exactly when it starts.
+        updaterController = SPUStandardUpdaterController(startingUpdater: false, updaterDelegate: nil, userDriverDelegate: nil)
         updaterController.updater.publisher(for: \.canCheckForUpdates).assign(to: &$canCheckForUpdates)
+        if startNow { startUpdaterIfNeeded() }
     }
-    func checkForUpdates() { updaterController.updater.checkForUpdates() }
+
+    private func startUpdaterIfNeeded() {
+        guard !updaterStarted else { return }
+        updaterStarted = true
+        updaterController.startUpdater()
+    }
+
+    func checkForUpdates() {
+        // A user-initiated check is never the unwanted first-launch prompt, so it's fine
+        // to start the updater here if it hasn't been started yet.
+        startUpdaterIfNeeded()
+        updaterController.updater.checkForUpdates()
+    }
 }
 
 // MARK: - Main App
@@ -229,11 +254,18 @@ struct AboutView: View {
 
 // MARK: - App Delegate
 class AppDelegate: NSObject, NSApplicationDelegate {
+    // Set true once the main window has appeared. Until then we must NOT quit on
+    // last-window-close: at launch Sparkle's update dialog can appear before the
+    // SwiftUI WindowGroup window is on screen (the window is created async), and
+    // dismissing Sparkle's dialog would otherwise look like "last window closed"
+    // and terminate the app before the main window ever shows.
+    static var mainWindowHasAppeared = false
+
     func applicationDidFinishLaunching(_ notification: Notification) {
         InstrumentOrders.setup()
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
-        return true
+        return AppDelegate.mainWindowHasAppeared
     }
 }
 
@@ -275,6 +307,8 @@ struct ContentView: View {
             }
             .frame(minWidth: 900, minHeight: 700)
             .onAppear {
+                // Now that the main window is on screen, allow quit-on-last-window-close.
+                AppDelegate.mainWindowHasAppeared = true
                 if !hasSeenWelcomeTour {
                     hasSeenWelcomeTour = true
                     // Short delay lets the window finish rendering before the overlay appears
@@ -388,10 +422,9 @@ struct CombineView: View {
 
                 if !combineManager.files.isEmpty {
                     Button(action: { combineManager.clearAll(undoManager: undoManager) }) {
-                        Label("Clear All", systemImage: "xmark.circle.fill")
+                        Label("Clear Files", systemImage: "xmark.circle.fill")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
+                    .help("Remove all files and start over")
                 }
             }
             .padding()
@@ -2893,10 +2926,9 @@ struct ScoreOrderSortView: View {
                             selectedIDs = []
                             lastClickedID = nil
                         }) {
-                            Label("Clear", systemImage: "xmark.circle.fill")
+                            Label("Clear Files", systemImage: "xmark.circle.fill")
                         }
-                        .buttonStyle(.plain)
-                        .foregroundColor(.secondary)
+                        .help("Remove all files and start over")
                     }
                 }
                 .padding()
@@ -3619,10 +3651,9 @@ struct BulkRenameView: View {
                     Spacer()
                     if !loadedFiles.isEmpty {
                         Button(action: clearFiles) {
-                            Label("Clear", systemImage: "xmark.circle.fill")
+                            Label("Clear Files", systemImage: "xmark.circle.fill")
                         }
-                        .buttonStyle(.plain)
-                        .foregroundColor(.secondary)
+                        .help("Remove all files and start over")
                     }
                 }
                 .padding()
@@ -5563,10 +5594,9 @@ struct RotateView: View {
                 
                 if pdfManager.pdfDocument != nil {
                     Button(action: { pdfManager.clearPDF() }) {
-                        Label("Clear", systemImage: "xmark.circle.fill")
+                        Label("Clear File", systemImage: "xmark.circle.fill")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
+                    .help("Remove the current file and start over")
                 }
             }
             .padding()
@@ -6101,6 +6131,13 @@ struct SplitView: View {
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
     @AppStorage("prefixEnsembleType") private var prefixEnsembleType: EnsembleType = .band
+    /// When on, the original PDF is moved to the Trash after the split files are written.
+    /// Persisted so users who always want it don't re-tick every time; it's recoverable
+    /// (Trash, not permanent delete) and the summary screen confirms when it happened.
+    @AppStorage("deleteSourceAfterSplit") private var deleteSourceAfterSplit: Bool = false
+    /// Set true after a successful save when the source file was actually trashed, so the
+    /// summary screen can confirm it. Reset whenever a new save round begins.
+    @State private var sourceWasTrashed = false
 
     var totalPages: Int {
         pdfManager.pdfDocument?.pageCount ?? 0
@@ -6174,6 +6211,7 @@ struct SplitView: View {
                 RenameSummaryView(
                     finalNames: summaryNames,
                     outputFolderURL: pendingFolderURL,
+                    sourceTrashedNote: sourceWasTrashed ? "Original moved to the Trash." : nil,
                     onStartOver: {
                         pdfManager.clearPDF() // onChange handles full state reset
                     }
@@ -6256,6 +6294,7 @@ struct SplitView: View {
                 skippedPages = []
                 selectedFileIndices = []
                 skipMode = .file
+                sourceWasTrashed = false
                 lastBookletOrder = nil
                 bookletRedoNoticeVisible = false
                 a3HintVisible = false
@@ -6263,6 +6302,7 @@ struct SplitView: View {
         }
         .sheet(isPresented: $showingA3Detection) {
             A3SplitChoiceView(
+                firstPage: pdfManager.pdfDocument?.page(at: 0),
                 onChoose: { leftFirst in
                     guard let original = pdfManager.pdfDocument else { return }
                     showingA3Detection = false
@@ -6370,10 +6410,9 @@ struct SplitView: View {
                     .disabled(splitMarkers.isEmpty)
 
                     Button(action: { pdfManager.clearPDF() }) {
-                        Label("Clear", systemImage: "xmark.circle.fill")
+                        Label("Clear File", systemImage: "xmark.circle.fill")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
+                    .help("Remove the current file and start over")
                 }
             }
             .padding()
@@ -6822,6 +6861,23 @@ struct SplitView: View {
         isViewFocused = true
     }
 
+    /// If the "Move original to Trash after splitting" option is on, moves the loaded
+    /// source file to the Trash. Returns true if a file was actually trashed. Called only
+    /// after the split files have been written successfully, so the original is never
+    /// removed before its replacements exist. Failures are surfaced but non-fatal.
+    private func trashSourceFileIfRequested() -> Bool {
+        guard deleteSourceAfterSplit, let url = pdfManager.sourceURL else { return false }
+        do {
+            try FileManager.default.trashItem(at: url, resultingItemURL: nil)
+            return true
+        } catch {
+            showNSAlert(title: "Couldn't Move Original to Trash",
+                        message: "The split files were saved, but the original file could not be moved to the Trash:\n\n\(error.localizedDescription)",
+                        isError: true)
+            return false
+        }
+    }
+
     func saveSplitPDF() {
         guard let document = pdfManager.pdfDocument,
               activeFileCount >= 1,
@@ -6885,6 +6941,7 @@ struct SplitView: View {
                                 names.append("\(baseFileName)\(filenameSeparator)\(sfx).pdf")
                             }
                         }
+                        sourceWasTrashed = trashSourceFileIfRequested()
                         pendingFolderURL = folderURL
                         summaryNames = names
                         splitStage = .summary
@@ -7132,6 +7189,7 @@ struct SplitView: View {
                             message: "Could not write one or more files to \(folderURL.path).",
                             isError: true)
             } else {
+                sourceWasTrashed = trashSourceFileIfRequested()
                 pendingFolderURL = folderURL   // stored here so summary can offer "Show in Finder"
                 summaryNames = finalNamesForSummary
                 splitStage = .summary
@@ -7145,9 +7203,34 @@ struct SplitView: View {
 /// Sheet shown when an A3-landscape PDF is detected.  The user picks which half
 /// is page 1 (left-first or right-first), or dismisses without splitting.
 struct A3SplitChoiceView: View {
+    /// The detected A3 page, used to render a real preview behind the left/right markers.
+    let firstPage: PDFPage?
     /// Called with `true` for left-first, `false` for right-first.
     let onChoose: (Bool) -> Void
     let onKeepAsIs: () -> Void
+
+    /// Rendered thumbnail of `firstPage` (in its display orientation, so rotation is honoured).
+    @State private var pageImage: NSImage?
+
+    /// Aspect ratio of the rendered page; falls back to A3-landscape (√2) before the image loads.
+    private var previewAspect: CGFloat {
+        guard let img = pageImage, img.size.height > 0 else { return 1.414 }
+        return img.size.width / img.size.height
+    }
+
+    /// One half-page marker (number badge + caption) on a legible material backing.
+    private func halfMarker(symbol: String, text: String, prominent: Bool) -> some View {
+        VStack(spacing: 6) {
+            Image(systemName: symbol)
+                .font(.title)
+                .foregroundColor(prominent ? .accentColor : .secondary)
+            Text(text)
+                .font(.caption)
+                .foregroundColor(.secondary)
+        }
+        .padding(8)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
+    }
 
     var body: some View {
         VStack(spacing: 24) {
@@ -7160,46 +7243,51 @@ struct A3SplitChoiceView: View {
                 .foregroundColor(.secondary)
                 .frame(maxWidth: 380)
 
-            // Visual diagram — two A4-portrait rectangles side by side
-            HStack(spacing: 0) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.accentColor.opacity(0.08))
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color.accentColor.opacity(0.5), lineWidth: 1.5)
-                    VStack(spacing: 6) {
-                        Image(systemName: "1.circle.fill")
-                            .font(.title)
-                            .foregroundColor(.accentColor)
-                        Text("Left half")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                }
-                .frame(width: 90, height: 126)
-
-                ZStack {
+            // Visual diagram — left/right markers overlaid on a preview of the actual page.
+            ZStack {
+                if let img = pageImage {
+                    Image(nsImage: img)
+                        .resizable()
+                        .scaledToFit()
+                } else {
                     RoundedRectangle(cornerRadius: 4)
                         .fill(Color(NSColor.controlBackgroundColor))
-                    RoundedRectangle(cornerRadius: 4)
-                        .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-                    VStack(spacing: 6) {
-                        Image(systemName: "2.circle")
-                            .font(.title)
-                            .foregroundColor(.secondary)
-                        Text("Right half")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
                 }
-                .frame(width: 90, height: 126)
+
+                // Left half tinted to signal it's page 1 by default.
+                HStack(spacing: 0) {
+                    Color.accentColor.opacity(0.18)
+                    Color.clear
+                }
+
+                HStack(spacing: 0) {
+                    halfMarker(symbol: "1.circle.fill", text: "Left half", prominent: true)
+                        .frame(maxWidth: .infinity)
+                    halfMarker(symbol: "2.circle", text: "Right half", prominent: false)
+                        .frame(maxWidth: .infinity)
+                }
             }
+            .aspectRatio(previewAspect, contentMode: .fit)
+            .frame(maxWidth: 300, maxHeight: 200)
+            // Centre divider showing where the sheet will be cut.
+            .overlay(
+                Rectangle()
+                    .fill(Color.white.opacity(0.7))
+                    .frame(width: 1.5)
+                    .shadow(color: .black.opacity(0.4), radius: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 6))
             .overlay(
                 RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.secondary.opacity(0.2), lineWidth: 1)
-                    .padding(-10)
+                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
             )
             .padding(14)
+            .onAppear {
+                guard pageImage == nil, let page = firstPage else { return }
+                // thumbnail(of:for:) preserves the page's display aspect within the box,
+                // so a square bounding size yields a correctly-proportioned image.
+                pageImage = page.thumbnail(of: NSSize(width: 600, height: 600), for: .cropBox)
+            }
 
             // Choice buttons
             HStack(spacing: 16) {
@@ -8019,6 +8107,9 @@ struct SplitNamingStageView: View {
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
     /// Sticky across splits and launches (shared by key with SplitView / BulkRenameView).
     @AppStorage("prefixEnsembleType") private var prefixEnsembleType: EnsembleType = .band
+    /// Shared by key with SplitView. When on, the original file is moved to the Trash
+    /// after the split files are written (handled back in SplitView's save paths).
+    @AppStorage("deleteSourceAfterSplit") private var deleteSourceAfterSplit: Bool = false
 
     /// Set to true once we've auto-inferred the ensemble from a high-confidence signal.
     /// Prevents re-inference (and fighting the user) on subsequent edits this session.
@@ -8078,10 +8169,9 @@ struct SplitNamingStageView: View {
                     .fontWeight(.semibold)
                 Spacer()
                 Button(action: onClear) {
-                    Label("Clear", systemImage: "xmark.circle.fill")
+                    Label("Clear File", systemImage: "xmark.circle.fill")
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(.secondary)
+                .help("Remove the current file and start over")
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
@@ -8216,6 +8306,9 @@ struct SplitNamingStageView: View {
                     .disabled(!prefixEnabled)
                     .opacity(prefixEnabled ? 1 : 0.5)
                     Spacer()
+                    Toggle("Move original to Trash", isOn: $deleteSourceAfterSplit)
+                        .toggleStyle(.checkbox)
+                        .help("When the split files are saved, the original PDF is moved to the Trash (recoverable). Off by default.")
                 }
 
                 HStack {
@@ -9195,6 +9288,8 @@ struct RenameSummaryView: View {
     let finalNames: [String]
     /// Non-nil for the Splitter (lets us offer "Show in Finder"). Nil for Bulk Rename.
     let outputFolderURL: URL?
+    /// Optional confirmation line shown under the header (e.g. "Original moved to the Trash.").
+    var sourceTrashedNote: String? = nil
     let onStartOver: () -> Void
 
     var body: some View {
@@ -9208,6 +9303,11 @@ struct RenameSummaryView: View {
                     .font(.title).fontWeight(.bold)
                 Text("\(finalNames.count) file\(finalNames.count == 1 ? "" : "s") saved successfully.")
                     .foregroundColor(.secondary)
+                if let note = sourceTrashedNote {
+                    Label(note, systemImage: "trash")
+                        .font(.callout)
+                        .foregroundColor(.secondary)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.top, 36)

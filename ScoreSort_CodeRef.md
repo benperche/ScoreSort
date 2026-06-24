@@ -420,6 +420,10 @@ When a new PDF loads, `fileSizes` is pre-populated via `splitSizesFromBookmarks`
 
 **`skipMode`** — defaults to `.file`; automatically set to `.page` after an A3 split (where blank pages need to be removed individually). Reset to `.file` on any fresh PDF load or clear.
 
+**Move original to Trash** — a `.checkbox` Toggle bound to `@AppStorage("deleteSourceAfterSplit")` (persisted, defaults off). It lives in **Step 2** (`SplitNamingStageView`), right-justified on the same row as the "Prefix score order" toggle/picker (after the `Spacer()`), so it's the last decision before saving. The key is shared between `SplitView` and `SplitNamingStageView` via `@AppStorage`. After a *successful* save, both save paths (`saveSplitPDF`'s non-prefix branch and `applyPrefixToFolder`) call `trashSourceFileIfRequested()`, which `FileManager.trashItem`s `pdfManager.sourceURL` (recoverable, not a hard delete) and returns whether it acted. The result is stored in `@State sourceWasTrashed` and passed to `RenameSummaryView` as `sourceTrashedNote` so the summary confirms "Original moved to the Trash." Trash failure is surfaced via `showNSAlert` but is non-fatal (split files are already written).
+
+**Clear buttons** — every tab's reset button is a standard bordered (square) `Button` with a full-rectangle hit target, **not** `.buttonStyle(.plain)` (the plain style only registered hits on the glyphs). Labels: **"Clear File"** (singular: Split Step 1, Split Step 2, Rotate) and **"Clear Files"** (plural: Combine, Rename Files, Bulk Part Rename).
+
 ### SplitView methods (booklet / A3)
 
 | Method | Purpose |
@@ -456,7 +460,7 @@ When a new PDF loads, `fileSizes` is pre-populated via `splitSizesFromBookmarks`
 
 ### A3 split workflow
 
-1. User drags in a PDF. `onChange` calls `isA3Landscape` → shows `A3SplitChoiceView` sheet.
+1. User drags in a PDF. `onChange` calls `isA3Landscape` → shows `A3SplitChoiceView` sheet. The sheet is passed `firstPage: pdfDocument.page(at: 0)` and renders its `thumbnail(of:for:)` (display orientation, so rotation is honoured) as the diagram background, with the "1 / Left half" and "2 / Right half" markers overlaid on a centre divider instead of abstract rectangles. Falls back to a plain rectangle if the page is nil.
 2. User picks "Left half first" / "Right half first". Background thread calls `splitA3Pages`. On completion, sets `skipMode = .page`, then assigns result to `pdfManager.pdfDocument` (suppress flags prevent re-detection and state reset).
 3. `a3SplitNoticeVisible` banner appears for 6 s pointing to "Swap with Next (S)".
 4. Toolbar "Fix Booklet Order" button becomes available once split markers define file segments of size divisible by 4.
@@ -625,6 +629,8 @@ ScoreSort ships via **direct distribution** (GitHub Releases) with **Sparkle 2**
 ### How it's wired
 - **Sparkle package**: `XCRemoteSwiftPackageReference` to `sparkle-project/Sparkle` (up-to-next-major from 2.9.1). The product is linked to the **ScoreSort** target (`packageProductDependencies` + a `PBXBuildFile` in the app's Frameworks phase). If updates ever stop building with "no such module Sparkle", that link is what's missing.
 - **Code**: `import Sparkle`; `UpdaterViewModel` (wraps `SPUStandardUpdaterController`); injected as `@StateObject` on `ScoreSortApp`; **Check for Updates…** menu item via `CommandGroup(after: .appInfo)`. To build an App Store/TestFlight variant, comment these back out (Sparkle must not ship in MAS builds).
+- **Deferred first-launch start**: `UpdaterViewModel` inits the controller with `startingUpdater: false` and only calls `startUpdater()` once `appLaunchCount` (in `UserDefaults`, incremented each init) reaches **2**. This suppresses Sparkle's "check for updates automatically?" permission prompt on a brand-new user's *first* launch — it appears on the second launch instead. Manual **Check for Updates…** starts the updater on demand (`startUpdaterIfNeeded()`), so it still works on first launch.
+- **Launch-quit guard**: `AppDelegate.applicationShouldTerminateAfterLastWindowClosed` returns the static `mainWindowHasAppeared` flag (set true in `ContentView`'s `.onAppear`), **not** an unconditional `true`. Reason: at launch Sparkle's dialog can appear before the async `WindowGroup` window exists, and dismissing it would otherwise read as "last window closed" and quit the app before the main window shows. Don't revert this to `return true`.
 - **Info.plist**: `SUFeedURL = https://benperche.github.io/ScoreSort/appcast.xml`, `SUPublicEDKey = 6Dj8WlfDC/fWZMetFfw7XObJTa9fOsyXGuHDpxjYFYY=`.
 - **Appcast**: `docs/appcast.xml`, served by **GitHub Pages** from the repo's `docs/` folder. Downloads (DMGs) are **GitHub Release assets**.
 - **Signing key**: the EdDSA **private key lives in the login Keychain** (paired with `SUPublicEDKey`). Verify with `generate_keys -p` (prints the public key — must equal `SUPublicEDKey`). Sparkle CLI tools (`sign_update`, `generate_keys`, `generate_appcast`) are in the resolved package artifacts: `~/Library/Developer/Xcode/DerivedData/ScoreSort-*/SourcePackages/artifacts/sparkle/Sparkle/bin/`.
