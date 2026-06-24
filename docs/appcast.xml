@@ -7,6 +7,36 @@
         <language>en</language>
 
         <item>
+            <title>Version 1.6.0</title>
+            <sparkle:version>10</sparkle:version>
+            <sparkle:shortVersionString>1.6.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <pubDate>Wed, 24 Jun 2026 14:41:05 +1000</pubDate>
+            <description><![CDATA[
+                <h2>ScoreSort 1.6.0</h2>
+                <p><b>New</b></p>
+                <ul>
+                    <li><b>Splitter — move the original to Trash.</b> A new checkbox on Step 2 cleans up the source PDF after your split files are saved. Off by default, remembered between uses, and recoverable (it goes to the Trash).</li>
+                    <li><b>Splitter — A3 page preview.</b> The "which half comes first?" dialog now shows a preview of your actual page behind the left/right selector.</li>
+                </ul>
+                <p><b>Improved</b></p>
+                <ul>
+                    <li><b>Easier-to-hit &ldquo;Clear&rdquo; buttons</b> in every tool.</li>
+                </ul>
+                <p><b>Fixed</b></p>
+                <ul>
+                    <li>The app no longer quits from the update dialog at launch.</li>
+                    <li>No &ldquo;check for updates automatically?&rdquo; prompt on the very first launch.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/benperche/ScoreSort/releases/download/v1.6.0/ScoreSort.dmg"
+                sparkle:edSignature="AHcFWBGDfT1NOLvNPRBFvjrAmxo4gIHLId1qpuF7J8pRZUhPiOEMthLFAmEjD48QfzYPzaYwdadNufcoXgmLDg=="
+                length="6902454"
+                type="application/octet-stream"/>
+        </item>
+
+        <item>
             <title>Version 1.5.2</title>
             <sparkle:version>9</sparkle:version>
             <sparkle:shortVersionString>1.5.2</sparkle:shortVersionString>
