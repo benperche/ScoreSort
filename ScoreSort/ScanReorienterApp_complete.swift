@@ -371,6 +371,12 @@ struct CombineView: View {
     @State private var anchorFileId: UUID?      // anchor for shift-range selection
     @State private var showPresetSidebar = false
     @State private var unmatchedFileIds: Set<UUID> = []
+    /// Drag-to-reorder: the (group-snapped) row id an insertion line is shown above,
+    /// or `.endOfList` when hovering the trailing drop zone. Nil when not dragging.
+    @State private var dropTargetId: UUID?
+    @State private var isDropAtEnd = false
+    /// Drag-to-reorder: the collate group whose body is hovered (drop = add to group).
+    @State private var mergeTargetGroupId: UUID?
     @FocusState private var listFocused: Bool
     @Environment(\.undoManager) var undoManager
     
@@ -527,44 +533,86 @@ struct CombineView: View {
                     ScrollView {
                         LazyVStack(spacing: 0) {
                             ForEach(combineManager.files) { file in
-                                // If this file is the first member of a collate group,
-                                // emit a group header row before it.
-                                if let gid = file.collateGroupId,
-                                   let group = combineManager.collateGroups[gid],
-                                   combineManager.files.first(where: { $0.collateGroupId == gid })?.id == file.id {
-                                    let groupFiles = combineManager.files.filter { $0.collateGroupId == gid }
-                                    CollateGroupHeaderRow(
-                                        group: group,
-                                        fileCount: groupFiles.count,
-                                        totalPages: groupFiles.reduce(0) { $0 + $1.pageCount },
+                                let isGroupFirst = file.collateGroupId.map { gid in
+                                    combineManager.files.first(where: { $0.collateGroupId == gid })?.id == file.id
+                                } ?? false
+                                VStack(spacing: 0) {
+                                    // If this file is the first member of a collate group,
+                                    // emit a group header row before it. The header is a
+                                    // *reorder* drop target (lands above the group), while
+                                    // the member rows below merge dropped files into it.
+                                    if isGroupFirst, let gid = file.collateGroupId,
+                                       let group = combineManager.collateGroups[gid] {
+                                        let groupFiles = combineManager.files.filter { $0.collateGroupId == gid }
+                                        CollateGroupHeaderRow(
+                                            group: group,
+                                            fileCount: groupFiles.count,
+                                            totalPages: groupFiles.reduce(0) { $0 + $1.pageCount },
+                                            isMergeTarget: mergeTargetGroupId == gid,
+                                            onCopiesChanged: { newValue in
+                                                combineManager.updateGroupCopies(id: gid, copies: newValue, undoManager: undoManager)
+                                            },
+                                            onUngroup: {
+                                                combineManager.dissolveGroup(id: gid, undoManager: undoManager)
+                                            }
+                                        )
+                                        .draggable(file.id.uuidString) { dragPreview(for: file) }
+                                        .overlay(alignment: .top) { insertionLine(visible: dropTargetId == file.id) }
+                                        .dropDestination(for: String.self) { items, _ in
+                                            handleReorderDrop(items, onto: file.id)
+                                        } isTargeted: { setReorderTarget(file.id, $0) }
+                                        Divider()
+                                    }
+                                    CombineFileRow(
+                                        file: file,
+                                        isSelected: selectedFiles.contains(file.id),
+                                        isFocused: focusedFileId == file.id,
+                                        isUnmatched: unmatchedFileIds.contains(file.id),
+                                        isGrouped: file.collateGroupId != nil,
+                                        isLastInGroup: isLastInGroup(file),
+                                        isMergeTarget: file.collateGroupId != nil && mergeTargetGroupId == file.collateGroupId,
+                                        onToggleSelect: { toggleSelection(file.id) },
                                         onCopiesChanged: { newValue in
-                                            combineManager.updateGroupCopies(id: gid, copies: newValue, undoManager: undoManager)
+                                            combineManager.updateCopies(for: file.id, copies: newValue, undoManager: undoManager)
                                         },
-                                        onUngroup: {
-                                            combineManager.dissolveGroup(id: gid, undoManager: undoManager)
+                                        onRemove: {
+                                            selectedFiles.remove(file.id)
+                                            unmatchedFileIds.remove(file.id)
+                                            combineManager.removeFiles(ids: [file.id], undoManager: undoManager)
+                                            showRemovalNotice(undoManager: undoManager)
                                         }
                                     )
+                                    .draggable(file.id.uuidString) { dragPreview(for: file) }
+                                    .overlay(alignment: .top) {
+                                        // Ungrouped rows show a reorder insertion line; grouped
+                                        // member rows use the whole-group merge highlight instead.
+                                        insertionLine(visible: file.collateGroupId == nil && dropTargetId == file.id)
+                                    }
+                                    .dropDestination(for: String.self) { items, _ in
+                                        if let gid = file.collateGroupId {
+                                            return handleAddToGroup(items, groupId: gid)
+                                        }
+                                        return handleReorderDrop(items, onto: file.id)
+                                    } isTargeted: { targeted in
+                                        if let gid = file.collateGroupId {
+                                            if targeted { mergeTargetGroupId = gid; dropTargetId = nil }
+                                            else if mergeTargetGroupId == gid { mergeTargetGroupId = nil }
+                                        } else {
+                                            setReorderTarget(file.id, targeted)
+                                        }
+                                    }
                                     Divider()
                                 }
-                                CombineFileRow(
-                                    file: file,
-                                    isSelected: selectedFiles.contains(file.id),
-                                    isFocused: focusedFileId == file.id,
-                                    isUnmatched: unmatchedFileIds.contains(file.id),
-                                    isGrouped: file.collateGroupId != nil,
-                                    onToggleSelect: { toggleSelection(file.id) },
-                                    onCopiesChanged: { newValue in
-                                        combineManager.updateCopies(for: file.id, copies: newValue, undoManager: undoManager)
-                                    },
-                                    onRemove: {
-                                        selectedFiles.remove(file.id)
-                                        unmatchedFileIds.remove(file.id)
-                                        combineManager.removeFiles(ids: [file.id], undoManager: undoManager)
-                                        showRemovalNotice(undoManager: undoManager)
-                                    }
-                                )
-                                Divider()
                             }
+
+                            // Trailing zone: drop here to move the block to the very end.
+                            Color.clear
+                                .frame(maxWidth: .infinity, minHeight: 32)
+                                .contentShape(Rectangle())
+                                .overlay(alignment: .top) { insertionLine(visible: isDropAtEnd) }
+                                .dropDestination(for: String.self) { items, _ in
+                                    handleReorderDropAtEnd(items)
+                                } isTargeted: { isDropAtEnd = $0 }
                         }
                     }
                     .focusable()
@@ -697,6 +745,97 @@ struct CombineView: View {
             }
         }
         return expanded
+    }
+
+    // True when `file` is the last member of its collate group (used to draw the
+    // closing border so a group's extent is obvious).
+    private func isLastInGroup(_ file: CombineFile) -> Bool {
+        guard let gid = file.collateGroupId,
+              let idx = combineManager.files.firstIndex(where: { $0.id == file.id })
+        else { return false }
+        let next = idx + 1
+        return next >= combineManager.files.count || combineManager.files[next].collateGroupId != gid
+    }
+
+    // Snap a drop target to its collate group's first member, so an insert never
+    // lands inside a group (which would split it). Ungrouped ids are returned as-is.
+    private func groupSnappedTarget(_ targetId: UUID) -> UUID {
+        guard let gid = combineManager.files.first(where: { $0.id == targetId })?.collateGroupId
+        else { return targetId }
+        return combineManager.files.first(where: { $0.collateGroupId == gid })?.id ?? targetId
+    }
+
+    // The set of files a drag should move: the whole selection if the dragged row is
+    // part of it, otherwise just the dragged row — then group-expanded either way.
+    private func draggedSet(for draggedId: UUID) -> Set<UUID> {
+        let base: Set<UUID> = selectedFiles.contains(draggedId) ? selectedFiles : [draggedId]
+        return expandForGroups(base)
+    }
+
+    /// Handle a reorder drop onto `rowId`. Returns true if the order changed.
+    private func handleReorderDrop(_ items: [String], onto rowId: UUID) -> Bool {
+        dropTargetId = nil
+        mergeTargetGroupId = nil
+        guard let first = items.first, let draggedId = UUID(uuidString: first) else { return false }
+        let moving = draggedSet(for: draggedId)
+        let target = groupSnappedTarget(rowId)
+        guard !moving.contains(target) else { return false }   // dropped onto its own block
+        combineManager.move(ids: moving, before: target, undoManager: undoManager)
+        return true
+    }
+
+    /// Handle a drop onto a collate group's body — merge the dragged file(s) into it.
+    private func handleAddToGroup(_ items: [String], groupId: UUID) -> Bool {
+        dropTargetId = nil
+        mergeTargetGroupId = nil
+        guard let first = items.first, let draggedId = UUID(uuidString: first) else { return false }
+        combineManager.addToGroup(ids: draggedSet(for: draggedId), groupId: groupId, undoManager: undoManager)
+        return true
+    }
+
+    // Track which row's insertion line is shown while reordering.
+    private func setReorderTarget(_ id: UUID, _ targeted: Bool) {
+        if targeted { dropTargetId = id; mergeTargetGroupId = nil }
+        else if dropTargetId == id { dropTargetId = nil }
+    }
+
+    /// Handle a drop onto the trailing zone — move the dragged block to the end.
+    private func handleReorderDropAtEnd(_ items: [String]) -> Bool {
+        isDropAtEnd = false
+        guard let first = items.first, let draggedId = UUID(uuidString: first) else { return false }
+        combineManager.move(ids: draggedSet(for: draggedId), before: nil, undoManager: undoManager)
+        return true
+    }
+
+    /// Drag preview, reflecting what's actually being moved: "Collate Group" when the
+    /// drag is exactly one collate group, "N items" for a multi-file selection, else
+    /// the single file's name.
+    @ViewBuilder private func dragPreview(for file: CombineFile) -> some View {
+        let moving = draggedSet(for: file.id)
+        if let gid = file.collateGroupId,
+           moving == Set(combineManager.files.filter { $0.collateGroupId == gid }.map(\.id)) {
+            dragPreviewLabel("Collate Group", systemImage: "rectangle.stack.fill")
+        } else if moving.count > 1 {
+            dragPreviewLabel("\(moving.count) items", systemImage: "doc.on.doc")
+        } else {
+            dragPreviewLabel(file.name, systemImage: "doc.on.doc")
+        }
+    }
+
+    private func dragPreviewLabel(_ text: String, systemImage: String) -> some View {
+        Label(text, systemImage: systemImage)
+            .lineLimit(1)
+            .padding(6)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+    }
+
+    /// A thin accent insertion line shown where a dragged block will land.
+    @ViewBuilder private func insertionLine(visible: Bool) -> some View {
+        RoundedRectangle(cornerRadius: 1.5)
+            .fill(Color.accentColor)
+            .frame(height: 3)
+            .padding(.horizontal, 8)
+            .opacity(visible ? 1 : 0)
     }
 
     private var canMoveUp: Bool {
@@ -1046,6 +1185,10 @@ struct CombineFileRow: View {
     let isUnmatched: Bool
     /// True when this file belongs to a collate group (indents row, hides copies stepper).
     var isGrouped: Bool = false
+    /// True when this is the last member of its collate group (draws the closing border).
+    var isLastInGroup: Bool = false
+    /// True while a drag is hovering this file's collate group (highlight as merge target).
+    var isMergeTarget: Bool = false
     let onToggleSelect: () -> Void
     let onCopiesChanged: (Int) -> Void
     let onRemove: () -> Void
@@ -1114,17 +1257,33 @@ struct CombineFileRow: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
-        .background(
-            isSelected
-                ? Color.accentColor.opacity(isFocused ? 0.18 : 0.1)
-                : isUnmatched ? Color.orange.opacity(0.12)
-                : file.isBlankPage ? Color.gray.opacity(0.08) : Color.clear
-        )
+        .background(rowBackground)
+        // Continuous accent spine down the left edge of a collate group, plus a
+        // closing border under the last member so the group's extent is obvious.
+        .overlay(alignment: .leading) {
+            if isGrouped {
+                Rectangle().fill(Color.accentColor.opacity(0.55)).frame(width: 3)
+            }
+        }
+        .overlay(alignment: .bottom) {
+            if isLastInGroup {
+                Rectangle().fill(Color.accentColor.opacity(0.55)).frame(height: 2)
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture { onToggleSelect() }
         .onChange(of: copiesFieldFocused) { _, focused in
             if !focused && isEditingCopies { commitCopiesEdit() }
         }
+    }
+
+    private var rowBackground: Color {
+        if isMergeTarget { return Color.accentColor.opacity(0.22) }   // drag merge highlight
+        if isSelected { return Color.accentColor.opacity(isFocused ? 0.18 : 0.1) }
+        if isUnmatched { return Color.orange.opacity(0.12) }
+        if isGrouped { return Color.accentColor.opacity(0.05) }   // faint group fill
+        if file.isBlankPage { return Color.gray.opacity(0.08) }
+        return Color.clear
     }
 
     private func commitCopiesEdit() {
@@ -1140,6 +1299,8 @@ struct CollateGroupHeaderRow: View {
     let group: CollateGroup
     let fileCount: Int
     let totalPages: Int
+    /// True while a drag is hovering this group (highlight as merge target).
+    var isMergeTarget: Bool = false
     var onCopiesChanged: (Int) -> Void
     var onUngroup: () -> Void
 
@@ -1208,7 +1369,11 @@ struct CollateGroupHeaderRow: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 6)
-        .background(Color.accentColor.opacity(0.07))
+        .background(Color.accentColor.opacity(isMergeTarget ? 0.22 : 0.07))
+        // Top of the accent spine that runs down the whole collate group.
+        .overlay(alignment: .leading) {
+            Rectangle().fill(Color.accentColor.opacity(0.55)).frame(width: 3)
+        }
         .onChange(of: copiesFocused) { _, focused in
             if !focused && isEditingCopies { commitEdit() }
         }
@@ -2559,6 +2724,62 @@ class CombineManager: ObservableObject {
         if files.map(\.id) != bf.map(\.id) {
             registerUndo(undoManager: undoManager, actionName: "Move Down",
                          restoringFiles: bf, restoringGroups: bg)
+        }
+    }
+
+    /// Moves the given files (a group-expanded block; order preserved) so they land
+    /// immediately before `targetId`, or to the end when `targetId` is nil. Callers
+    /// snap `targetId` to a collate-group boundary, so groups stay contiguous.
+    func move(ids: Set<UUID>, before targetId: UUID?, undoManager: UndoManager?) {
+        let bf = files; let bg = collateGroups
+        let moving = files.filter { ids.contains($0.id) }
+        guard !moving.isEmpty else { return }
+        var remaining = files.filter { !ids.contains($0.id) }
+        let insertIndex: Int
+        if let targetId, let idx = remaining.firstIndex(where: { $0.id == targetId }) {
+            insertIndex = idx
+        } else {
+            insertIndex = remaining.count   // target nil or itself moved → append
+        }
+        remaining.insert(contentsOf: moving, at: insertIndex)
+        files = remaining
+        if files.map(\.id) != bf.map(\.id) {
+            registerUndo(undoManager: undoManager, actionName: "Reorder Files",
+                         restoringFiles: bf, restoringGroups: bg)
+        }
+    }
+
+    /// Adds the given files into an existing collate group (drag-onto-group). The files
+    /// are reassigned to `groupId` and pulled in contiguously after the group's current
+    /// last member. Files already in the group are ignored; any source group left with
+    /// fewer than 2 members is dissolved.
+    func addToGroup(ids: Set<UUID>, groupId: UUID, undoManager: UndoManager?) {
+        guard collateGroups[groupId] != nil else { return }
+        let bf = files; let bg = collateGroups
+        let addingIds = ids.filter { id in
+            files.first(where: { $0.id == id })?.collateGroupId != groupId
+        }
+        guard !addingIds.isEmpty else { return }
+
+        var moving = files.filter { addingIds.contains($0.id) }
+        for i in moving.indices { moving[i].collateGroupId = groupId }
+        var remaining = files.filter { !addingIds.contains($0.id) }
+        if let lastIdx = remaining.lastIndex(where: { $0.collateGroupId == groupId }) {
+            remaining.insert(contentsOf: moving, at: lastIdx + 1)
+        } else {
+            remaining.append(contentsOf: moving)
+        }
+        files = remaining
+        cleanupSmallGroups()
+        registerUndo(undoManager: undoManager, actionName: "Add to Collate Group",
+                     restoringFiles: bf, restoringGroups: bg)
+    }
+
+    /// Dissolves any collate group left with fewer than 2 members.
+    private func cleanupSmallGroups() {
+        for gid in collateGroups.keys where files.filter({ $0.collateGroupId == gid }).count < 2 {
+            for i in files.indices where files[i].collateGroupId == gid { files[i].collateGroupId = nil }
+            collateGroups.removeValue(forKey: gid)
         }
     }
 

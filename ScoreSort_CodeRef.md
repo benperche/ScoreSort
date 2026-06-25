@@ -95,6 +95,18 @@ struct CollateGroup: Identifiable, Equatable {
 #### Reordering
 `moveUp/Down(ids:undoManager:)` — same `swapAt` block-move logic as before, but `CombineView` always expands the passed set via `expandForGroups()` first so collate groups move as an indivisible unit.
 
+`move(ids:before:undoManager:)` — backs **drag-to-reorder**. Pulls the moving files out (order preserved), then re-inserts the block immediately before `targetId` (or appends when nil). Registers a "Reorder Files" undo. `addToGroup(ids:groupId:undoManager:)` — backs **drag-onto-group**: reassigns the dragged files' `collateGroupId` to the target group, pulls them in after the group's current last member, then `cleanupSmallGroups()` dissolves any source group left with <2 members ("Add to Collate Group" undo).
+
+The list is a `ScrollView`/`LazyVStack` (not a `List`), so drag/drop is SwiftUI `.draggable(file.id.uuidString)` (row UUID as a `String`, with a `dragPreview`) + `.dropDestination(for: String.self)` attached to **individual** sub-views (not the row wrapper), because the header and the member rows need different drop actions:
+- **Header** (`CollateGroupHeaderRow`) → `handleReorderDrop` (insert *before* the group); shows the `insertionLine`.
+- **Grouped member row** → `handleAddToGroup` (merge into the group); shows a whole-group merge highlight via `isMergeTarget` (driven by `mergeTargetGroupId`), not an insertion line.
+- **Ungrouped row** → `handleReorderDrop` with an `insertionLine`.
+- **Trailing `Color.clear` zone** → `handleReorderDropAtEnd` ("move to end").
+
+`CombineView` drag helpers: `draggedSet(for:)` (whole selection if the dragged row is selected, else just that row, group-expanded), `groupSnappedTarget(_:)` (snaps a reorder target to its group's first member so a drop never splits a group), `setReorderTarget(_:_:)`, and `insertionLine(visible:)` (3pt accent line, `.overlay(alignment: .top)`). State: `dropTargetId`, `isDropAtEnd`, `mergeTargetGroupId`. Coexists with the view-level `.onDrop(of: [.fileURL])` (Finder import) because internal drags carry `String`, not `fileURL`.
+
+**Collate-group visuals** (so a group's extent is obvious): a 3pt accent **spine** down the leading edge of the header and every member row, a faint accent fill on member rows (`rowBackground` in `CombineFileRow`), and a 2pt accent **closing border** under the last member (`isLastInGroup`, computed in `CombineView`). During a drag-merge, the whole group (header + members) tints to `accentColor.opacity(0.22)` via `isMergeTarget`.
+
 #### Collate group methods
 | Method | Notes |
 |--------|-------|
