@@ -3089,18 +3089,9 @@ struct ScoreOrderSortView: View {
     /// new folder restarts immediately without clicking Start Over. `loadFolder`/`loadFiles`
     /// fully reset the manager; clearing `renameResult` leaves the done screen.
     private func handleRestartDrop(_ providers: [NSItemProvider]) -> Bool {
-        var collectedURLs: [URL] = []
-        let group = DispatchGroup()
-        for provider in providers {
-            group.enter()
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                if let url = url { collectedURLs.append(url) }
-                group.leave()
-            }
-        }
-        group.notify(queue: .main) {
-            guard !collectedURLs.isEmpty else { return }
-            startInput(collectedURLs)
+        collectDroppedFileURLs(from: providers) { urls in
+            guard !urls.isEmpty else { return }
+            startInput(urls)
         }
         return true
     }
@@ -3134,7 +3125,7 @@ struct ScoreOrderSortView: View {
         return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
     }
 
-    private func folderHasDirectPDFs(_ url: URL) -> Bool {
+    private func folderHasDirectRenamableFiles(_ url: URL) -> Bool {
         let items = (try? FileManager.default.contentsOfDirectory(
             at: url, includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants])) ?? []
@@ -3152,7 +3143,7 @@ struct ScoreOrderSortView: View {
     }
 
     private func collectJobFolders(_ folder: URL, into jobs: inout [URL]) {
-        if folderHasDirectPDFs(folder) { jobs.append(folder) }
+        if folderHasDirectRenamableFiles(folder) { jobs.append(folder) }
         let subs = (try? FileManager.default.contentsOfDirectory(
             at: folder, includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants])) ?? []
@@ -3500,19 +3491,8 @@ struct ScoreOrderSortView: View {
                 .allowsHitTesting(false)
         )
         .onDrop(of: [.fileURL], isTargeted: $isListDropTargeted) { providers in
-            var collected: [URL] = []
-            let group = DispatchGroup()
-            for provider in providers {
-                group.enter()
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    DispatchQueue.main.async {
-                        if let url = url { collected.append(url) }
-                        group.leave()
-                    }
-                }
-            }
-            group.notify(queue: .main) {
-                renamerManager.addFiles(urls: collected)
+            collectDroppedFileURLs(from: providers) { urls in
+                renamerManager.addFiles(urls: urls)
             }
             return true
         }
@@ -4323,18 +4303,7 @@ struct BulkRenameView: View {
     /// zone and the "done" summary screen, so finishing a job and dropping new files
     /// restarts immediately without clicking Start Over.
     private func handleRestartDrop(_ providers: [NSItemProvider]) -> Bool {
-        var collected: [URL] = []
-        let group = DispatchGroup()
-        for provider in providers {
-            group.enter()
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                DispatchQueue.main.async {
-                    if let url = url { collected.append(url) }
-                    group.leave()
-                }
-            }
-        }
-        group.notify(queue: .main) {
+        collectDroppedFileURLs(from: providers) { collected in
             guard !collected.isEmpty else { return }
             var isDir: ObjCBool = false
             let isFolder = collected.count == 1
@@ -5067,6 +5036,23 @@ let renamableFileExtensions: Set<String> = ["pdf", "jpg", "jpeg", "png", "tif", 
 
 private func isRenamableFile(_ url: URL) -> Bool {
     renamableFileExtensions.contains(url.pathExtension.lowercased())
+}
+
+/// Resolves file URLs from dropped `NSItemProvider`s and calls `completion` on the main
+/// queue once all have loaded. `loadObject` callbacks fire on arbitrary threads, so the
+/// appends are serialised with a lock — safe for any number of dropped items.
+func collectDroppedFileURLs(from providers: [NSItemProvider], completion: @escaping ([URL]) -> Void) {
+    var collected: [URL] = []
+    let lock = NSLock()
+    let group = DispatchGroup()
+    for provider in providers {
+        group.enter()
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            if let url { lock.lock(); collected.append(url); lock.unlock() }
+            group.leave()
+        }
+    }
+    group.notify(queue: .main) { completion(collected) }
 }
 
 /// A concise, disambiguating display name for `url` relative to the deepest directory
