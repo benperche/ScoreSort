@@ -9060,6 +9060,30 @@ struct SplitFileNamingRow: View {
     private let stepV: CGFloat = 25
     private let stepH: CGFloat = 100
 
+    /// Rendered size of the preview strip (captured via GeometryReader) so drag
+    /// distances can be converted from screen points to PDF points.
+    @State private var stripSize: CGSize = .zero
+    /// Running translation of the in-progress strip drag, so we apply incremental deltas.
+    @State private var lastStripDrag: CGSize = .zero
+
+    /// (cropW, cropH, pageW, pageH) in PDF points — mirrors PageInstrumentPreview's crop.
+    private func cropDims(_ pg: PDFPage) -> (cropW: CGFloat, cropH: CGFloat, pageW: CGFloat, pageH: CGFloat) {
+        let mediaBox = pg.bounds(for: .mediaBox)
+        let rotation = ((pg.rotation % 360) + 360) % 360
+        let pageW = rotation == 90 || rotation == 270 ? mediaBox.height : mediaBox.width
+        let pageH = rotation == 90 || rotation == 270 ? mediaBox.width  : mediaBox.height
+        return (min(pageW * 0.4, 200), 100, pageW, pageH)
+    }
+
+    /// Adds a PDF-point delta to the shared pan offset, clamped to the page's valid range
+    /// (x: 0…pageW-cropW, y: -(pageH-cropH)…0) so dragging stops cleanly at the edges.
+    private func applyPan(_ delta: CGSize) {
+        guard let pg = page else { return }
+        let d = cropDims(pg)
+        previewOffset.x = min(max(previewOffset.x + delta.width,  0), max(0, d.pageW - d.cropW))
+        previewOffset.y = min(max(previewOffset.y + delta.height, -(d.pageH - d.cropH)), 0)
+    }
+
     private var isFieldFocused: Bool { fieldFocus.wrappedValue == fileIndex }
 
     // Arrow-key selection index into the suggestions list (nil = in the text field)
@@ -9083,6 +9107,28 @@ struct SplitFileNamingRow: View {
     /// height proposal, so buttons never collapse when the image finishes loading.
     private var panOverlay: some View {
         Color.clear
+            .background(GeometryReader { geo in
+                Color.clear
+                    .onAppear { stripSize = geo.size }
+                    .onChange(of: geo.size) { _, s in stripSize = s }
+            })
+            // Drag anywhere on the strip to pan (grab-the-paper direction). Arrow
+            // buttons sit on top and still receive their own taps.
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 2)
+                    .onChanged { value in
+                        guard let pg = page, stripSize.width > 0, stripSize.height > 0 else { return }
+                        let d = cropDims(pg)
+                        // `.fill` scales the crop uniformly to cover the strip.
+                        let scale = max(stripSize.width / d.cropW, stripSize.height / d.cropH)
+                        let dx = (value.translation.width  - lastStripDrag.width)  / scale
+                        let dy = (value.translation.height - lastStripDrag.height) / scale
+                        lastStripDrag = value.translation
+                        applyPan(CGSize(width: -dx, height: dy))   // drag right→see left; drag down→see up
+                    }
+                    .onEnded { _ in lastStripDrag = .zero }
+            )
             .overlay(alignment: .top) {
                 panButton("chevron.up")   { previewOffset.y += stepV }
                     .padding(.top, 6)
@@ -9253,8 +9299,8 @@ struct SplitFileNamingRow: View {
                         .shadow(color: .black.opacity(0.12), radius: 3, x: 0, y: 1)
                         .overlay { panOverlay }
 
-                    // Minimap: full-page thumbnail with crop indicator
-                    PageCropOverview(page: pg, offset: previewOffset)
+                    // Minimap: full-page thumbnail with crop indicator (drag to reposition)
+                    PageCropOverview(page: pg, offset: previewOffset, onPanBy: applyPan)
                         .frame(width: 52, height: 70)
                         .padding(.top, (150 - 70) / 2)  // vertically centre against the 150pt strip
                 }
@@ -9960,12 +10006,38 @@ struct PageInstrumentPreview: View {
 struct PageCropOverview: View {
     let page: PDFPage
     var offset: CGPoint = .zero
+    /// When set, the minimap is draggable: reports an incremental PDF-point delta to add
+    /// to the shared pan offset (direct manipulation — drag the indicator where you want it).
+    var onPanBy: ((CGSize) -> Void)? = nil
 
     /// Fixed display size for the minimap thumbnail.
     private let thumbWidth: CGFloat  = 52
     private let thumbHeight: CGFloat = 70
 
     @State private var thumbnailImage: NSImage?
+    @State private var lastDrag: CGSize = .zero
+
+    /// (pageW, pageH) in PDF points, honouring rotation.
+    private var pageDims: (w: CGFloat, h: CGFloat) {
+        let mediaBox = page.bounds(for: .mediaBox)
+        let rotation = ((page.rotation % 360) + 360) % 360
+        return rotation == 90 || rotation == 270
+            ? (mediaBox.height, mediaBox.width)
+            : (mediaBox.width,  mediaBox.height)
+    }
+
+    private var dragGesture: some Gesture {
+        DragGesture(minimumDistance: 1)
+            .onChanged { value in
+                let dims = pageDims
+                let dx = (value.translation.width  - lastDrag.width)  * (dims.w / thumbWidth)
+                let dy = (value.translation.height - lastDrag.height) * (dims.h / thumbHeight)
+                lastDrag = value.translation
+                // Drag the indicator: right → window right (+x); down → window down (−y).
+                onPanBy?(CGSize(width: dx, height: -dy))
+            }
+            .onEnded { _ in lastDrag = .zero }
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -9990,6 +10062,8 @@ struct PageCropOverview: View {
         .frame(width: thumbWidth, height: thumbHeight)
         .clipShape(RoundedRectangle(cornerRadius: 3))
         .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.gray.opacity(0.3), lineWidth: 1))
+        .contentShape(Rectangle())
+        .gesture(dragGesture, including: onPanBy == nil ? .subviews : .all)
         .task {
             thumbnailImage = await Self.renderThumbnailAsync(
                 page: page,
