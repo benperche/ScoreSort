@@ -72,3 +72,4 @@ These are non-obvious *whys* established across the sessions that built the app 
 
 - Work happens in a git worktree; merge and push directly to `main` — no extra feature branches needed.
 - When switching worktrees, remember to switch the branch in Xcode too.
+- **Commit (and push to `main`) after every substantial change** — i.e. at the end of each prompt that produces a working, building change, without waiting to be asked. Group the change into one descriptive commit; don't batch multiple prompts' worth of work into a single commit. Trivial/no-op changes don't need their own commit.
