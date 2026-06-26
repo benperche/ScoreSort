@@ -3361,11 +3361,14 @@ struct ScoreOrderSortView: View {
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            Text("Adds sequential prefixes based on detected instrument names.\nWorks with PDFs and image scans (JPG, PNG…). Drop several folders to rename them in a batch.")
+            Text("Adds sequential prefixes based on detected instrument names. Works with PDFs and image scans (JPG, PNG…). Drop several folders to rename them in a batch.")
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
+                .frame(maxWidth: 360)
+                .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 4)
         }
+        .padding(.horizontal, 32)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(
             RoundedRectangle(cornerRadius: 12)
@@ -3526,7 +3529,7 @@ struct ScoreOrderSortView: View {
                 Text("Folder \(batchPosition + 1) of \(batchFolders.count)")
                     .fontWeight(.semibold)
                 Text("·").foregroundColor(.secondary)
-                Text(batchFolders[batchPosition].lastPathComponent)
+                Text(qualifiedFolderName(for: batchFolders[batchPosition], among: batchFolders))
                     .foregroundColor(.secondary)
                     .lineLimit(1)
                     .truncationMode(.middle)
@@ -3544,7 +3547,7 @@ struct ScoreOrderSortView: View {
                     ForEach(upcoming, id: \.self) { url in
                         HStack(spacing: 6) {
                             Image(systemName: "folder").foregroundColor(.secondary)
-                            Text(url.lastPathComponent)
+                            Text(qualifiedFolderName(for: url, among: batchFolders))
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
@@ -3660,11 +3663,12 @@ private struct ScoreOrderRenameSummaryView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
                     if isBatch {
+                        let allFolders = perFolder!.compactMap { $0.folder }
                         ForEach(perFolder!.indices, id: \.self) { fi in
                             let entry = perFolder![fi]
                             HStack(spacing: 6) {
                                 Image(systemName: "folder.fill").foregroundColor(.accentColor)
-                                Text(entry.folder?.lastPathComponent ?? "Folder")
+                                Text(entry.folder.map { qualifiedFolderName(for: $0, among: allFolders) } ?? "Folder")
                                     .fontWeight(.semibold)
                                 Text("(\(entry.names.count))").foregroundColor(.secondary)
                             }
@@ -5063,6 +5067,24 @@ let renamableFileExtensions: Set<String> = ["pdf", "jpg", "jpeg", "png", "tif", 
 
 private func isRenamableFile(_ url: URL) -> Bool {
     renamableFileExtensions.contains(url.pathExtension.lowercased())
+}
+
+/// A concise, disambiguating display name for `url` relative to the deepest directory
+/// shared by every folder in `among` — e.g. "Concert Band › Symphony 5". Lets the batch
+/// queue/summary tell apart same-named folders in different parts of a nested tree.
+/// Falls back to the last path component when there's only one folder.
+func qualifiedFolderName(for url: URL, among all: [URL]) -> String {
+    guard all.count > 1 else { return url.lastPathComponent }
+    let target = url.standardizedFileURL.pathComponents
+    var common = target.count
+    for other in all where other.standardizedFileURL != url.standardizedFileURL {
+        let comps = other.standardizedFileURL.pathComponents
+        var i = 0
+        while i < common && i < comps.count && comps[i] == target[i] { i += 1 }
+        common = i
+    }
+    let tail = Array(target.dropFirst(common))
+    return tail.isEmpty ? url.lastPathComponent : tail.joined(separator: " › ")
 }
 
 class RenamerManager: ObservableObject {
