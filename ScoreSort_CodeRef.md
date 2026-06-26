@@ -461,6 +461,8 @@ When a new PDF loads, `fileSizes` is pre-populated via `splitSizesFromBookmarks`
 | `canFixBookletOrder: Bool` | `true` when the current file has ≥ 4 pages and page count is divisible by 4. |
 | `handleDeleteKey()` | Respects `skipMode`: `.page` → `toggleSkipPage(currentPage)`; `.file` → `toggleSkipFiles(selectedFileIndices or current file)`. |
 
+**Step-1 undo/redo** (⌘Z / ⌘⇧Z): a manual `[SplitSnapshot]` `undoStack`/`redoStack` (view-local `@State`, since the split state isn't in a manager). Each mutating marker/skip/stride action (`clearAllMarkers`, `applyStride`, `restrideFromCurrentPage`, `toggleSplitAt`, `toggleSkipFiles`, `toggleSkipPage`) calls `pushUndo()` first; a `SplitSnapshot` captures `fileSizes` + `skippedPages` + `customFileNames` (not the document). ⌘Z is handled in the **NSEvent local monitor** (keyCode 6, gated on `!inTextField`) — not a menu command — so it works without an Edit-menu `UndoManager` and never bonks. Stacks are cleared on new-doc load, clear, **and** any in-place document rebuild (the `suppressDocumentReset` path), because a page reorder would make snapshot skip-indices stale. Document-rebuild actions (swap/booklet/A3) are intentionally **not** undoable here.
+
 ### Pure split / A3 / booklet functions (top-level, above `SplitView`)
 
 | Function | Purpose |

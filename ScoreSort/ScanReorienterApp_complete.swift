@@ -6473,6 +6473,15 @@ func splitA3Pages(_ doc: PDFDocument, leftFirst: Bool) -> PDFDocument {
 // MARK: - Split View
 private enum SplitStage { case split, naming, prefix, summary }
 
+/// Snapshot of the undoable Step-1 split state (file boundaries, skipped pages, and
+/// custom names). Does not include the PDF document — document-rebuild actions (page
+/// swap, booklet reorder, A3 split) are not part of this undo stack.
+private struct SplitSnapshot {
+    var fileSizes: [Int]
+    var skippedPages: Set<Int>
+    var customFileNames: [Int: String]
+}
+
 /// Controls whether the Delete key (and the Skip button) targets a single page or
 /// the whole output file that contains the current page.
 enum SkipMode { case page, file }
@@ -6568,6 +6577,10 @@ struct SplitView: View {
     @State private var skippedPages: Set<Int> = []
     /// File indices currently highlighted in the output-files list (for multi-select + Delete).
     @State private var selectedFileIndices: Set<Int> = []
+    /// Undo/redo stacks for Step-1 split edits (markers, skips, stride). Captured as
+    /// view-local @State because the split state lives in this view, not a manager.
+    @State private var undoStack: [SplitSnapshot] = []
+    @State private var redoStack: [SplitSnapshot] = []
     /// Retained reference to the local NSEvent monitor that handles the delete key.
     @State private var splitViewKeyMonitor: Any?
     @State private var bookmarkNoticeVisible = false
@@ -6721,8 +6734,12 @@ struct SplitView: View {
         .onChange(of: pdfManager.pdfDocument) { _, newValue in
             if let doc = newValue {
                 // Page-swap replaces the document in-place: preserve all split state.
+                // But drop the undo history — a reorder (swap/booklet/A3) can make prior
+                // snapshots' page-based skip indices map onto the wrong pages.
                 if suppressDocumentReset {
                     suppressDocumentReset = false
+                    undoStack = []
+                    redoStack = []
                     return
                 }
 
@@ -6734,6 +6751,8 @@ struct SplitView: View {
                 skippedPages = []
                 selectedFileIndices = []
                 skipMode = .file
+                undoStack = []
+                redoStack = []
 
                 // Detect A3 landscape — pause and ask the user which half is page 1,
                 // unless this load was triggered by our own A3 processing pipeline.
@@ -6763,6 +6782,8 @@ struct SplitView: View {
                 skippedPages = []
                 selectedFileIndices = []
                 skipMode = .file
+                undoStack = []
+                redoStack = []
                 sourceWasTrashed = false
                 lastBookletOrder = nil
                 bookletRedoNoticeVisible = false
@@ -7197,9 +7218,18 @@ struct SplitView: View {
             // on macOS — the system routes it through a different responder path first.
             // A local NSEvent monitor catches it at the app level before that happens.
             splitViewKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                // Don't steal keys from text fields (stride stepper, name fields, etc.)
+                let inTextField = NSApp.keyWindow?.firstResponder is NSTextView
+                // ⌘Z / ⌘⇧Z — undo/redo Step-1 split edits. Caught here (not via a menu
+                // command) so it works without an Edit-menu UndoManager and never bonks.
+                if !inTextField, event.keyCode == 6, event.modifierFlags.contains(.command) {
+                    DispatchQueue.main.async {
+                        if event.modifierFlags.contains(.shift) { self.redoSplit() } else { self.undoSplit() }
+                    }
+                    return nil
+                }
                 guard event.keyCode == 51 || event.keyCode == 117 else { return event }
-                // Don't steal delete from text fields (stride stepper etc.)
-                if NSApp.keyWindow?.firstResponder is NSTextView { return event }
+                if inTextField { return event }
                 DispatchQueue.main.async { self.handleDeleteKey() }
                 return nil  // consume — prevents the system bonk
             }
@@ -7210,7 +7240,39 @@ struct SplitView: View {
         }
     } // end splitStageBody
     
+    // ── Undo / redo (Step 1 split edits) ──────────────────────────────────────
+    private func currentSplitSnapshot() -> SplitSnapshot {
+        SplitSnapshot(fileSizes: fileSizes, skippedPages: skippedPages, customFileNames: customFileNames)
+    }
+
+    /// Record the current state before a mutating action so ⌘Z can revert it.
+    private func pushUndo() {
+        undoStack.append(currentSplitSnapshot())
+        redoStack.removeAll()
+        if undoStack.count > 50 { undoStack.removeFirst() }
+    }
+
+    private func restoreSplit(_ s: SplitSnapshot) {
+        fileSizes = s.fileSizes
+        skippedPages = s.skippedPages
+        customFileNames = s.customFileNames
+        selectedFileIndices = []
+    }
+
+    private func undoSplit() {
+        guard let prev = undoStack.popLast() else { return }
+        redoStack.append(currentSplitSnapshot())
+        restoreSplit(prev)
+    }
+
+    private func redoSplit() {
+        guard let next = redoStack.popLast() else { return }
+        undoStack.append(currentSplitSnapshot())
+        restoreSplit(next)
+    }
+
     private func clearAllMarkers() {
+        pushUndo()
         fileSizes = totalPages > 0 ? [totalPages] : []
         customFileNames.removeAll()
         skippedPages = []
@@ -7218,6 +7280,7 @@ struct SplitView: View {
     }
 
     private func applyStride() {
+        pushUndo()
         fileSizes = splitSizes(totalPages: totalPages, stride: stride)
         customFileNames.removeAll()
         skippedPages = []
@@ -7234,6 +7297,7 @@ struct SplitView: View {
     ///   → fileSizes becomes [3, 4, 4, 4 …]
     private func restrideFromCurrentPage() {
         guard currentPage > 0, totalPages > currentPage else { return }
+        pushUndo()
 
         // Walk existing fileSizes, keeping every segment that ends at or before
         // currentPage.  If currentPage falls inside a segment, keep only the
@@ -7263,12 +7327,14 @@ struct SplitView: View {
     }
 
     private func toggleSplitAt(page: Int) {
+        pushUndo()
         fileSizes = toggleSplit(in: fileSizes, at: page)
     }
 
     /// Toggle skip on all pages of the given file indices.
     /// If every file in the set is already fully skipped, they are un-skipped; otherwise all are skipped.
     private func toggleSkipFiles(_ fileIndices: Set<Int>) {
+        pushUndo()
         let allFullySkipped = fileIndices.allSatisfy { isFileFullySkipped($0) }
         for idx in fileIndices {
             let pages = pagesForFile(idx)
@@ -7299,6 +7365,7 @@ struct SplitView: View {
 
     /// Toggle skip on a single page.
     private func toggleSkipPage(_ page: Int) {
+        pushUndo()
         if skippedPages.contains(page) {
             skippedPages.remove(page)
         } else {
