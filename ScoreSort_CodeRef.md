@@ -648,6 +648,9 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `SplitEnsembleInferenceTests` | `inferredSplitSuggestionEnsemble(_:)` — flute alone → nil, bowed string → orchestra, first part sax → jazz, sax-not-first → nil, strings beat sax, leading blanks skipped, case-insensitive, ambiguous band instruments → nil, upright/double bass → nil, empty → nil |
 | `SplitNumberedSuggestionTests` | `splitSuggestionTypicalPartCount` (trumpet 4, cornet 3, trombone 4, violin 3, alto/tenor sax 2, single-part = 1, unknown → 2); `splitSuggestionStartingNumberedName` cross-boundary (single-part next is bare e.g. "Bass Trombone", multi-part keeps "1", single→single bare, below typical → nil) |
 | `OutputDirectoryTests` | `outputDirectory(forSourceFile:)` — parent folder of source file, nil → nil |
+| `RenamableFileTests` | `isRenamableFile(_:)` — accepts PDF + all image extensions, case-insensitive, rejects non-media / no extension |
+| `QualifiedFolderNameTests` | `qualifiedFolderName(for:among:)` — single folder, distinct siblings, same-name-different-parent disambiguation, shared-parent collapse |
+| `JobFolderExpansionTests` | `expandToRenameJobFolders(_:)` — folder of PDFs = 1 job, parent-of-folders batches children, nested at any depth, image scans count, no-renamable → empty, parent + PDF subfolder both jobs |
 
 **Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; `applyBookletOrder` state mutations; UI/integration tests.
 

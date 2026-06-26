@@ -3102,53 +3102,20 @@ struct ScoreOrderSortView: View {
     /// just a batch of one, so the flow is identical to before for the common case.
     private func startInput(_ urls: [URL]) {
         renameResult = nil   // leave the done screen if we're on it
-        let folders = urls.filter { isDirectory($0) }
+        let folders = urls.filter { urlIsDirectory($0) }
         if folders.isEmpty {
             resetBatch()
             renamerManager.loadFiles(urls: urls)
             return
         }
-        let jobs = expandToJobFolders(folders)
-            .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        let jobs = expandToRenameJobFolders(folders)
         if jobs.isEmpty {
-            // No PDFs anywhere under the dropped folders — load the first one so the
-            // user sees its (empty) state rather than nothing happening.
+            // No renamable files anywhere under the dropped folders — load the first one
+            // so the user sees its (empty) state rather than nothing happening.
             resetBatch()
             renamerManager.loadFolder(url: folders[0])
         } else {
             beginBatch(jobs)
-        }
-    }
-
-    private func isDirectory(_ url: URL) -> Bool {
-        var isDir: ObjCBool = false
-        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
-    }
-
-    private func folderHasDirectRenamableFiles(_ url: URL) -> Bool {
-        let items = (try? FileManager.default.contentsOfDirectory(
-            at: url, includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants])) ?? []
-        return items.contains { renamableFileExtensions.contains($0.pathExtension.lowercased()) }
-    }
-
-    /// Turns dropped folders into batch jobs by walking each one recursively: **every**
-    /// directory at any depth that directly contains PDFs becomes a job. So dropping a
-    /// single folder of PDFs gives one job, while dropping a parent folder of (nested)
-    /// piece folders batches them all.
-    private func expandToJobFolders(_ folders: [URL]) -> [URL] {
-        var jobs: [URL] = []
-        for folder in folders { collectJobFolders(folder, into: &jobs) }
-        return jobs
-    }
-
-    private func collectJobFolders(_ folder: URL, into jobs: inout [URL]) {
-        if folderHasDirectRenamableFiles(folder) { jobs.append(folder) }
-        let subs = (try? FileManager.default.contentsOfDirectory(
-            at: folder, includingPropertiesForKeys: [.isDirectoryKey],
-            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants])) ?? []
-        for sub in subs where isDirectory(sub) {
-            collectJobFolders(sub, into: &jobs)
         }
     }
 
@@ -5034,8 +5001,37 @@ struct CombinerPreferencesView: View {
 /// prepends a prefix to the existing filename, so the original extension is preserved.
 let renamableFileExtensions: Set<String> = ["pdf", "jpg", "jpeg", "png", "tif", "tiff", "heic", "bmp", "gif"]
 
-private func isRenamableFile(_ url: URL) -> Bool {
+func isRenamableFile(_ url: URL) -> Bool {
     renamableFileExtensions.contains(url.pathExtension.lowercased())
+}
+
+func urlIsDirectory(_ url: URL) -> Bool {
+    var isDir: ObjCBool = false
+    return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+}
+
+func folderHasDirectRenamableFiles(_ url: URL) -> Bool {
+    let items = (try? FileManager.default.contentsOfDirectory(
+        at: url, includingPropertiesForKeys: nil,
+        options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants])) ?? []
+    return items.contains(where: isRenamableFile)
+}
+
+/// Turns dropped folders into batch rename jobs by walking each one recursively: every
+/// directory at any depth that directly contains renamable files becomes a job. A folder
+/// of PDFs is one job; a (nested) parent folder of piece folders batches them all.
+/// Result is sorted by full path so siblings group together.
+func expandToRenameJobFolders(_ folders: [URL]) -> [URL] {
+    var jobs: [URL] = []
+    func collect(_ folder: URL) {
+        if folderHasDirectRenamableFiles(folder) { jobs.append(folder) }
+        let subs = (try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants])) ?? []
+        for sub in subs where urlIsDirectory(sub) { collect(sub) }
+    }
+    for folder in folders { collect(folder) }
+    return jobs.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
 }
 
 /// Resolves file URLs from dropped `NSItemProvider`s and calls `completion` on the main

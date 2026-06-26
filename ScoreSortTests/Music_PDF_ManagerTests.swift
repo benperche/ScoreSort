@@ -1596,3 +1596,139 @@ struct OutputDirectoryTests {
         #expect(outputDirectory(forSourceFile: nil) == nil)
     }
 }
+
+// MARK: - Renamable file types
+// The Score Order Sorter renames PDFs and image scans; detection is filename-based.
+
+@Suite("Renamable file types")
+struct RenamableFileTests {
+
+    @Test func acceptsPDF() {
+        #expect(isRenamableFile(URL(fileURLWithPath: "/x/score.pdf")))
+    }
+
+    @Test func acceptsImages() {
+        for ext in ["jpg", "jpeg", "png", "tif", "tiff", "heic", "bmp", "gif"] {
+            #expect(isRenamableFile(URL(fileURLWithPath: "/x/scan.\(ext)")), "\(ext) should be renamable")
+        }
+    }
+
+    @Test func isCaseInsensitive() {
+        #expect(isRenamableFile(URL(fileURLWithPath: "/x/SCAN.PDF")))
+        #expect(isRenamableFile(URL(fileURLWithPath: "/x/Photo.JPG")))
+    }
+
+    @Test func rejectsNonMedia() {
+        for ext in ["txt", "doc", "mp3", "zip"] {
+            #expect(!isRenamableFile(URL(fileURLWithPath: "/x/file.\(ext)")), "\(ext) should not be renamable")
+        }
+        #expect(!isRenamableFile(URL(fileURLWithPath: "/x/noextension")))
+    }
+}
+
+// MARK: - Qualified folder names (batch queue / summary disambiguation)
+
+@Suite("Qualified folder names")
+struct QualifiedFolderNameTests {
+
+    @Test("A single folder shows just its own name")
+    func singleFolder() {
+        let a = URL(fileURLWithPath: "/Music/Band A/Parts")
+        #expect(qualifiedFolderName(for: a, among: [a]) == "Parts")
+    }
+
+    @Test("Distinct sibling names need no qualification")
+    func distinctSiblings() {
+        let a = URL(fileURLWithPath: "/Music/Symphony 1")
+        let b = URL(fileURLWithPath: "/Music/Symphony 2")
+        #expect(qualifiedFolderName(for: a, among: [a, b]) == "Symphony 1")
+    }
+
+    @Test("Same-named folders under different parents are disambiguated")
+    func sameNameDifferentParents() {
+        let a = URL(fileURLWithPath: "/Music/Band A/Parts")
+        let b = URL(fileURLWithPath: "/Music/Band B/Parts")
+        #expect(qualifiedFolderName(for: a, among: [a, b]) == "Band A › Parts")
+        #expect(qualifiedFolderName(for: b, among: [a, b]) == "Band B › Parts")
+    }
+
+    @Test("Siblings under a shared parent collapse to their own names")
+    func siblingsUnderSharedParent() {
+        let a = URL(fileURLWithPath: "/Music/Band/Parts")
+        let b = URL(fileURLWithPath: "/Music/Band/Score")
+        #expect(qualifiedFolderName(for: a, among: [a, b]) == "Parts")
+    }
+}
+
+// MARK: - Batch job-folder expansion (Score Order Sorter)
+// `expandToRenameJobFolders` walks dropped folders and returns every directory (any
+// depth) that directly contains a renamable file.
+
+@Suite("Batch job folder expansion")
+struct JobFolderExpansionTests {
+
+    var root: URL
+
+    init() throws {
+        root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+    }
+
+    /// Ensures a directory exists at `path` (relative to root) and returns its URL.
+    @discardableResult
+    func dir(_ path: String) throws -> URL {
+        let u = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: u, withIntermediateDirectories: true)
+        return u
+    }
+
+    /// Creates an (empty) file at `path` (relative to root), making parent dirs as needed.
+    func file(_ path: String) throws {
+        let u = root.appendingPathComponent(path)
+        try FileManager.default.createDirectory(at: u.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try "x".write(to: u, atomically: true, encoding: .utf8)
+    }
+
+    @Test mutating func folderWithPDFsIsOneJob() throws {
+        try file("Band/flute.pdf")
+        try file("Band/oboe.pdf")
+        let jobs = expandToRenameJobFolders([try dir("Band")])
+        #expect(jobs.map { $0.lastPathComponent } == ["Band"])
+    }
+
+    @Test mutating func parentOfFoldersBatchesChildren() throws {
+        try file("Parent/Band A/flute.pdf")
+        try file("Parent/Band B/flute.pdf")
+        let jobs = expandToRenameJobFolders([try dir("Parent")])
+        #expect(jobs.map { $0.lastPathComponent } == ["Band A", "Band B"])
+    }
+
+    @Test mutating func discoversNestedFoldersAtAnyDepth() throws {
+        try file("Top/A/parts/flute.pdf")
+        try file("Top/B/inner/parts/flute.pdf")
+        let jobs = expandToRenameJobFolders([try dir("Top")])
+        #expect(jobs.count == 2)
+        #expect(jobs.allSatisfy { $0.lastPathComponent == "parts" })
+    }
+
+    @Test mutating func imageScansCountAsJobs() throws {
+        try file("Scans/flute.jpg")
+        try file("Scans/oboe.png")
+        let jobs = expandToRenameJobFolders([try dir("Scans")])
+        #expect(jobs.map { $0.lastPathComponent } == ["Scans"])
+    }
+
+    @Test mutating func foldersWithNoRenamableFilesYieldNoJobs() throws {
+        try file("Docs/readme.txt")
+        let jobs = expandToRenameJobFolders([try dir("Docs")])
+        #expect(jobs.isEmpty)
+    }
+
+    @Test mutating func parentAndPDFSubfolderAreBothJobs() throws {
+        try file("Mix/score.pdf")          // direct PDFs → Mix is a job
+        try file("Mix/sub/flute.pdf")      // PDF subfolder → Mix/sub is also a job
+        let jobs = expandToRenameJobFolders([try dir("Mix")])
+        #expect(jobs.count == 2)
+        #expect(Set(jobs.map { $0.lastPathComponent }) == ["Mix", "sub"])
+    }
+}
