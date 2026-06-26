@@ -3024,6 +3024,15 @@ struct ScoreOrderSortView: View {
     @State private var isListDropTargeted = false
     @State private var renameResult: (folderURL: URL?, names: [String])? = nil
 
+    // ── Batch state ───────────────────────────────────────────────────────
+    /// Ordered folders in the current batch. `count <= 1` means non-batch (single
+    /// folder); the batch UI only appears when `count > 1`.
+    @State private var batchFolders: [URL] = []
+    /// Index of the folder currently loaded for review within `batchFolders`.
+    @State private var batchPosition: Int = 0
+    /// Per-folder results accumulated as each folder is renamed (for the final summary).
+    @State private var batchResults: [(folder: URL?, names: [String])] = []
+
     // ── Selection state ───────────────────────────────────────────────────
     /// IDs of currently-selected operations (stable across re-scans).
     @State private var selectedIDs: Set<String> = []
@@ -3075,6 +3084,132 @@ struct ScoreOrderSortView: View {
         lastClickedID = nil
     }
 
+    /// Handles a folder/file drop that (re)starts the rename flow. Used by both the
+    /// empty drop zone and the "done" summary screen, so finishing a job and dropping a
+    /// new folder restarts immediately without clicking Start Over. `loadFolder`/`loadFiles`
+    /// fully reset the manager; clearing `renameResult` leaves the done screen.
+    private func handleRestartDrop(_ providers: [NSItemProvider]) -> Bool {
+        var collectedURLs: [URL] = []
+        let group = DispatchGroup()
+        for provider in providers {
+            group.enter()
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                if let url = url { collectedURLs.append(url) }
+                group.leave()
+            }
+        }
+        group.notify(queue: .main) {
+            guard !collectedURLs.isEmpty else { return }
+            startInput(collectedURLs)
+        }
+        return true
+    }
+
+    // ── Batch import / queue ──────────────────────────────────────────────
+    /// Routes a set of imported URLs: any folders start a batch (one job each); a pure
+    /// file selection loads as individual files (current behaviour). A single folder is
+    /// just a batch of one, so the flow is identical to before for the common case.
+    private func startInput(_ urls: [URL]) {
+        renameResult = nil   // leave the done screen if we're on it
+        let folders = urls.filter { isDirectory($0) }
+        if folders.isEmpty {
+            resetBatch()
+            renamerManager.loadFiles(urls: urls)
+            return
+        }
+        let jobs = expandToJobFolders(folders)
+            .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
+        if jobs.isEmpty {
+            // No PDFs anywhere under the dropped folders — load the first one so the
+            // user sees its (empty) state rather than nothing happening.
+            resetBatch()
+            renamerManager.loadFolder(url: folders[0])
+        } else {
+            beginBatch(jobs)
+        }
+    }
+
+    private func isDirectory(_ url: URL) -> Bool {
+        var isDir: ObjCBool = false
+        return FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) && isDir.boolValue
+    }
+
+    private func folderHasDirectPDFs(_ url: URL) -> Bool {
+        let items = (try? FileManager.default.contentsOfDirectory(
+            at: url, includingPropertiesForKeys: nil,
+            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants])) ?? []
+        return items.contains { renamableFileExtensions.contains($0.pathExtension.lowercased()) }
+    }
+
+    /// Turns dropped folders into batch jobs by walking each one recursively: **every**
+    /// directory at any depth that directly contains PDFs becomes a job. So dropping a
+    /// single folder of PDFs gives one job, while dropping a parent folder of (nested)
+    /// piece folders batches them all.
+    private func expandToJobFolders(_ folders: [URL]) -> [URL] {
+        var jobs: [URL] = []
+        for folder in folders { collectJobFolders(folder, into: &jobs) }
+        return jobs
+    }
+
+    private func collectJobFolders(_ folder: URL, into jobs: inout [URL]) {
+        if folderHasDirectPDFs(folder) { jobs.append(folder) }
+        let subs = (try? FileManager.default.contentsOfDirectory(
+            at: folder, includingPropertiesForKeys: [.isDirectoryKey],
+            options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants])) ?? []
+        for sub in subs where isDirectory(sub) {
+            collectJobFolders(sub, into: &jobs)
+        }
+    }
+
+    private func beginBatch(_ folders: [URL]) {
+        batchFolders = folders
+        batchPosition = 0
+        batchResults = []
+        renameResult = nil
+        renamerManager.loadFolder(url: folders[0])
+    }
+
+    private func resetBatch() {
+        batchFolders = []
+        batchPosition = 0
+        batchResults = []
+    }
+
+    /// True when more than one folder is queued — drives the batch UI.
+    private var isBatchActive: Bool { batchFolders.count > 1 }
+
+    /// Advances to the next folder in the batch, or finishes by showing the combined
+    /// summary. Called after a rename (`recordResult` carries that folder's outcome) or
+    /// from Skip (`recordResult == nil`).
+    private func advanceOrFinish(recordResult: (folder: URL?, names: [String])?) {
+        if let recordResult { batchResults.append(recordResult) }
+        if batchPosition + 1 < batchFolders.count {
+            batchPosition += 1
+            selectedIDs = []
+            lastClickedID = nil
+            renamerManager.loadFolder(url: batchFolders[batchPosition])
+        } else {
+            // Finished — trigger the Done screen. The combined summary renders from
+            // batchResults when >1; otherwise we point at the last *renamed* folder
+            // (not a trailing skip, which appends nothing) so its files still show.
+            renameResult = (folderURL: batchResults.last?.folder,
+                            names: batchResults.last?.names ?? [])
+        }
+    }
+
+    /// Skip the current folder without renaming it, advancing to the next (or finishing).
+    private func skipCurrent() {
+        advanceOrFinish(recordResult: nil)
+    }
+
+    /// Reorders only the *upcoming* tail of the queue (folders after the current one).
+    private func moveUpcoming(from source: IndexSet, to destination: Int) {
+        let head = Array(batchFolders[...batchPosition])           // done + current (fixed)
+        var tail = Array(batchFolders[(batchPosition + 1)...])     // upcoming (reorderable)
+        tail.move(fromOffsets: source, toOffset: destination)
+        batchFolders = head + tail
+    }
+
     /// Other PDF files in the same folder as the currently-loaded individual files
     /// that haven't been added yet. Nil when irrelevant (folder-mode load, files
     /// span multiple folders, or there are no additional files).
@@ -3086,7 +3221,7 @@ struct ScoreOrderSortView: View {
         let all = (try? FileManager.default.contentsOfDirectory(
             at: folder, includingPropertiesForKeys: nil,
             options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
-        ))?.filter { $0.pathExtension.lowercased() == "pdf" } ?? []
+        ))?.filter { renamableFileExtensions.contains($0.pathExtension.lowercased()) } ?? []
         let existing = Set(files.map { $0.standardizedFileURL })
         let extra = all.filter { !existing.contains($0.standardizedFileURL) }
         return extra.isEmpty ? nil : extra
@@ -3098,8 +3233,10 @@ struct ScoreOrderSortView: View {
             ScoreOrderRenameSummaryView(
                 renamedNames: result.names,
                 folderURL: result.folderURL,
+                perFolder: batchResults.count > 1 ? batchResults : nil,
                 onStartOver: {
                     renameResult = nil
+                    resetBatch()
                     renamerManager.clearFolder()
                 },
                 onRescan: {
@@ -3107,6 +3244,8 @@ struct ScoreOrderSortView: View {
                     renamerManager.scanFolder()
                 }
             )
+            // Drop a new folder/files here to restart without clicking Start Over.
+            .onDrop(of: [.fileURL], isTargeted: nil) { providers in handleRestartDrop(providers) }
         } else {
             VStack(spacing: 0) {
                 // ── Top toolbar ───────────────────────────────────────────────
@@ -3143,19 +3282,25 @@ struct ScoreOrderSortView: View {
                             Label("Preferences", systemImage: "gearshape")
                         }
                         Button(action: {
+                            resetBatch()
                             renamerManager.clearFolder()
                             selectedIDs = []
                             lastClickedID = nil
                         }) {
-                            Label("Clear Files", systemImage: "xmark.circle.fill")
+                            Label(isBatchActive ? "Cancel Batch" : "Clear Files", systemImage: "xmark.circle.fill")
                         }
-                        .help("Remove all files and start over")
+                        .help(isBatchActive ? "Stop the batch and clear all folders" : "Remove all files and start over")
                     }
                 }
                 .padding()
                 .background(Color(NSColor.windowBackgroundColor))
 
                 Divider()
+
+                if isBatchActive && renamerManager.hasContent {
+                    batchQueueBar
+                    Divider()
+                }
 
                 if renamerManager.hasContent {
                     fileListView
@@ -3206,17 +3351,17 @@ struct ScoreOrderSortView: View {
             Text("Select Files or Folder")
                 .font(.title2)
                 .fontWeight(.medium)
-            Text("Drag a folder or PDF files here")
+            Text("Drag one or more folders (or PDF / image files) here")
                 .font(.callout)
                 .foregroundColor(isFolderTargeted ? .accentColor : .secondary)
             Text("or")
                 .foregroundColor(.secondary)
             Button(action: selectFolder) {
-                Label("Choose Files or Folder", systemImage: "folder")
+                Label("Choose Files or Folders", systemImage: "folder")
             }
             .buttonStyle(.borderedProminent)
             .controlSize(.large)
-            Text("Adds sequential prefixes based on detected instrument names")
+            Text("Adds sequential prefixes based on detected instrument names.\nWorks with PDFs and image scans (JPG, PNG…). Drop several folders to rename them in a batch.")
                 .multilineTextAlignment(.center)
                 .foregroundColor(.secondary)
                 .padding(.top, 4)
@@ -3231,27 +3376,7 @@ struct ScoreOrderSortView: View {
                 .padding()
         )
         .onDrop(of: [.fileURL], isTargeted: $isFolderTargeted) { providers in
-            var collectedURLs: [URL] = []
-            let group = DispatchGroup()
-            for provider in providers {
-                group.enter()
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    if let url = url { collectedURLs.append(url) }
-                    group.leave()
-                }
-            }
-            group.notify(queue: .main) {
-                guard !collectedURLs.isEmpty else { return }
-                var isDirectory: ObjCBool = false
-                if collectedURLs.count == 1,
-                   FileManager.default.fileExists(atPath: collectedURLs[0].path, isDirectory: &isDirectory),
-                   isDirectory.boolValue {
-                    renamerManager.loadFolder(url: collectedURLs[0])
-                } else {
-                    renamerManager.loadFiles(urls: collectedURLs)
-                }
-            }
-            return true
+            handleRestartDrop(providers)
         }
     }
 
@@ -3390,6 +3515,53 @@ struct ScoreOrderSortView: View {
         }
     }
 
+    // ── Batch queue bar ───────────────────────────────────────────────────
+    private var batchQueueBar: some View {
+        let upcoming = batchPosition + 1 < batchFolders.count
+            ? Array(batchFolders[(batchPosition + 1)...]) : []
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 10) {
+                Image(systemName: "square.stack.3d.up.fill")
+                    .foregroundColor(.accentColor)
+                Text("Folder \(batchPosition + 1) of \(batchFolders.count)")
+                    .fontWeight(.semibold)
+                Text("·").foregroundColor(.secondary)
+                Text(batchFolders[batchPosition].lastPathComponent)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button(action: skipCurrent) {
+                    Label("Skip Folder", systemImage: "forward.end")
+                }
+                .help("Skip this folder without renaming it and move to the next")
+            }
+            if !upcoming.isEmpty {
+                Text("Up next — drag to reorder")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                List {
+                    ForEach(upcoming, id: \.self) { url in
+                        HStack(spacing: 6) {
+                            Image(systemName: "folder").foregroundColor(.secondary)
+                            Text(url.lastPathComponent)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
+                        .listRowSeparator(.hidden)
+                    }
+                    .onMove(perform: moveUpcoming)
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .frame(height: min(CGFloat(upcoming.count) * 26 + 8, 132))
+            }
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 10)
+        .background(Color.accentColor.opacity(0.06))
+    }
+
     // ── Bottom controls ───────────────────────────────────────────────────
     private var bottomControlsView: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -3412,10 +3584,12 @@ struct ScoreOrderSortView: View {
                 Spacer()
                 Button {
                     renamerManager.executeRename { folderURL, names in
-                        renameResult = (folderURL: folderURL, names: names)
+                        advanceOrFinish(recordResult: (folder: folderURL, names: names))
                     }
                 } label: {
-                    Label("Rename Files", systemImage: "checkmark.circle.fill")
+                    Label(isBatchActive && batchPosition + 1 < batchFolders.count
+                          ? "Rename & Next" : "Rename Files",
+                          systemImage: "checkmark.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
@@ -3432,21 +3606,13 @@ struct ScoreOrderSortView: View {
         panel.canChooseFiles = true
         panel.canChooseDirectories = true
         panel.allowsMultipleSelection = true
-        panel.allowedContentTypes = [.pdf, .folder]
+        panel.allowedContentTypes = [.pdf, .image, .folder]
         panel.canCreateDirectories = false
-        panel.title = "Select PDF Files or Folder"
-        panel.message = "Choose a folder, or select individual PDF files to rename"
+        panel.title = "Select Files or Folders"
+        panel.message = "Choose one or more folders to rename in a batch, or select individual PDF/image files"
         panel.begin { response in
             guard response == .OK else { return }
-            let urls = panel.urls
-            var isDirectory: ObjCBool = false
-            if urls.count == 1,
-               FileManager.default.fileExists(atPath: urls[0].path, isDirectory: &isDirectory),
-               isDirectory.boolValue {
-                renamerManager.loadFolder(url: urls[0])
-            } else {
-                renamerManager.loadFiles(urls: urls)
-            }
+            startInput(panel.urls)
         }
     }
 }
@@ -3457,8 +3623,15 @@ struct ScoreOrderSortView: View {
 private struct ScoreOrderRenameSummaryView: View {
     let renamedNames: [String]
     let folderURL: URL?
+    /// Non-nil with >1 entry → render a combined multi-folder batch summary (Rescan hidden).
+    var perFolder: [(folder: URL?, names: [String])]? = nil
     let onStartOver: () -> Void
     let onRescan: () -> Void
+
+    private var isBatch: Bool { (perFolder?.count ?? 0) > 1 }
+    private var totalFileCount: Int {
+        isBatch ? (perFolder ?? []).reduce(0) { $0 + $1.names.count } : renamedNames.count
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -3469,8 +3642,13 @@ private struct ScoreOrderRenameSummaryView: View {
                     .foregroundColor(.green)
                 Text("Done!")
                     .font(.title).fontWeight(.bold)
-                Text("\(renamedNames.count) file\(renamedNames.count == 1 ? "" : "s") renamed successfully.")
-                    .foregroundColor(.secondary)
+                if isBatch {
+                    Text("\(perFolder!.count) folders · \(totalFileCount) file\(totalFileCount == 1 ? "" : "s") renamed successfully.")
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("\(renamedNames.count) file\(renamedNames.count == 1 ? "" : "s") renamed successfully.")
+                        .foregroundColor(.secondary)
+                }
             }
             .frame(maxWidth: .infinity)
             .padding(.top, 36)
@@ -3481,17 +3659,26 @@ private struct ScoreOrderRenameSummaryView: View {
             // ── File list ─────────────────────────────────────────────────
             ScrollView {
                 VStack(alignment: .leading, spacing: 4) {
-                    ForEach(renamedNames.indices, id: \.self) { i in
-                        HStack(spacing: 8) {
-                            Image(systemName: "doc.fill")
-                                .foregroundColor(.accentColor)
-                                .font(.caption)
-                            Text(renamedNames[i])
-                                .font(.system(.body, design: .monospaced))
-                                .lineLimit(1)
+                    if isBatch {
+                        ForEach(perFolder!.indices, id: \.self) { fi in
+                            let entry = perFolder![fi]
+                            HStack(spacing: 6) {
+                                Image(systemName: "folder.fill").foregroundColor(.accentColor)
+                                Text(entry.folder?.lastPathComponent ?? "Folder")
+                                    .fontWeight(.semibold)
+                                Text("(\(entry.names.count))").foregroundColor(.secondary)
+                            }
+                            .padding(.horizontal)
+                            .padding(.top, fi == 0 ? 0 : 8)
+                            .padding(.bottom, 2)
+                            ForEach(entry.names.indices, id: \.self) { i in
+                                fileRow(entry.names[i]).padding(.leading, 16)
+                            }
                         }
-                        .padding(.horizontal)
-                        .padding(.vertical, 2)
+                    } else {
+                        ForEach(renamedNames.indices, id: \.self) { i in
+                            fileRow(renamedNames[i])
+                        }
                     }
                 }
                 .padding(.vertical, 12)
@@ -3506,7 +3693,8 @@ private struct ScoreOrderRenameSummaryView: View {
                 }
                 .buttonStyle(.bordered)
 
-                if let url = folderURL {
+                // Show in Finder only makes sense for a single folder.
+                if !isBatch, let url = folderURL {
                     Button {
                         NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: url.path)
                     } label: {
@@ -3517,15 +3705,34 @@ private struct ScoreOrderRenameSummaryView: View {
 
                 Spacer()
 
-                Button(action: onRescan) {
-                    Label("Rescan Folder", systemImage: "arrow.clockwise")
+                // Rescan only applies to a single finished folder, not a multi-folder batch.
+                if !isBatch {
+                    Button(action: onRescan) {
+                        Label("Rescan Folder", systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .help("Rescan the folder to review or continue renaming")
                 }
-                .buttonStyle(.borderedProminent)
-                .help("Rescan the folder to review or continue renaming")
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
         }
+    }
+
+    private func fileRow(_ name: String) -> some View {
+        // No trailing Spacer: rows stay intrinsic-width so the VStack collapses to the
+        // widest row and the vertical ScrollView centres the whole block (matching the
+        // original single-folder summary).
+        HStack(spacing: 8) {
+            Image(systemName: "doc.fill")
+                .foregroundColor(.accentColor)
+                .font(.caption)
+            Text(name)
+                .font(.system(.body, design: .monospaced))
+                .lineLimit(1)
+        }
+        .padding(.horizontal)
+        .padding(.vertical, 2)
     }
 }
 
@@ -3853,6 +4060,8 @@ struct BulkRenameView: View {
                     clearFiles()
                 }
             )
+            // Drop a new folder/files here to restart without clicking Start Over.
+            .onDrop(of: [.fileURL], isTargeted: nil) { providers in handleRestartDrop(providers) }
         case .prefix:
             PrefixOrderStepView(
                 stepLabel: "Step 2",
@@ -3930,37 +4139,7 @@ struct BulkRenameView: View {
                 .padding()
         )
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
-            var collected: [URL] = []
-            let group = DispatchGroup()
-            for provider in providers {
-                group.enter()
-                _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                    // Dispatch to main to avoid concurrent array mutation (race condition).
-                    DispatchQueue.main.async {
-                        if let url = url { collected.append(url) }
-                        group.leave()
-                    }
-                }
-            }
-            group.notify(queue: .main) {
-                guard !collected.isEmpty else { return }
-                var isDir: ObjCBool = false
-                if collected.count == 1,
-                   FileManager.default.fileExists(atPath: collected[0].path, isDirectory: &isDir),
-                   isDir.boolValue {
-                    loadFromFolder(collected[0])
-                } else {
-                    let pdfs = collected.filter { $0.pathExtension.lowercased() == "pdf" }
-                    if pdfs.isEmpty {
-                        showNSAlert(title: "Unsupported File Type",
-                                    message: "The naming stage only accepts PDF files.",
-                                    isError: true)
-                    } else {
-                        loadFiles(pdfs)
-                    }
-                }
-            }
-            return true
+            handleRestartDrop(providers)
         }
     }
 
@@ -4134,6 +4313,55 @@ struct BulkRenameView: View {
         suffixes = [:]
         previewOffset = .zero
         hasFiles = false
+    }
+
+    /// Handles a folder/file drop that (re)starts the flow. Used by both the empty drop
+    /// zone and the "done" summary screen, so finishing a job and dropping new files
+    /// restarts immediately without clicking Start Over.
+    private func handleRestartDrop(_ providers: [NSItemProvider]) -> Bool {
+        var collected: [URL] = []
+        let group = DispatchGroup()
+        for provider in providers {
+            group.enter()
+            _ = provider.loadObject(ofClass: URL.self) { url, _ in
+                DispatchQueue.main.async {
+                    if let url = url { collected.append(url) }
+                    group.leave()
+                }
+            }
+        }
+        group.notify(queue: .main) {
+            guard !collected.isEmpty else { return }
+            var isDir: ObjCBool = false
+            let isFolder = collected.count == 1
+                && FileManager.default.fileExists(atPath: collected[0].path, isDirectory: &isDir)
+                && isDir.boolValue
+            let pdfs = collected.filter { $0.pathExtension.lowercased() == "pdf" }
+            if isFolder {
+                // Bulk Part Rename works on the PDFs inside a single folder. A folder of
+                // subfolders (a batch) belongs to the Score Order Sorter, not here.
+                let directPDFs = (try? FileManager.default.contentsOfDirectory(
+                    at: collected[0], includingPropertiesForKeys: nil,
+                    options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]))?
+                    .contains { $0.pathExtension.lowercased() == "pdf" } ?? false
+                if !directPDFs {
+                    showNSAlert(title: "No PDFs in That Folder",
+                                message: "“\(collected[0].lastPathComponent)” doesn’t contain PDF files directly. Bulk Part Rename works on the PDFs inside a single folder. To rename several folders in one go, use the Score Order Sorter on the left side of the Rename Files tab.",
+                                isError: true)
+                    return
+                }
+            } else if pdfs.isEmpty {
+                showNSAlert(title: "Unsupported File Type",
+                            message: "The naming stage only accepts PDF files.",
+                            isError: true)
+                return
+            }
+            // Reset to a clean Step 1, leaving the summary screen if we're on it.
+            baseFileName = ""
+            bulkStage = .base
+            if isFolder { loadFromFolder(collected[0]) } else { loadFiles(pdfs) }
+        }
+        return true
     }
 
     // ── Rename execution ──────────────────────────────────────────────────
@@ -4827,6 +5055,16 @@ struct CombinerPreferencesView: View {
 }
 
 // MARK: - Renamer Manager
+
+/// File types the renamer picks up and renames: PDFs plus common image formats — some
+/// libraries store sheet music as scans (JPG/PNG/etc.) rather than PDFs. Renaming only
+/// prepends a prefix to the existing filename, so the original extension is preserved.
+let renamableFileExtensions: Set<String> = ["pdf", "jpg", "jpeg", "png", "tif", "tiff", "heic", "bmp", "gif"]
+
+private func isRenamableFile(_ url: URL) -> Bool {
+    renamableFileExtensions.contains(url.pathExtension.lowercased())
+}
+
 class RenamerManager: ObservableObject {
     @Published var folderURL: URL?
     /// Files loaded directly (when the user drags in individual PDFs rather than a folder).
@@ -4896,10 +5134,10 @@ class RenamerManager: ObservableObject {
         scanFolder()
     }
 
-    /// Load individual PDF files directly (no enclosing folder required).
+    /// Load individual files directly (no enclosing folder required). Accepts PDFs and images.
     func loadFiles(urls: [URL]) {
         self.folderURL = nil
-        self.directFiles = urls.filter { $0.pathExtension.lowercased() == "pdf" }
+        self.directFiles = urls.filter(isRenamableFile)
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         self.manualOverrides = [:]
         self.excludedNames = []
@@ -4912,7 +5150,7 @@ class RenamerManager: ObservableObject {
     /// expands the folder's contents into `directFiles` first (so the user can
     /// see and manipulate the full list) before merging the new URLs in.
     func addFiles(urls: [URL]) {
-        let newPDFs = urls.filter { $0.pathExtension.lowercased() == "pdf" }
+        let newPDFs = urls.filter(isRenamableFile)
         guard !newPDFs.isEmpty else { return }
 
         if let folder = folderURL {
@@ -4920,7 +5158,7 @@ class RenamerManager: ObservableObject {
             let existing = (try? FileManager.default.contentsOfDirectory(
                 at: folder, includingPropertiesForKeys: nil,
                 options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
-            ))?.filter { $0.pathExtension.lowercased() == "pdf" }
+            ))?.filter(isRenamableFile)
               .sorted { $0.lastPathComponent < $1.lastPathComponent } ?? []
             folderURL = nil
             let existingSet = Set(existing.map { $0.standardizedFileURL })
@@ -5031,14 +5269,13 @@ class RenamerManager: ObservableObject {
             let fileManager = FileManager.default
             let searchRecursively = UserDefaults.standard.bool(forKey: "renamerSearchRecursively")
             if searchRecursively {
-                // Deep search: pick up PDFs anywhere inside the folder tree.
+                // Deep search: pick up renamable files anywhere inside the folder tree.
                 guard let enumerator = fileManager.enumerator(at: folderURL,
                                                               includingPropertiesForKeys: [.isRegularFileKey]) else {
                     return
                 }
                 pdfFiles = []
-                for case let fileURL as URL in enumerator
-                where fileURL.pathExtension.lowercased() == "pdf" {
+                for case let fileURL as URL in enumerator where isRenamableFile(fileURL) {
                     pdfFiles.append(fileURL)
                 }
             } else {
@@ -5048,7 +5285,7 @@ class RenamerManager: ObservableObject {
                     includingPropertiesForKeys: [.isRegularFileKey],
                     options: [.skipsHiddenFiles]
                 )) ?? []
-                pdfFiles = contents.filter { $0.pathExtension.lowercased() == "pdf" }
+                pdfFiles = contents.filter(isRenamableFile)
             }
             pdfFiles.sort { $0.lastPathComponent < $1.lastPathComponent }
         } else {
@@ -6437,6 +6674,9 @@ struct SplitView: View {
                         pdfManager.clearPDF() // onChange handles full state reset
                     }
                 )
+                // Drop a new PDF here to restart without clicking Start Over — loading a
+                // document fires the Group-level onChange, which resets the whole flow.
+                .onDrop(of: [.fileURL], isTargeted: nil) { providers in handleSummaryPDFDrop(providers) }
             case .prefix:
                 PrefixOrderStepView(
                     stepLabel: "Step 3",
@@ -7097,6 +7337,26 @@ struct SplitView: View {
                         isError: true)
             return false
         }
+    }
+
+    /// Loads a PDF dropped on the "done" summary screen, restarting the split flow.
+    /// The Group-level `onChange(of: pdfManager.pdfDocument)` resets all split state
+    /// (and re-runs A3 detection), so no extra cleanup is needed here.
+    private func handleSummaryPDFDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard let provider = providers.first else { return false }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let url = url else { return }
+            DispatchQueue.main.async {
+                if url.pathExtension.lowercased() == "pdf" {
+                    pdfManager.loadPDF(from: url)
+                } else {
+                    showNSAlert(title: "Unsupported File Type",
+                                message: "This tab only accepts PDF files.",
+                                isError: true)
+                }
+            }
+        }
+        return true
     }
 
     func saveSplitPDF() {

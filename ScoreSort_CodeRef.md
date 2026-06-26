@@ -321,6 +321,9 @@ Used in both `PresetSidebarView` and `CombinerPreferencesView`. Features:
 **Sheets:** `ManualAssignmentView` (uses `.sheet(item:)`), `AppPreferencesView` (⌘,)  
 **Row:** `FileRowView` — double-click triggers manual override sheet
 
+### Accepted file types
+The Score Order Sorter renames **PDFs and image scans** (JPG/JPEG/PNG/TIF/TIFF/HEIC/BMP/GIF) — detection is filename-based, and renaming only prepends a prefix to the existing filename so the original extension is preserved. The accepted set is the top-level `renamableFileExtensions` / `isRenamableFile(_:)` (just above `RenamerManager`), used by `scanFolder`, `loadFiles`, `addFiles`, the batch `folderHasDirectPDFs`, `additionalFolderFiles`, and the open panel (`[.pdf, .image, .folder]`). **Bulk Part Rename stays PDF-only** because it renders `PDFDocument` page previews; accidental pickups are handled by the existing "Don't Rename" exclude (`excludeSelected`/`setExcluded`).
+
 ### RenamerManager state
 ```swift
 folderURL: URL?
@@ -388,6 +391,16 @@ Written from built-in defaults on first launch (via `InstrumentOrders.setup()` c
 - Toolbar: Choose Folder | Change Folder | Preferences (⌘,) | Rescan for Errors.
 - Bottom: status text + "Rename Files" button (disabled if `renameCount == 0`).
 
+### Batch folder renaming (Score Order Sorter)
+Import **multiple folders at once** and process them one-by-one. All state is `@State` in `ScoreOrderSortView` (the queue is a UI-workflow concern; `RenamerManager` is unchanged and still single-folder):
+- `batchFolders: [URL]` (ordered jobs; `count <= 1` ⇒ non-batch, no batch UI), `batchPosition: Int` (current folder index), `batchResults: [(folder, names)]` (accumulated for the final summary). `isBatchActive == batchFolders.count > 1`.
+- **Import routing:** all entry points (`selectFolder` panel, empty-zone drop, and the done-screen restart drop) funnel through `startInput(_ urls:)` → folders go through `expandToJobFolders` then `beginBatch` (sorted, loads job 0); pure files ⇒ `loadFiles`. A single folder is just a batch of one.
+- **Container-folder expansion** (`expandToJobFolders` → recursive `collectJobFolders`): walks each dropped folder's whole subtree and makes **every directory at any depth that directly contains PDFs** a job. So a single folder of PDFs = one job; a (nested) parent folder of piece folders batches them all. Jobs sorted by full `path` (groups siblings; nested duplicate `lastPathComponent`s can look alike in the queue). Uses `folderHasDirectPDFs` / `isDirectory` helpers. (Bulk Part Rename is single-piece only: dropping a folder with no direct PDFs shows a "No PDFs in That Folder" alert pointing to the Score Order Sorter, rather than silently failing.)
+- **Advance:** the Rename button calls `executeRename { … advanceOrFinish(recordResult:) }`. `advanceOrFinish` appends the result then loads the next folder (staying on the review screen, no per-folder Done screen) or, when the queue is exhausted, sets `renameResult` to show the combined Done screen. The button label flips to **"Rename & Next"** mid-batch.
+- **Skip:** `skipCurrent()` = `advanceOrFinish(recordResult: nil)` (nothing appended). **Reorder:** `batchQueueBar` shows a `List` of the *upcoming* folders (`batchFolders[(batchPosition+1)...]`) with `.onMove(moveUpcoming)`, which reorders only the tail after the current folder.
+- **Final summary:** `ScoreOrderRenameSummaryView` takes an optional `perFolder: [(folder, names)]?`; when >1 it renders a grouped multi-folder summary ("N folders · M files", Rescan/Show-in-Finder hidden). `batchResults.last` backs the single-folder fallback so a trailing Skip doesn't blank the summary.
+- **Reset** (`resetBatch()`): Start Over, the toolbar button (labelled **"Cancel Batch"** mid-batch), and `beginBatch`.
+
 ---
 
 ## Tab 2 — Split PDF
@@ -435,6 +448,8 @@ When a new PDF loads, `fileSizes` is pre-populated via `splitSizesFromBookmarks`
 **Move original to Trash** — a `.checkbox` Toggle bound to `@AppStorage("deleteSourceAfterSplit")` (persisted, defaults off). It lives in **Step 2** (`SplitNamingStageView`), right-justified on the same row as the "Prefix score order" toggle/picker (after the `Spacer()`), so it's the last decision before saving. The key is shared between `SplitView` and `SplitNamingStageView` via `@AppStorage`. After a *successful* save, both save paths (`saveSplitPDF`'s non-prefix branch and `applyPrefixToFolder`) call `trashSourceFileIfRequested()`, which `FileManager.trashItem`s `pdfManager.sourceURL` (recoverable, not a hard delete) and returns whether it acted. The result is stored in `@State sourceWasTrashed` and passed to `RenameSummaryView` as `sourceTrashedNote` so the summary confirms "Original moved to the Trash." Trash failure is surfaced via `showNSAlert` but is non-fatal (split files are already written).
 
 **Clear buttons** — every tab's reset button is a standard bordered (square) `Button` with a full-rectangle hit target, **not** `.buttonStyle(.plain)` (the plain style only registered hits on the glyphs). Labels: **"Clear File"** (singular: Split Step 1, Split Step 2, Rotate) and **"Clear Files"** (plural: Combine, Rename Files, Bulk Part Rename).
+
+**Done/summary screens are drop targets** — each finished-job screen has an (invisible, no `isTargeted` highlight) `.onDrop(of: [.fileURL], isTargeted: nil)` so dropping a new folder/PDF restarts the flow without clicking Start Over: Score Order Sorter (`handleRestartDrop` → `startInput`, which clears `renameResult` and starts a batch or `loadFiles` — see Batch folder renaming), Bulk Part Rename (`handleRestartDrop` → resets `baseFileName`/`bulkStage = .base`, `loadFromFolder`/`loadFiles`), Splitter (`handleSummaryPDFDrop` → `pdfManager.loadPDF`, letting the Group-level `onChange` reset all split state + re-run A3 detection). The same `handleRestartDrop` helpers also back each tool's empty drop zone. Rotate and Combine have no summary screen, so nothing to add there.
 
 ### SplitView methods (booklet / A3)
 
