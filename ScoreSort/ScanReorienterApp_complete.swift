@@ -32,6 +32,8 @@ class CombineMenuState: ObservableObject {
     @Published var canGroup    = false
     @Published var hasFiles    = false
     @Published var isPanelOpen = false  // disables menu shortcuts while a file panel is open
+    @Published var isActiveTab = false  // disables the Combiner menu's bare-key shortcuts
+                                        // (↑ ↓ ⌫ c p) when another tab is on screen
 
     var removeSelected:          () -> Void = {}
     var moveUp:                  () -> Void = {}
@@ -72,51 +74,52 @@ struct CombinerCommands: Commands {
         CommandMenu("Combiner") {
             Button("Select Previous") { state.selectPrevious() }
                 .keyboardShortcut(.upArrow, modifiers: [])
-                .disabled(state.isPanelOpen || !state.hasFiles)
+                .disabled(!state.isActiveTab || state.isPanelOpen || !state.hasFiles)
 
             Button("Extend Selection Up") { state.selectPreviousExtending() }
                 .keyboardShortcut(.upArrow, modifiers: .shift)
-                .disabled(state.isPanelOpen || !state.hasFiles)
+                .disabled(!state.isActiveTab || state.isPanelOpen || !state.hasFiles)
 
             Button("Select Next") { state.selectNext() }
                 .keyboardShortcut(.downArrow, modifiers: [])
-                .disabled(state.isPanelOpen || !state.hasFiles)
+                .disabled(!state.isActiveTab || state.isPanelOpen || !state.hasFiles)
 
             Button("Extend Selection Down") { state.selectNextExtending() }
                 .keyboardShortcut(.downArrow, modifiers: .shift)
-                .disabled(state.isPanelOpen || !state.hasFiles)
+                .disabled(!state.isActiveTab || state.isPanelOpen || !state.hasFiles)
 
             Divider()
 
             Button("Move Up") { state.moveUp() }
                 .keyboardShortcut(.upArrow, modifiers: .command)
-                .disabled(state.isPanelOpen || !state.canMoveUp)
+                .disabled(!state.isActiveTab || state.isPanelOpen || !state.canMoveUp)
 
             Button("Move Down") { state.moveDown() }
                 .keyboardShortcut(.downArrow, modifiers: .command)
-                .disabled(state.isPanelOpen || !state.canMoveDown)
+                .disabled(!state.isActiveTab || state.isPanelOpen || !state.canMoveDown)
 
             Divider()
 
             Button("Remove Selected Files") { state.removeSelected() }
                 .keyboardShortcut(.delete, modifiers: [])
-                .disabled(state.isPanelOpen || !state.canRemove)
+                .disabled(!state.isActiveTab || state.isPanelOpen || !state.canRemove)
 
             Divider()
 
             Button("Group Selected Files") { state.group() }
                 .keyboardShortcut("c", modifiers: [])
-                .disabled(state.isPanelOpen || !state.canGroup)
+                .disabled(!state.isActiveTab || state.isPanelOpen || !state.canGroup)
 
             Divider()
 
             Button("Select All Files") { state.selectAll() }
-                .disabled(state.isPanelOpen || !state.hasFiles)
+                .disabled(!state.isActiveTab || state.isPanelOpen || !state.hasFiles)
 
             Divider()
 
             Button("Toggle Presets Panel") { state.togglePresetSidebar() }
                 .keyboardShortcut("p", modifiers: [])
+                .disabled(!state.isActiveTab)
         }
     }
 }
@@ -361,6 +364,7 @@ struct CombineView: View {
     @Binding var showingKeyboardHelp: Bool
     let menuState: CombineMenuState
     @EnvironmentObject var presetStore: EnsemblePresetStore
+    @EnvironmentObject private var appState: AppState
     @StateObject private var combineManager = CombineManager()
     @State private var addBlankPages = false
     @State private var isTargeted = false
@@ -395,9 +399,11 @@ struct CombineView: View {
             handleDrop(providers: providers)
             return true
         }
-        .onAppear { DispatchQueue.main.async { syncMenuClosures() } }
+        .onAppear { DispatchQueue.main.async { syncMenuClosures(); syncMenuFlags() } }
         .onChange(of: selectedFiles)          { DispatchQueue.main.async { syncMenuFlags() } }
         .onChange(of: combineManager.files)   { DispatchQueue.main.async { syncMenuFlags() } }
+        // Disable the Combiner menu's bare-key shortcuts the instant another tab is shown.
+        .onChange(of: appState.selectedTab)   { DispatchQueue.main.async { syncMenuFlags() } }
     }
 
     private var mainContent: some View {
@@ -618,6 +624,7 @@ struct CombineView: View {
                     .focusable()
                     .focused($listFocused)
                     .onKeyPress { press in
+                        guard appState.selectedTab == 0 else { return .ignored }   // Combine tab only
                         guard !menuState.isPanelOpen else { return .ignored }
                         let isShift = press.modifiers.contains(.shift)
                         switch press.key {
@@ -1108,6 +1115,7 @@ struct CombineView: View {
         menuState.canMoveDown = canMoveDown
         menuState.canGroup    = canGroup
         menuState.hasFiles    = !combineManager.files.isEmpty
+        menuState.isActiveTab = appState.selectedTab == 0
     }
 
     // MARK: - Apply Preset
@@ -3018,6 +3026,7 @@ struct RenamerView: View {
 // MARK: - Score Order Sort View
 struct ScoreOrderSortView: View {
     @EnvironmentObject private var renamerManager: RenamerManager
+    @EnvironmentObject private var appState: AppState
     @Environment(\.openSettings) private var openSettings
     @State private var selectedFileForAssignment: RenameOperation?
     @State private var isFolderTargeted = false
@@ -3267,6 +3276,9 @@ struct ScoreOrderSortView: View {
                             // needing SwiftUI focus on the list (which is unreliable for
                             // a non-text ScrollView on macOS).
                             keyEventMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                                // Only act on the Rename tab — this app-global monitor stays
+                                // installed across tab switches (TabView keeps tabs mounted).
+                                guard appState.selectedTab == 1 else { return event }
                                 // keyCode 51 = Delete/Backspace
                                 if event.keyCode == 51, !selectedIDs.isEmpty {
                                     excludeSelected()
@@ -6033,6 +6045,7 @@ struct RenameOperation: Identifiable {
 
 // MARK: - Rotate View
 struct RotateView: View {
+    @EnvironmentObject private var appState: AppState
     @StateObject private var pdfManager = PDFManager()
     @State private var baseRotation: RotationAngle = .none
     @State private var additionalRotationMode: RotationMode = .none
@@ -6189,6 +6202,7 @@ struct RotateView: View {
             }
         }
         .onKeyPress { press in
+            guard appState.selectedTab == 3 else { return .ignored }   // Rotate tab only
             guard pdfManager.pdfDocument != nil else { return .ignored }
             switch press.key {
             case .leftArrow:
@@ -6549,6 +6563,7 @@ struct BookletFixRequest: Identifiable {
 }
 
 struct SplitView: View {
+    @EnvironmentObject private var appState: AppState
     @StateObject private var pdfManager = PDFManager()
     // fileSizes stores the page count for each output file in order.
     // e.g. [2, 2, 1, 3] means 4 files with 2, 2, 1, and 3 pages respectively.
@@ -7140,6 +7155,7 @@ struct SplitView: View {
                         .frame(width: geometry.size.width * 0.5)
                     }
                     .onKeyPress { press in
+                        guard appState.selectedTab == 2 else { return .ignored }   // Split tab only
                         switch press.key {
                         case .leftArrow:
                             if press.modifiers.contains(.command) {
@@ -7218,6 +7234,10 @@ struct SplitView: View {
             // on macOS — the system routes it through a different responder path first.
             // A local NSEvent monitor catches it at the app level before that happens.
             splitViewKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+                // Only act while the Split tab is the one on screen — this app-global
+                // monitor would otherwise fire on other tabs (it stays installed because
+                // TabView keeps hidden tabs mounted).
+                guard appState.selectedTab == 2 else { return event }
                 // Don't steal keys from text fields (stride stepper, name fields, etc.)
                 let inTextField = NSApp.keyWindow?.firstResponder is NSTextView
                 // ⌘Z / ⌘⇧Z — undo/redo Step-1 split edits. Caught here (not via a menu

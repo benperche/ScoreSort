@@ -38,7 +38,9 @@ Window min size: 900×700.
 
 `CommandGroup(replacing: .appInfo)` replaces the system About panel with a button that calls `openWindow(id: "about")`, opening `AboutView` as a separate `Window` scene.
 
-**`CombineMenuState`** — `ObservableObject` shared between `CombineView` (writes) and `CombinerCommands` (reads). Carries `canRemove`, `canMoveUp`, `canMoveDown`, `canGroup`, `hasFiles`, `isPanelOpen` flags plus action closures (`removeSelected`, `moveUp`, `moveDown`, `group`, `selectAll`, navigation closures). `CombineView.syncMenuFlags()` + `syncMenuClosures()` keep it in sync via `.onAppear` and `.onChange`.
+**`CombineMenuState`** — `ObservableObject` shared between `CombineView` (writes) and `CombinerCommands` (reads). Carries `canRemove`, `canMoveUp`, `canMoveDown`, `canGroup`, `hasFiles`, `isPanelOpen`, `isActiveTab` flags plus action closures (`removeSelected`, `moveUp`, `moveDown`, `group`, `selectAll`, navigation closures). `CombineView.syncMenuFlags()` + `syncMenuClosures()` keep it in sync via `.onAppear` and `.onChange` (incl. `appState.selectedTab`).
+
+**Keyboard handlers are tab-scoped.** TabView keeps hidden tabs mounted, so handlers leak across tabs unless gated. Two mechanisms: (1) `CombinerCommands`' bare-key menu shortcuts (↑ ↓ ⇧↑ ⇧↓ ⌫ `c` `p`) are global menu key-equivalents that fire on any tab — every one is `.disabled(!state.isActiveTab || …)`, where `isActiveTab = appState.selectedTab == 0`. (2) Each tab's in-view `.onKeyPress` (Combine/Split/Rotate) and **app-global `NSEvent` local monitors** (renamer delete, splitter delete+⌘Z) early-out with `guard appState.selectedTab == <tab> else { return … }`. (Combine 0, Rename 1, Split 2, Rotate 3.) This fixed a bug where a populated Combine list captured ↑/↓ while the Split tab was on screen.
 
 **`ShortcutsHelpView`** — modal sheet listing all shortcuts grouped by Combine navigation, Combine file management, Combine collate groups, Combine presets, Tabs, Split/Rotate, and Renamer.
 
