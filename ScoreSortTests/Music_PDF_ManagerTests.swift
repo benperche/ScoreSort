@@ -1846,3 +1846,37 @@ struct PreferredInstrumentNameTests {
         }
     }
 }
+
+// MARK: - Next suggestion index (dropdown rotation start)
+
+@Suite("Next suggestion index")
+struct NextSuggestionIndexTests {
+
+    func name(_ order: [String], after prev: String, used: Set<String> = []) -> String? {
+        nextSuggestionIndex(after: prev, in: order, usedKeys: used).map { order[$0] }
+    }
+
+    @Test("Skips same-instrument aliases to the next distinct instrument")
+    func skipsAliases() {
+        let order = ["Alto Saxophone", "Sax Alto", "Tenor Saxophone", "Saxophone Tenor", "Sax Tenor", "Baritone Saxophone"]
+        #expect(name(order, after: "Tenor Saxophone") == "Baritone Saxophone")
+    }
+
+    @Test("After bass clarinet, offers a not-yet-used bassoon")
+    func bassoonAfterBassClarinet() {
+        let order = ["Bassoon", "Eb Clarinet", "Clarinet", "Bass Clarinet", "Alto Saxophone"]
+        #expect(name(order, after: "Bass Clarinet") == "Bassoon")
+    }
+
+    @Test("If bassoon was already used, bass clarinet rolls on normally")
+    func bassoonAlreadyUsed() {
+        let order = ["Bassoon", "Eb Clarinet", "Clarinet", "Bass Clarinet", "Alto Saxophone"]
+        #expect(name(order, after: "Bass Clarinet", used: ["bassoon"]) == "Alto Saxophone")
+    }
+
+    @Test("Unrecognised previous instrument yields nil (caller falls through)")
+    func unrecognisedYieldsNil() {
+        let order = ["Flute", "Oboe", "Clarinet"]
+        #expect(nextSuggestionIndex(after: "Theremin", in: order, usedKeys: []) == nil)
+    }
+}

@@ -9002,6 +9002,23 @@ func instrumentIdentityKey(_ name: String) -> String {
     return splitSuggestionGroupKey(splitSuggestionBaseName(name))
 }
 
+/// Index in `order` to start instrument suggestions from, given the most-recently-named
+/// instrument `prev` and the identity keys already used. Skips past aliases of `prev`
+/// (so "Tenor Saxophone" rolls to the next *distinct* instrument, not another tenor
+/// spelling); after a bass clarinet, offers a not-yet-used bassoon (some band sets group
+/// the bassoon with the low reeds). Returns nil when `prev` isn't a recognised instrument.
+func nextSuggestionIndex(after prev: String, in order: [String], usedKeys: Set<String>) -> Int? {
+    let prevKey = instrumentIdentityKey(prev)
+    if prevKey == "bass clarinet", !usedKeys.contains("bassoon"),
+       let bsn = order.firstIndex(where: { instrumentIdentityKey($0) == "bassoon" }) {
+        return bsn
+    }
+    guard let idx = order.firstIndex(where: { instrumentIdentityKey($0) == prevKey }) else { return nil }
+    var next = idx + 1
+    while next < order.count, instrumentIdentityKey(order[next]) == prevKey { next += 1 }
+    return min(next, order.count - 1)
+}
+
 /// Typical number of parts for common instrument families, **per ensemble** (used to
 /// decide when a suggestion should cross to the next instrument). Band (concert/wind
 /// band) is the base; jazz (big band) and orchestra override where they differ —
@@ -9269,15 +9286,17 @@ struct SplitFileNamingRow: View {
     /// Uses alias normalisation so "Alto Sax" and "Alto Saxophone" are treated
     /// as the same instrument family.
     private var nextExpectedIndex: Int {
+        // Instruments already named anywhere (by identity), so we can offer stragglers.
+        let usedKeys = Set(allSuffixes.values
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .map { instrumentIdentityKey($0) })
+
         for i in Swift.stride(from: fileIndex - 1, through: 0, by: -1) {
             let prev = (allSuffixes[i] ?? "").trimmingCharacters(in: .whitespaces)
-            if !prev.isEmpty {
-                let prevKey = splitSuggestionGroupKey(prev)
-                if let idx = instrumentNames.firstIndex(where: {
-                    splitSuggestionGroupKey($0) == prevKey
-                }) {
-                    return min(idx + 1, instrumentNames.count - 1)
-                }
+            guard !prev.isEmpty else { continue }
+            if let idx = nextSuggestionIndex(after: prev, in: instrumentNames, usedKeys: usedKeys) {
+                return idx
             }
         }
         return 0
