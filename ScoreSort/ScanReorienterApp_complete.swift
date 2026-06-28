@@ -10098,11 +10098,15 @@ struct PageInstrumentPreview: View {
     @State private var displayImage: NSImage?
 
     var body: some View {
-        Group {
+        // GeometryReader + top alignment: the crop strip is wider than it is tall, so a
+        // plain `.fill` clips the *vertical centre* — cutting the instrument name off the
+        // top of the page. Aligning the filled image to the top keeps the page top visible.
+        GeometryReader { geo in
             if let img = displayImage {
                 Image(nsImage: img)
                     .resizable()
                     .aspectRatio(contentMode: .fill)
+                    .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
                     .clipped()
             } else {
                 Color.gray.opacity(0.08)
