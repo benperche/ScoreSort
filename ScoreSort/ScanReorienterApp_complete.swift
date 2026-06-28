@@ -5617,7 +5617,7 @@ struct InstrumentOrders {
 
     // Bump this whenever the built-in defaults change so existing JSON files
     // are automatically regenerated on next launch.
-    private static let defaultsVersion = 3
+    private static let defaultsVersion = 4
 
     // MARK: - Loaded state (populated by setup())
     private static var loaded: [String: [String]] = [:]
@@ -5885,9 +5885,9 @@ struct InstrumentOrders {
         "oboe",
         "cor anglais",
         "english horn",
-        "clarinet",
         "eb clarinet",
         "eflat clarinet",
+        "clarinet",
         "alto clarinet",
         "bass clarinet",
         "contrabass clarinet",
@@ -8973,22 +8973,24 @@ private func clefCompanion(for name: String) -> String? {
 /// Rewrites `name` so that its "sax"/"saxophone" word matches the style used in
 /// `reference`. E.g. if the user typed "Alto Saxophone", the cross-boundary
 /// suggestion "Tenor Sax" becomes "Tenor Saxophone".
-private func saxStyleMatch(_ name: String, toStyleOf reference: String) -> String {
-    let refLower = reference.lowercased()
-    // Detect which style the reference uses — must be a standalone word "sax"
-    // (not the start of "saxophone"), hence the word-boundary regex.
-    let usesFull  = refLower.range(of: "saxophone", options: .regularExpression) != nil
-    let usesAbbr  = !usesFull && (refLower.range(of: "\\bsax\\b", options: .regularExpression) != nil)
-    if usesFull {
-        // Expand standalone "Sax" → "Saxophone" in the result
-        return name.replacingOccurrences(of: "\\bSax\\b", with: "Saxophone",
-                                         options: [.regularExpression, .caseInsensitive])
-    } else if usesAbbr {
-        // Shorten "Saxophone" → "Sax"
-        return name.replacingOccurrences(of: "Saxophone", with: "Sax",
-                                         options: .caseInsensitive)
-    }
-    return name
+/// The preferred display/suggestion name for an instrument. The saxophone family is
+/// canonicalised to its full name (any spelling/order of "Alto Sax", "Sax Alto",
+/// "Special Alto Sax" → "Alto Saxophone") so suggestions read in full. Detection is
+/// unaffected — it still matches the abbreviations in the instrument-order arrays.
+/// Everything that isn't a saxophone is returned unchanged.
+func preferredInstrumentDisplayName(_ name: String) -> String {
+    let lower = name.lowercased()
+    guard lower.contains("sax") else { return name }
+    // register-word → canonical full name (checked in this order)
+    let registers: [(needle: String, full: String)] = [
+        ("sop",    "Soprano Saxophone"),
+        ("alto",   "Alto Saxophone"),
+        ("tenor",  "Tenor Saxophone"),
+        ("bari",   "Baritone Saxophone"),   // "bari" or "baritone"
+        ("bass",   "Bass Saxophone"),
+    ]
+    for (needle, full) in registers where lower.contains(needle) { return full }
+    return name   // a bare "sax" with no register — leave as written
 }
 
 /// Typical number of parts for common instrument families (used to detect when
@@ -9032,8 +9034,8 @@ func splitSuggestionStartingNumberedName(
     }) {
         let nextIdx = (idx + 1) % instrumentNames.count
         let rawNextName = splitSuggestionBaseName(instrumentNames[nextIdx])
-        // Preserve the user's preferred sax style: "Alto Saxophone" → "Tenor Saxophone" not "Tenor Sax"
-        let nextName = saxStyleMatch(rawNextName, toStyleOf: basePart)
+        // Always suggest the full instrument name (e.g. "Tenor Saxophone", not "Tenor Sax").
+        let nextName = preferredInstrumentDisplayName(rawNextName)
         // Only append "1" when the next instrument typically has more than one part.
         // Single-part instruments (Bass Trombone, Tuba, Piccolo, …) should be bare.
         return splitSuggestionTypicalPartCount(rawNextName) > 1 ? "\(nextName) 1" : nextName
@@ -9047,7 +9049,9 @@ private func splitSuggestionDisplayNames(_ names: [String]) -> [String] {
     var seen = Set<String>()
     var result: [String] = []
     for name in names {
-        let base = splitSuggestionBaseName(name)
+        // Canonicalise to the preferred display name first, so the abbreviated sax
+        // variants ("Alto Sax", "Sax Alto") collapse into one full "Alto Saxophone".
+        let base = preferredInstrumentDisplayName(splitSuggestionBaseName(name))
         let key = base.lowercased()
         if seen.insert(key).inserted {
             result.append(base)

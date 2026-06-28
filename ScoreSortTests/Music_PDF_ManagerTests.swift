@@ -1787,3 +1787,27 @@ struct ScoreOrderNumberingTests {
         #expect(scoreOrderNumbers(forOrderedItems: []).isEmpty)
     }
 }
+
+// MARK: - Preferred instrument display name (full sax names in suggestions)
+
+@Suite("Preferred instrument display name")
+struct PreferredInstrumentNameTests {
+
+    @Test func canonicalisesSaxFamilyToFullNames() {
+        #expect(preferredInstrumentDisplayName("Alto Sax") == "Alto Saxophone")
+        #expect(preferredInstrumentDisplayName("alto saxophone") == "Alto Saxophone")
+        #expect(preferredInstrumentDisplayName("Sax Alto") == "Alto Saxophone")
+        #expect(preferredInstrumentDisplayName("Special Alto Sax") == "Alto Saxophone")
+        #expect(preferredInstrumentDisplayName("Tenor Sax") == "Tenor Saxophone")
+        #expect(preferredInstrumentDisplayName("Bari Sax") == "Baritone Saxophone")
+        #expect(preferredInstrumentDisplayName("Baritone Saxophone") == "Baritone Saxophone")
+        #expect(preferredInstrumentDisplayName("Sop Sax") == "Soprano Saxophone")
+        #expect(preferredInstrumentDisplayName("Bass Sax") == "Bass Saxophone")
+    }
+
+    @Test func leavesNonSaxNamesUnchanged() {
+        for name in ["Flute", "Clarinet", "Bass Clarinet", "Eb Clarinet", "Trumpet", "Horn in F"] {
+            #expect(preferredInstrumentDisplayName(name) == name)
+        }
+    }
+}
