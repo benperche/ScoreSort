@@ -4145,6 +4145,7 @@ struct BulkRenameView: View {
                                 fieldFocus: $focusedField,
                                 instrumentNames: instrumentNames,
                                 allSuffixes: suffixes.mapValues { $0 },
+                                ensemble: prefixEnsembleType,
                                 previewOffset: $previewOffset
                             )
                             .id(index)
@@ -8809,6 +8810,7 @@ struct SplitNamingStageView: View {
                                 fieldFocus: $focusedField,
                                 instrumentNames: instrumentNames,
                                 allSuffixes: customFileNames,
+                                ensemble: prefixEnsembleType,
                                 previewOffset: $previewOffset,
                                 isLastField: fileIndex == visibleFileIndices.last,
                                 onLastTab: { if canSave { onSave() } }
@@ -9000,20 +9002,33 @@ func instrumentIdentityKey(_ name: String) -> String {
     return splitSuggestionGroupKey(splitSuggestionBaseName(name))
 }
 
-/// Typical number of parts for common instrument families (used to detect when
-/// to cross to the next instrument in cross-boundary suggestions).
-func splitSuggestionTypicalPartCount(_ baseName: String) -> Int {
+/// Typical number of parts for common instrument families, **per ensemble** (used to
+/// decide when a suggestion should cross to the next instrument). Band (concert/wind
+/// band) is the base; jazz (big band) and orchestra override where they differ —
+/// e.g. a band has 1 tenor sax and 3 trumpets, a big band has 2 tenors and 4 trumpets.
+func splitSuggestionTypicalPartCount(_ baseName: String, ensemble: EnsembleType = .band) -> Int {
     let key = splitSuggestionGroupKey(baseName)
-    let counts: [String: Int] = [
+    let band: [String: Int] = [
         "flute": 2, "piccolo": 1, "oboe": 2, "english horn": 1, "bassoon": 2,
         "eb clarinet": 1, "clarinet": 3, "alto clarinet": 1, "bass clarinet": 1, "contrabass clarinet": 1,
-        "alto saxophone": 2, "tenor saxophone": 2, "baritone saxophone": 1, "soprano saxophone": 1,
-        "cornet": 3, "trumpet": 4, "horn": 4, "trombone": 4, "bass trombone": 1,
+        "soprano saxophone": 1, "alto saxophone": 2, "tenor saxophone": 1, "baritone saxophone": 1,
+        "cornet": 3, "trumpet": 3, "horn": 4, "trombone": 3, "bass trombone": 1,
         "euphonium": 1, "baritone": 1, "tuba": 1,
-        "violin": 3, "viola": 1, "cello": 1, "double bass": 1,
         "percussion": 4, "timpani": 1,
     ]
-    return counts[key] ?? 2
+    let jazz: [String: Int] = [   // big band
+        "soprano saxophone": 1, "alto saxophone": 2, "tenor saxophone": 2, "baritone saxophone": 1,
+        "cornet": 4, "trumpet": 4, "trombone": 4, "bass trombone": 1,
+    ]
+    let orchestra: [String: Int] = [
+        "clarinet": 2, "trumpet": 2, "trombone": 3,
+        "violin": 2, "viola": 1, "cello": 1, "double bass": 1,
+    ]
+    switch ensemble {
+    case .band:      return band[key] ?? 2
+    case .jazz:      return jazz[key] ?? band[key] ?? 2
+    case .orchestra: return orchestra[key] ?? band[key] ?? 2
+    }
 }
 
 /// If the previous suffix's number equals the typical part count for that family,
@@ -9021,7 +9036,8 @@ func splitSuggestionTypicalPartCount(_ baseName: String) -> Int {
 /// E.g. after "Flute 2" (typical=2) → "Oboe 1" if Oboe follows Flute in the list.
 func splitSuggestionStartingNumberedName(
     prevSuffix: String,
-    instrumentNames: [String]
+    instrumentNames: [String],
+    ensemble: EnsembleType = .band
 ) -> String? {
     let prev = prevSuffix.trimmingCharacters(in: .whitespaces)
     guard !prev.isEmpty else { return nil }
@@ -9030,7 +9046,7 @@ func splitSuggestionStartingNumberedName(
           let last = parts.last, let n = Int(last), n > 0
     else { return nil }
     let basePart = parts.dropLast().joined(separator: " ")
-    let typical = splitSuggestionTypicalPartCount(basePart)
+    let typical = splitSuggestionTypicalPartCount(basePart, ensemble: ensemble)
     guard n >= typical else { return nil }
     // Find the instrument's position in the list via its identity key.
     let key = instrumentIdentityKey(basePart)
@@ -9050,7 +9066,7 @@ func splitSuggestionStartingNumberedName(
         let nextName = preferredInstrumentDisplayName(rawNextName)
         // Only append "1" when the next instrument typically has more than one part.
         // Single-part instruments (Bass Trombone, Tuba, Piccolo, …) should be bare.
-        return splitSuggestionTypicalPartCount(rawNextName) > 1 ? "\(nextName) 1" : nextName
+        return splitSuggestionTypicalPartCount(rawNextName, ensemble: ensemble) > 1 ? "\(nextName) 1" : nextName
     }
     return nil
 }
@@ -9118,6 +9134,9 @@ struct SplitFileNamingRow: View {
     var fieldFocus: FocusState<Int?>.Binding
     let instrumentNames: [String]   // ordered, deduplicated, capitalised
     let allSuffixes: [Int: String]  // snapshot of all rows' current suffixes
+    /// Selected ensemble — drives ensemble-specific part counts (e.g. 1 tenor sax in a
+    /// band vs 2 in a big band). Defaults to band.
+    var ensemble: EnsembleType = .band
     @Binding var previewOffset: CGPoint
     /// True for the last visible row — Tab/Return will call onLastTab instead of advancing focus.
     var isLastField: Bool = false
@@ -9279,12 +9298,13 @@ struct SplitFileNamingRow: View {
             // Must have at least two tokens and last token must be a positive integer
             if parts.count >= 2, let last = parts.last, let n = Int(last), n > 0 {
                 let basePart = parts.dropLast().joined(separator: " ")
-                let typical = splitSuggestionTypicalPartCount(basePart)
+                let typical = splitSuggestionTypicalPartCount(basePart, ensemble: ensemble)
                 if n >= typical {
                     // Cross-boundary: suggest the next instrument family at part 1
                     return splitSuggestionStartingNumberedName(
                         prevSuffix: prev,
-                        instrumentNames: instrumentNames
+                        instrumentNames: instrumentNames,
+                        ensemble: ensemble
                     )
                 } else {
                     // Same family, next part — preserve the user's sax style

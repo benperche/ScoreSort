@@ -1533,16 +1533,21 @@ struct SplitNumberedSuggestionTests {
 
     @Test("Typical part counts (educational + jazz)")
     func typicalCounts() {
-        #expect(splitSuggestionTypicalPartCount("Trumpet") == 4)   // jazz big band
-        #expect(splitSuggestionTypicalPartCount("Cornet") == 3)
-        #expect(splitSuggestionTypicalPartCount("Trombone") == 4)
-        #expect(splitSuggestionTypicalPartCount("Violin") == 3)
-        #expect(splitSuggestionTypicalPartCount("Tenor Saxophone") == 2)
-        #expect(splitSuggestionTypicalPartCount("Alto Saxophone") == 2)
-        #expect(splitSuggestionTypicalPartCount("Baritone Saxophone") == 1)
-        #expect(splitSuggestionTypicalPartCount("Bass Trombone") == 1)
-        #expect(splitSuggestionTypicalPartCount("Flute") == 2)
-        #expect(splitSuggestionTypicalPartCount("Tuba") == 1)
+        // Band (concert/wind band): 3 trumpets, 1 tenor sax, 3 trombones.
+        #expect(splitSuggestionTypicalPartCount("Trumpet", ensemble: .band) == 3)
+        #expect(splitSuggestionTypicalPartCount("Tenor Saxophone", ensemble: .band) == 1)
+        #expect(splitSuggestionTypicalPartCount("Trombone", ensemble: .band) == 3)
+        #expect(splitSuggestionTypicalPartCount("Alto Saxophone", ensemble: .band) == 2)
+        #expect(splitSuggestionTypicalPartCount("Baritone Saxophone", ensemble: .band) == 1)
+        #expect(splitSuggestionTypicalPartCount("Bass Trombone", ensemble: .band) == 1)
+        #expect(splitSuggestionTypicalPartCount("Flute", ensemble: .band) == 2)
+        #expect(splitSuggestionTypicalPartCount("Tuba", ensemble: .band) == 1)
+        // Jazz big band: 4 trumpets, 2 tenor saxes, 4 trombones.
+        #expect(splitSuggestionTypicalPartCount("Trumpet", ensemble: .jazz) == 4)
+        #expect(splitSuggestionTypicalPartCount("Tenor Saxophone", ensemble: .jazz) == 2)
+        #expect(splitSuggestionTypicalPartCount("Trombone", ensemble: .jazz) == 4)
+        // Default (no ensemble) is band.
+        #expect(splitSuggestionTypicalPartCount("Trumpet") == 3)
     }
 
     @Test("Unknown instrument falls back to 2")
@@ -1585,11 +1590,26 @@ struct SplitNumberedSuggestionTests {
         #expect(splitSuggestionStartingNumberedName(prevSuffix: "Clarinet 3", instrumentNames: clarinets) == "Alto Clarinet")
     }
 
-    @Test("Crossing skips same-instrument aliases (Alto Saxophone 2 → Tenor Saxophone 1)")
+    @Test("Crossing skips same-instrument aliases (Alto Saxophone 2 → Tenor Saxophone 1 in jazz)")
     func crossSkipsAliases() {
         // The list has several Alto-sax aliases in a row, as the real instrument list does.
         let saxes = ["Alto Saxophone", "Sax Alto", "Alto Sax", "Tenor Saxophone", "Tenor Sax"]
-        #expect(splitSuggestionStartingNumberedName(prevSuffix: "Alto Saxophone 2", instrumentNames: saxes) == "Tenor Saxophone 1")
+        #expect(splitSuggestionStartingNumberedName(prevSuffix: "Alto Saxophone 2", instrumentNames: saxes, ensemble: .jazz) == "Tenor Saxophone 1")
+    }
+
+    @Test("Band has a single tenor sax: Alto Saxophone 2 → bare Tenor Saxophone")
+    func bandTenorSaxIsBare() {
+        let saxes = ["Alto Saxophone", "Tenor Saxophone", "Baritone Saxophone"]
+        #expect(splitSuggestionStartingNumberedName(prevSuffix: "Alto Saxophone 2", instrumentNames: saxes, ensemble: .band) == "Tenor Saxophone")
+    }
+
+    @Test("Trumpet count is ensemble-specific: band 'Trumpet 3' crosses, jazz does not")
+    func trumpetCountByEnsemble() {
+        let brass = ["Trumpet", "Horn", "Trombone"]
+        // Band: 3rd trumpet is the last → crosses to Horn (4 parts → "Horn 1").
+        #expect(splitSuggestionStartingNumberedName(prevSuffix: "Trumpet 3", instrumentNames: brass, ensemble: .band) == "Horn 1")
+        // Jazz: a 4th trumpet is expected, so "Trumpet 3" does not cross yet.
+        #expect(splitSuggestionStartingNumberedName(prevSuffix: "Trumpet 3", instrumentNames: brass, ensemble: .jazz) == nil)
     }
 }
 
