@@ -8931,14 +8931,16 @@ private func splitSuggestionGroupKey(_ name: String) -> String {
         (["vln", "violin"], "violin"),
         (["vla", "viola"], "viola"),
         (["vlc", "cello", "violoncello"], "cello"),
-        // Euphonium / baritone clef variants — all collapse to "euphonium" / "baritone"
-        // so nextExpectedIndex can find the instrument after the last euphonium/baritone entry.
+        // Euphonium and baritone are the *same* instrument (euphonium = baritone horn),
+        // so all clef variants collapse to one identity — after a baritone, suggestions
+        // roll on to tuba rather than offering euphonium separately. (They still display
+        // as written, e.g. "Baritone BC", since display uses preferredInstrumentDisplayName.)
         (["euphonium treble clef", "euphonium t.c.", "euphonium tc",
           "euphonium bass clef",   "euphonium b.c.", "euphonium bc",
-          "euphonium", "eupho"],   "euphonium"),
-        (["baritone treble clef",  "baritone t.c.",  "baritone tc",
+          "euphonium", "eupho",
+          "baritone treble clef",  "baritone t.c.",  "baritone tc",
           "baritone bass clef",    "baritone b.c.",  "baritone bc",
-          "baritone"], "baritone"),
+          "baritone"], "euphonium"),
     ]
     for (variants, canonical) in aliases {
         if variants.contains(base) { return canonical }
@@ -9300,8 +9302,15 @@ struct SplitFileNamingRow: View {
             let prev = (allSuffixes[i] ?? "").trimmingCharacters(in: .whitespaces)
             guard !prev.isEmpty else { continue }
 
-            // Clef companion takes priority: "Euphonium B.C." → "Euphonium T.C."
-            if let companion = clefCompanion(for: prev) { return companion }
+            // Clef companion takes priority: "Baritone BC" → "Baritone TC" — but only if
+            // that companion clef hasn't been named yet (otherwise fall through to the
+            // next instrument, so "Baritone BC" then "Baritone TC" rolls on to Tuba).
+            if let companion = clefCompanion(for: prev),
+               !allSuffixes.values.contains(where: {
+                   preferredInstrumentDisplayName($0.trimmingCharacters(in: .whitespaces)) == companion
+               }) {
+                return companion
+            }
 
             let parts = prev.components(separatedBy: " ")
             // Must have at least two tokens and last token must be a positive integer

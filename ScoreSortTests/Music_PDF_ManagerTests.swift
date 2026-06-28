@@ -1866,6 +1866,12 @@ struct PreferredInstrumentNameTests {
         #expect(instrumentIdentityKey("Baritone Saxophone") != instrumentIdentityKey("Baritone BC"))
     }
 
+    @Test func baritoneAndEuphoniumShareIdentity() {
+        // Same instrument (euphonium = baritone horn) — so suggestions don't offer both.
+        #expect(instrumentIdentityKey("Baritone BC") == instrumentIdentityKey("Euphonium BC"))
+        #expect(instrumentIdentityKey("Baritone") == instrumentIdentityKey("Euphonium"))
+    }
+
     @Test func clefCompanionPairsBcAndTc() {
         #expect(clefCompanion(for: "Baritone BC") == "Baritone TC")
         #expect(clefCompanion(for: "Baritone Bass Clef") == "Baritone TC")   // canonicalised
@@ -1906,5 +1912,11 @@ struct NextSuggestionIndexTests {
     func unrecognisedYieldsNil() {
         let order = ["Flute", "Oboe", "Clarinet"]
         #expect(nextSuggestionIndex(after: "Theremin", in: order, usedKeys: []) == nil)
+    }
+
+    @Test("Baritone (= euphonium) rolls on to tuba, skipping both clefs and euphonium")
+    func baritoneRollsToTuba() {
+        let order = ["Trombone", "Baritone BC", "Baritone TC", "Euphonium BC", "Euphonium TC", "Tuba"]
+        #expect(name(order, after: "Baritone TC") == "Tuba")
     }
 }
