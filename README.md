@@ -361,6 +361,8 @@ ScoreSort updates itself with [Sparkle](https://sparkle-project.org). The update
 
 8. **Commit & push `docs/appcast.xml`** — GitHub Pages serves the new feed and existing users are offered the update in-app.
 
+9. **Reset `RELEASE_NOTES_NEXT.md`** back to an empty per-section draft so it's ready to accumulate notes for the next release.
+
 The website's download button should point at `https://github.com/benperche/ScoreSort/releases/latest/download/ScoreSort.dmg`, which always resolves to the newest release's `ScoreSort.dmg` asset (keep the asset filename consistent).
 
 ## Contributing
