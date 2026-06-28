@@ -533,6 +533,9 @@ Full-window scrollable list of `SplitFileNamingRow` views, one per output file.
 
 Because a plain wind-band list (flute first, no strings) triggers neither rule, no "manual lock" flag is needed — `@AppStorage` alone keeps the user's choice sticky. The `onChange(of: customFileNames)` handler fires the inference at most once per naming session (`hasInferredEnsemble`), so it won't fight manual edits, but it *can* override the displayed value when a real signal appears (e.g. strings showing up switches to orchestra). (Earlier versions inferred from only the first suffix and matched band before strings, so flute always won and orchestra was never detected.)
 
+#### Prefix numbering — shared with the Score Order Sorter
+`PrefixOrderStepView` (splitter Step 3 **and** Bulk Part Rename Step 2) numbers via the top-level pure function **`scoreOrderNumbers(forOrderedItems: [PrefixItem]) -> [Int: Int]`**, mirroring `scanFolder`: **score → 0**, manually-numbered items keep their number (reserved), everything else auto-numbers from **1** up skipping reserved numbers — so `00` is always reserved for the score, even when absent. `PrefixItem` carries `isScore` (set in `autoSorted`), `manualNumber` (forced number → others reflow; set via the double-click badge popover `PrefixEditSheet`, now numeric), and `isSkipped` (per-row skip control; excluded from output + numbering). **The same function drives both the Step 3 preview and the save** (`applyPrefixToFolder` adds skipped segments' pages to `skippedPages`; `applyPrefixAndRenameBulk` skips renaming) so display == saved names. (Previously the preview was 0-based and the save independently re-derived 1-based and ignored the old free-form `customPrefix` — display ≠ save, and no `00` reservation.) `scoreOrderNumbers` is unit-tested (`ScoreOrderNumberingTests`); `scanFolder` itself was left unchanged but matches the same rules.
+
 #### `SplitFileNamingRow` autocomplete
 
 **`nextExpectedIndex: Int`** — scans rows above (nearest first) to find the last recognised instrument name, then returns `index + 1` in `instrumentNames`. Rotates suggestion list so the most likely next instrument appears first.
@@ -651,6 +654,7 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `RenamableFileTests` | `isRenamableFile(_:)` — accepts PDF + all image extensions, case-insensitive, rejects non-media / no extension |
 | `QualifiedFolderNameTests` | `qualifiedFolderName(for:among:)` — single folder, distinct siblings, same-name-different-parent disambiguation, shared-parent collapse |
 | `JobFolderExpansionTests` | `expandToRenameJobFolders(_:)` — folder of PDFs = 1 job, parent-of-folders batches children, nested at any depth, image scans count, no-renamable → empty, parent + PDF subfolder both jobs |
+| `ScoreOrderNumberingTests` | `scoreOrderNumbers(forOrderedItems:)` — score→00 + instruments→01+, no-score still starts at 01, manual number reserved with reflow, auto skips reserved, skipped omitted (gap closed), all-manual, empty |
 
 **Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; `applyBookletOrder` state mutations; UI/integration tests.
 

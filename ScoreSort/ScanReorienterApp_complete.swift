@@ -4409,9 +4409,12 @@ struct BulkRenameView: View {
             return
         }
 
-        for (position, item) in orderedItems.enumerated() {
+        // Same numbering the user saw in Step 2 — so the renames match the preview.
+        let numbers = scoreOrderNumbers(forOrderedItems: orderedItems)
+        for item in orderedItems {
             guard let originalURL = item.originalURL else { continue }
-            let prefix = String(format: "%02d", position + 1)
+            guard let number = numbers[item.id] else { continue }  // skipped → leave unrenamed
+            let prefix = String(format: "%02d", number)
             let finalName = "\(prefix)\(sep)\(item.proposedName)"
             let targetURL = originalURL.deletingLastPathComponent()
                                        .appendingPathComponent(finalName)
@@ -7714,12 +7717,19 @@ struct SplitView: View {
         // Build customFileNames keyed by original fileIndex.
         // saveSplitPDF writes: "\(baseFileName)\(separator)\(suffix).pdf"
         // We pass baseFileName="" separator="" so the suffix IS the complete filename (without .pdf).
+        // Same numbering the user saw in Step 3 — so the saved names match the preview.
+        let numbers = scoreOrderNumbers(forOrderedItems: orderedItems)
         var finalCustomNames: [Int: String] = [:]
         var finalNamesForSummary: [String] = []
+        var omittedPages = skippedPages   // Step-1 skips, plus any Step-3 skips below
 
-        for (position, item) in orderedItems.enumerated() {
-            let prefix = String(format: "%02d", position + 1)
-            let fullName = "\(prefix)\(sep)\(item.proposedName)"  // e.g. "01 - Beethoven - Flute.pdf"
+        for item in orderedItems {
+            guard let number = numbers[item.id] else {
+                // Skipped in Step 3 → drop this segment's pages so the file isn't written.
+                omittedPages.formUnion(pagesForFile(item.id))
+                continue
+            }
+            let fullName = "\(String(format: "%02d", number))\(sep)\(item.proposedName)"  // e.g. "01 - Beethoven - Flute.pdf"
             let nameWithoutPdf = fullName.hasSuffix(".pdf")
                 ? String(fullName.dropLast(4))
                 : fullName
@@ -7733,7 +7743,7 @@ struct SplitView: View {
             baseFileName: "",
             customFileNames: finalCustomNames,
             pageToFileMapping: pageToFileMapping,
-            skippedPages: skippedPages,
+            skippedPages: omittedPages,
             separator: ""
         ) { _, _, isError in
             if isError {
@@ -9540,25 +9550,53 @@ struct PrefixItem: Identifiable {
     let proposedName: String // full filename incl. .pdf, e.g. "Beethoven - Flute.pdf"
     let page: PDFPage?
     var originalURL: URL? = nil
-    /// When non-nil, overrides the auto-computed position number with this free-form string.
-    var customPrefix: String? = nil
+    /// True when the proposed name matched the score (instrument rank 0) — pinned to "00".
+    var isScore: Bool = false
+    /// Forced number (renamer-style override). Reserved, so auto-numbered items reflow around it.
+    var manualNumber: Int? = nil
+    /// Excluded from output and from numbering.
+    var isSkipped: Bool = false
+}
+
+/// Score-order numbers for an ordered item list, mirroring the Score Order Sorter
+/// (`scanFolder`): the score → 0, manually-numbered items keep their number (reserved),
+/// everything else auto-numbers from 1 up, skipping reserved numbers. `00` is therefore
+/// always reserved for the score even when no score is present. Returns `item.id → number`;
+/// skipped items are omitted.
+func scoreOrderNumbers(forOrderedItems items: [PrefixItem]) -> [Int: Int] {
+    let active = items.filter { !$0.isSkipped }
+    let reserved = Set(active.compactMap { $0.manualNumber })
+    var result: [Int: Int] = [:]
+    var next = 1
+    for item in active {
+        if item.isScore {
+            result[item.id] = 0
+        } else if let manual = item.manualNumber {
+            result[item.id] = manual
+        } else {
+            while reserved.contains(next) { next += 1 }
+            result[item.id] = next
+            next += 1
+        }
+    }
+    return result
 }
 
 /// One row in PrefixOrderStepView — shows position, thumbnail, proposed name → final name.
 private struct PrefixOrderRow: View {
     let item: PrefixItem
-    let position: Int        // auto-computed 0-based position
-    let autoPrefix: String   // what auto-numbering would produce (e.g. "00")
+    let prefixText: String   // "00"/"01"… or "—" when skipped
     let finalName: String
+    let isManual: Bool       // a forced number → orange badge
     let onMoveUp: (() -> Void)?
     let onMoveDown: (() -> Void)?
     var isUnmatched: Bool = false
+    var onToggleSkip: (() -> Void)? = nil
     var onEditPrefix: (() -> Void)? = nil  // called on double-click of the badge
 
-    private var displayPrefix: String {
-        item.customPrefix ?? autoPrefix
+    private var badgeColor: Color {
+        item.isSkipped ? .secondary : (isManual ? .orange : .accentColor)
     }
-    private var isCustom: Bool { item.customPrefix != nil }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -9578,19 +9616,19 @@ private struct PrefixOrderRow: View {
             }
             .padding(.leading, 8)
 
-            // Position badge — double-click to set a custom prefix
-            Text(displayPrefix)
+            // Number badge — double-click to force a number
+            Text(prefixText)
                 .font(.system(.body, design: .monospaced))
                 .fontWeight(.semibold)
-                .foregroundColor(isCustom ? .orange : .accentColor)
+                .foregroundColor(badgeColor)
                 .frame(minWidth: 30, alignment: .center)
                 .padding(.horizontal, 4)
                 .padding(.vertical, 2)
                 .background(
                     RoundedRectangle(cornerRadius: 4)
-                        .stroke(isCustom ? Color.orange.opacity(0.5) : Color.clear, lineWidth: 1)
+                        .stroke(isManual ? Color.orange.opacity(0.5) : Color.clear, lineWidth: 1)
                 )
-                .help("Double-click to set a custom prefix")
+                .help("Double-click to set a number")
                 .gesture(TapGesture(count: 2).onEnded { onEditPrefix?() })
 
             // Filenames
@@ -9598,23 +9636,42 @@ private struct PrefixOrderRow: View {
                 Text(item.proposedName)
                     .font(.body)
                     .lineLimit(1)
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.right")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Text(finalName)
+                    .strikethrough(item.isSkipped)
+                    .foregroundColor(item.isSkipped ? .secondary : .primary)
+                if item.isSkipped {
+                    Text("Skipped — won't be saved")
                         .font(.caption)
-                        .fontWeight(.medium)
-                        .foregroundColor(isCustom ? .orange : .accentColor)
-                        .lineLimit(1)
+                        .foregroundColor(.secondary)
+                } else {
+                    HStack(spacing: 4) {
+                        Image(systemName: "arrow.right")
+                            .font(.caption2)
+                            .foregroundColor(.secondary)
+                        Text(finalName)
+                            .font(.caption)
+                            .fontWeight(.medium)
+                            .foregroundColor(isManual ? .orange : .accentColor)
+                            .lineLimit(1)
+                    }
                 }
             }
 
             Spacer()
+
+            // Skip / include toggle
+            if let onToggleSkip {
+                Button(action: onToggleSkip) {
+                    Image(systemName: item.isSkipped ? "arrow.uturn.backward.circle" : "slash.circle")
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .help(item.isSkipped ? "Include this file" : "Skip this file (won't be saved)")
+                .padding(.trailing, 8)
+            }
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
-        .background(isUnmatched ? Color.orange.opacity(0.06) : Color.clear)
+        .background(isUnmatched && !item.isSkipped ? Color.orange.opacity(0.06) : Color.clear)
     }
 }
 
@@ -9662,11 +9719,12 @@ struct PrefixOrderStepView: View {
         var score:     [PrefixItem] = []
         var matched:   [(rank: Int, item: PrefixItem)] = []
         var unmatched: [PrefixItem] = []
-        for item in items {
+        for var item in items {
             if let rank = matchInstrumentOrder(in: item.proposedName, order: order) {
-                if rank == 0 { score.append(item) }
-                else { matched.append((rank, item)) }
+                if rank == 0 { item.isScore = true; score.append(item) }
+                else { item.isScore = false; matched.append((rank, item)) }
             } else {
+                item.isScore = false
                 unmatched.append(item)
             }
         }
@@ -9678,12 +9736,22 @@ struct PrefixOrderStepView: View {
         Set(items.filter { matchInstrumentOrder(in: $0.proposedName, order: order) == nil }.map(\.id))
     }
 
-    /// The prefix string for an item — custom if set, otherwise zero-based position ("00", "01"…).
-    private func autoPrefix(at position: Int) -> String { String(format: "%02d", position) }
+    /// id → assigned number for the current ordering (score=0, instruments 1+, skipped omitted).
+    private var numbers: [Int: Int] { scoreOrderNumbers(forOrderedItems: items) }
 
-    private func prefixedName(for item: PrefixItem, at position: Int) -> String {
-        let prefix = item.customPrefix ?? autoPrefix(at: position)
-        return "\(prefix)\(prefixSeparator)\(item.proposedName)"
+    /// Badge text for an item: "00"/"01"…, or "—" when skipped.
+    private func prefixText(for item: PrefixItem) -> String {
+        numbers[item.id].map { String(format: "%02d", $0) } ?? "—"
+    }
+
+    private func prefixedName(for item: PrefixItem) -> String {
+        guard let n = numbers[item.id] else { return item.proposedName }  // skipped — no prefix
+        return "\(String(format: "%02d", n))\(prefixSeparator)\(item.proposedName)"
+    }
+
+    private func toggleSkip(_ item: PrefixItem) {
+        guard let idx = items.firstIndex(where: { $0.id == item.id }) else { return }
+        items[idx].isSkipped.toggle()
     }
 
     // MARK: Body
@@ -9744,12 +9812,13 @@ struct PrefixOrderStepView: View {
                         let sectionIdx = matchedItems.firstIndex(where: { $0.id == item.id })!
                         PrefixOrderRow(
                             item: item,
-                            position: position,
-                            autoPrefix: autoPrefix(at: position),
-                            finalName: prefixedName(for: item, at: position),
+                            prefixText: prefixText(for: item),
+                            finalName: prefixedName(for: item),
+                            isManual: item.manualNumber != nil,
                             onMoveUp:   sectionIdx > 0                      ? { items.swapAt(position, position - 1) } : nil,
                             onMoveDown: sectionIdx < matchedItems.count - 1 ? { items.swapAt(position, position + 1) } : nil,
-                            onEditPrefix: { prefixEditTarget = item; prefixEditDraft = item.customPrefix ?? autoPrefix(at: position) }
+                            onToggleSkip: { toggleSkip(item) },
+                            onEditPrefix: { prefixEditTarget = item; prefixEditDraft = item.manualNumber.map(String.init) ?? "\(numbers[item.id] ?? 1)" }
                         )
                         if item.id != matchedItems.last?.id { Divider() }
                     }
@@ -9761,7 +9830,7 @@ struct PrefixOrderStepView: View {
                             Image(systemName: "exclamationmark.triangle.fill")
                                 .foregroundColor(.orange)
                                 .font(.caption)
-                            Text("Unmatched — instrument not recognised · double-click the prefix badge to set a custom prefix")
+                            Text("Unmatched — instrument not recognised · double-click the number badge to set a number, or skip the file")
                                 .font(.caption)
                                 .foregroundColor(.orange)
                             Spacer()
@@ -9775,13 +9844,14 @@ struct PrefixOrderStepView: View {
                             let sectionIdx = unmatchedItems.firstIndex(where: { $0.id == item.id })!
                             PrefixOrderRow(
                                 item: item,
-                                position: position,
-                                autoPrefix: autoPrefix(at: position),
-                                finalName: prefixedName(for: item, at: position),
+                                prefixText: prefixText(for: item),
+                                finalName: prefixedName(for: item),
+                                isManual: item.manualNumber != nil,
                                 onMoveUp:   sectionIdx > 0                        ? { items.swapAt(position, position - 1) } : nil,
                                 onMoveDown: sectionIdx < unmatchedItems.count - 1 ? { items.swapAt(position, position + 1) } : nil,
                                 isUnmatched: true,
-                                onEditPrefix: { prefixEditTarget = item; prefixEditDraft = item.customPrefix ?? autoPrefix(at: position) }
+                                onToggleSkip: { toggleSkip(item) },
+                                onEditPrefix: { prefixEditTarget = item; prefixEditDraft = item.manualNumber.map(String.init) ?? "\(numbers[item.id] ?? 1)" }
                             )
                             if item.id != unmatchedItems.last?.id { Divider() }
                         }
@@ -9810,20 +9880,21 @@ struct PrefixOrderStepView: View {
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
         }
-        // ── Custom prefix editor ──────────────────────────────────────────
+        // ── Manual number editor (forces a number; others reflow around it) ──
         .sheet(item: $prefixEditTarget) { target in
             PrefixEditSheet(
                 fileName: target.proposedName,
                 draft: $prefixEditDraft,
                 onApply: { value in
                     if let idx = items.firstIndex(where: { $0.id == target.id }) {
-                        items[idx].customPrefix = value.trimmingCharacters(in: .whitespaces).isEmpty ? nil : value.trimmingCharacters(in: .whitespaces)
+                        // A valid integer forces that number; anything else reverts to auto.
+                        items[idx].manualNumber = Int(value.trimmingCharacters(in: .whitespaces))
                     }
                     prefixEditTarget = nil
                 },
                 onClear: {
                     if let idx = items.firstIndex(where: { $0.id == target.id }) {
-                        items[idx].customPrefix = nil
+                        items[idx].manualNumber = nil
                     }
                     prefixEditTarget = nil
                 },
@@ -9833,7 +9904,7 @@ struct PrefixOrderStepView: View {
     }
 }
 
-/// Small sheet for typing a free-form prefix override.
+/// Small sheet for forcing a file's score-order number (others reflow around it).
 private struct PrefixEditSheet: View {
     let fileName: String
     @Binding var draft: String
@@ -9844,7 +9915,7 @@ private struct PrefixEditSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
-            Text("Set Custom Prefix")
+            Text("Set Number")
                 .font(.title2).fontWeight(.semibold)
 
             Text(fileName)
@@ -9854,9 +9925,9 @@ private struct PrefixEditSheet: View {
                 .truncationMode(.middle)
 
             VStack(alignment: .leading, spacing: 6) {
-                Text("Prefix (any text — leave blank to restore auto-numbering)")
+                Text("Number (the others reflow around it — leave blank to restore auto-numbering)")
                     .font(.caption).foregroundColor(.secondary)
-                TextField("e.g. 00, 05a, Extra", text: $draft)
+                TextField("e.g. 1", text: $draft)
                     .textFieldStyle(.roundedBorder)
                     .focused($fieldFocused)
                     .onSubmit { onApply(draft) }

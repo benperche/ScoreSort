@@ -1732,3 +1732,58 @@ struct JobFolderExpansionTests {
         #expect(Set(jobs.map { $0.lastPathComponent }) == ["Mix", "sub"])
     }
 }
+
+// MARK: - Score-order numbering (shared by splitter Step 3 / bulk Step 2 / renamer)
+// scoreOrderNumbers: score → 0, manual numbers reserved (others reflow), auto from 1.
+
+@Suite("Score-order numbering")
+struct ScoreOrderNumberingTests {
+
+    func item(_ id: Int, score: Bool = false, manual: Int? = nil, skipped: Bool = false) -> PrefixItem {
+        PrefixItem(id: id, proposedName: "n\(id).pdf", page: nil,
+                   isScore: score, manualNumber: manual, isSkipped: skipped)
+    }
+
+    @Test func scoreGetsZeroInstrumentsStartAtOne() {
+        let n = scoreOrderNumbers(forOrderedItems: [item(0, score: true), item(1), item(2)])
+        #expect(n[0] == 0)
+        #expect(n[1] == 1)
+        #expect(n[2] == 2)
+    }
+
+    @Test func noScoreStillStartsAtOne() {   // the reported bug: Flute must not become 00
+        let n = scoreOrderNumbers(forOrderedItems: [item(0), item(1)])
+        #expect(n[0] == 1)
+        #expect(n[1] == 2)
+    }
+
+    @Test func manualNumberReservedWithReflow() {
+        let n = scoreOrderNumbers(forOrderedItems: [item(0), item(1, manual: 1), item(2)])
+        #expect(n[1] == 1)   // forced
+        #expect(n[0] == 2)   // reflowed past the reserved 1
+        #expect(n[2] == 3)
+    }
+
+    @Test func autoSkipsReservedManualNumber() {
+        let n = scoreOrderNumbers(forOrderedItems: [item(0), item(1, manual: 1)])
+        #expect(n[1] == 1)
+        #expect(n[0] == 2)
+    }
+
+    @Test func skippedItemsOmittedAndDontConsumeNumbers() {
+        let n = scoreOrderNumbers(forOrderedItems: [item(0), item(1, skipped: true), item(2)])
+        #expect(n[1] == nil)
+        #expect(n[0] == 1)
+        #expect(n[2] == 2)   // gap closed — skip didn't consume a number
+    }
+
+    @Test func allManualKeepTheirNumbers() {
+        let n = scoreOrderNumbers(forOrderedItems: [item(0, manual: 5), item(1, manual: 9)])
+        #expect(n[0] == 5)
+        #expect(n[1] == 9)
+    }
+
+    @Test func emptyYieldsEmpty() {
+        #expect(scoreOrderNumbers(forOrderedItems: []).isEmpty)
+    }
+}
