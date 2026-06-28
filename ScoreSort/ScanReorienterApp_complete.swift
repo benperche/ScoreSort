@@ -3968,8 +3968,11 @@ struct BulkRenameView: View {
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
     @AppStorage("prefixEnsembleType") private var prefixEnsembleType: EnsembleType = .band
 
-    // ── Instrument names (same union as the Splitter) ─────────────────────
-    private var instrumentNames: [String] { InstrumentOrders.allNames }
+    // ── Instrument names — the selected ensemble's score order (so suggestions
+    // follow that ensemble; e.g. in a band, Horn comes right after Trumpet) ──
+    private var instrumentNames: [String] {
+        InstrumentOrders.getOrder(for: prefixEnsembleType).map { $0.capitalized }
+    }
 
     // ── Validation ────────────────────────────────────────────────────────
     private var baseNameError: String? { pdfFilenameError(for: baseFileName) }
@@ -5633,19 +5636,6 @@ struct InstrumentOrders {
         case .jazz:      return jazz
         case .orchestra: return orchestra
         }
-    }
-
-    /// Ordered, deduplicated union of orchestra + band + jazz, with each name
-    /// capitalised. Used for instrument-name autocomplete in both the Splitter
-    /// and the Bulk Renamer.
-    static var allNames: [String] {
-        var seen = Set<String>()
-        var result: [String] = []
-        for name in orchestra + band + jazz {
-            let key = name.lowercased()
-            if seen.insert(key).inserted { result.append(name.capitalized) }
-        }
-        return result
     }
 
     // MARK: - Setup (call once at launch from AppDelegate)
@@ -8706,8 +8696,11 @@ struct SplitNamingStageView: View {
         return "\(range) · \(size) \(size == 1 ? "page" : "pages")"
     }
 
-    /// Ordered, deduplicated instrument name list (orchestra → band → jazz).
-    private var instrumentNames: [String] { InstrumentOrders.allNames }
+    /// The selected ensemble's score order, so "next instrument" suggestions follow
+    /// that ensemble (e.g. in a band, Horn follows Trumpet; in an orchestra it precedes).
+    private var instrumentNames: [String] {
+        InstrumentOrders.getOrder(for: prefixEnsembleType).map { $0.capitalized }
+    }
 
     private var baseNameError: String? {
         filenameError(for: baseFileName)
