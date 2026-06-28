@@ -7,6 +7,49 @@
         <language>en</language>
 
         <item>
+            <title>Version 1.7.0</title>
+            <sparkle:version>11</sparkle:version>
+            <sparkle:shortVersionString>1.7.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <pubDate>Mon, 29 Jun 2026 09:08:38 +1000</pubDate>
+            <description><![CDATA[
+                <h2>ScoreSort 1.7.0</h2>
+                <p><b>✨ General improvements</b></p>
+                <ul>
+                    <li>Drop a new file onto the &ldquo;Done&rdquo; screen to start the next job immediately, without clicking Start Over (Rename, Bulk Rename, and Split).</li>
+                </ul>
+                <p><b>🏷️ Rename Files</b></p>
+                <ul>
+                    <li><b>Batch renaming.</b> Rename multiple folders of pieces at once — drag in a parent folder of nested folders, or several folders together, and the app walks you through them one after another.</li>
+                    <li>You can now rename image scans (e.g. JPGs) as well as PDFs.</li>
+                </ul>
+                <p><b>🔗 Combine PDFs</b></p>
+                <ul>
+                    <li><b>Drag to reorder files.</b> Collate groups move as a unit, and you can drop a file onto a group to add it in.</li>
+                </ul>
+                <p><b>✂️ Split PDF</b></p>
+                <ul>
+                    <li><b>Undo/redo while splitting.</b> ⌘Z / ⌘⇧Z undo and redo split-point, skip, and re-stride edits in Step 1.</li>
+                    <li><b>Drag to pan the part preview</b> in the naming step (the page strip or its minimap), not just the arrow buttons.</li>
+                    <li><b>Much smarter instrument-name suggestions,</b> now driven by the selected ensemble (Wind Band / Jazz Band / Orchestra): suggestions follow that ensemble&rsquo;s real score order (e.g. Horn follows Trumpet in a band), use ensemble-aware part counts, prefer full instrument names, and handle the clarinet family and baritone/euphonium better.</li>
+                    <li><b>Duplicate-name warning</b> when two files would get the same name; saving is blocked if they&rsquo;d truly collide.</li>
+                    <li>General improvements to the score-order prefix screen.</li>
+                </ul>
+                <p><b>🐞 Fixed</b></p>
+                <ul>
+                    <li>Keyboard shortcuts are now strictly limited to the current tab.</li>
+                    <li>The part-name preview no longer clips the instrument name at the top of the page.</li>
+                    <li>Dragging a new PDF onto the splitter&rsquo;s &ldquo;Done&rdquo; screen no longer leaves a blank Step 1 preview.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/benperche/ScoreSort/releases/download/v1.7.0/ScoreSort.dmg"
+                sparkle:edSignature="G8RFAexZOTuETp3IPX2kCdFKtP6WccDRy2pHgMkg06LUDrDD5cFIHVlvEB/LP26qSXVz4kxKnZH05uEq0uTHBg=="
+                length="7035452"
+                type="application/octet-stream"/>
+        </item>
+
+        <item>
             <title>Version 1.6.0</title>
             <sparkle:version>10</sparkle:version>
             <sparkle:shortVersionString>1.6.0</sparkle:shortVersionString>
