@@ -4190,6 +4190,8 @@ struct BulkRenameView: View {
                 // Prefix option row
                 HStack(spacing: 12) {
                     Toggle("Prefix score order", isOn: $prefixEnabled)
+                    // Always enabled — the ensemble drives the instrument suggestions
+                    // (order + per-ensemble part counts), not just prefixing.
                     Picker("", selection: $prefixEnsembleType) {
                         Text("Wind Band").tag(EnsembleType.band)
                         Text("Jazz Band").tag(EnsembleType.jazz)
@@ -4197,8 +4199,6 @@ struct BulkRenameView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 280)
-                    .disabled(!prefixEnabled)
-                    .opacity(prefixEnabled ? 1 : 0.5)
                     Spacer()
                 }
                 HStack {
@@ -8857,6 +8857,8 @@ struct SplitNamingStageView: View {
                 // Prefix option row
                 HStack(spacing: 12) {
                     Toggle("Prefix score order", isOn: $prefixEnabled)
+                    // Always enabled — the ensemble drives the Step 2 instrument
+                    // suggestions (order + per-ensemble part counts), not just prefixing.
                     Picker("", selection: $prefixEnsembleType) {
                         Text("Wind Band").tag(EnsembleType.band)
                         Text("Jazz Band").tag(EnsembleType.jazz)
@@ -8864,8 +8866,6 @@ struct SplitNamingStageView: View {
                     }
                     .pickerStyle(.segmented)
                     .frame(maxWidth: 280)
-                    .disabled(!prefixEnabled)
-                    .opacity(prefixEnabled ? 1 : 0.5)
                     Spacer()
                     Toggle("Move original to Trash", isOn: $deleteSourceAfterSplit)
                         .toggleStyle(.checkbox)
