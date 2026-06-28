@@ -6745,6 +6745,10 @@ struct SplitView: View {
                 // New PDF loaded — reset the entire split flow so no state from
                 // a previous file can survive into the naming or prefix stages.
                 isViewFocused = true
+                // Reset navigation: dropping a new file straight onto the done screen
+                // skips the clear step, so a stale currentPage could point past the new
+                // (shorter) document and blank the Step 1 preview.
+                currentPage = 0
                 customFileNames.removeAll()
                 previewOffset = .zero
                 skippedPages = []
