@@ -1576,6 +1576,21 @@ struct SplitNumberedSuggestionTests {
         // "Trombone 2" is below the new typical of 4, so no cross-boundary suggestion.
         #expect(splitSuggestionStartingNumberedName(prevSuffix: "Trombone 2", instrumentNames: names) == nil)
     }
+
+    @Test("Single-part clarinets are 1 (Alto Clarinet after Clarinet 3 is bare)")
+    func singlePartClarinets() {
+        #expect(splitSuggestionTypicalPartCount("Alto Clarinet") == 1)
+        #expect(splitSuggestionTypicalPartCount("Eb Clarinet") == 1)
+        let clarinets = ["Eb Clarinet", "Clarinet", "Alto Clarinet", "Bass Clarinet"]
+        #expect(splitSuggestionStartingNumberedName(prevSuffix: "Clarinet 3", instrumentNames: clarinets) == "Alto Clarinet")
+    }
+
+    @Test("Crossing skips same-instrument aliases (Alto Saxophone 2 → Tenor Saxophone 1)")
+    func crossSkipsAliases() {
+        // The list has several Alto-sax aliases in a row, as the real instrument list does.
+        let saxes = ["Alto Saxophone", "Sax Alto", "Alto Sax", "Tenor Saxophone", "Tenor Sax"]
+        #expect(splitSuggestionStartingNumberedName(prevSuffix: "Alto Saxophone 2", instrumentNames: saxes) == "Tenor Saxophone 1")
+    }
 }
 
 // MARK: - Output dialog default directory

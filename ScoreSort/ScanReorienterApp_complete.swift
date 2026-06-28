@@ -8997,13 +8997,23 @@ func preferredInstrumentDisplayName(_ name: String) -> String {
     return name   // a bare "sax" with no register — leave as written
 }
 
+/// A canonical key identifying *which instrument* a name is, collapsing all aliases —
+/// including reversed word orders the group-key table misses (e.g. "Sax Alto" / "Alto
+/// Sax" / "Alto Saxophone" all → "alto saxophone"). Used to skip same-instrument aliases
+/// when finding the next distinct instrument for a suggestion.
+func instrumentIdentityKey(_ name: String) -> String {
+    let preferred = preferredInstrumentDisplayName(name)
+    if preferred.lowercased().hasSuffix("saxophone") { return preferred.lowercased() }
+    return splitSuggestionGroupKey(splitSuggestionBaseName(name))
+}
+
 /// Typical number of parts for common instrument families (used to detect when
 /// to cross to the next instrument in cross-boundary suggestions).
 func splitSuggestionTypicalPartCount(_ baseName: String) -> Int {
     let key = splitSuggestionGroupKey(baseName)
     let counts: [String: Int] = [
         "flute": 2, "piccolo": 1, "oboe": 2, "english horn": 1, "bassoon": 2,
-        "clarinet": 3, "bass clarinet": 1, "contrabass clarinet": 1,
+        "eb clarinet": 1, "clarinet": 3, "alto clarinet": 1, "bass clarinet": 1, "contrabass clarinet": 1,
         "alto saxophone": 2, "tenor saxophone": 2, "baritone saxophone": 1, "soprano saxophone": 1,
         "cornet": 3, "trumpet": 4, "horn": 4, "trombone": 4, "bass trombone": 1,
         "euphonium": 1, "baritone": 1, "tuba": 1,
@@ -9029,14 +9039,19 @@ func splitSuggestionStartingNumberedName(
     let basePart = parts.dropLast().joined(separator: " ")
     let typical = splitSuggestionTypicalPartCount(basePart)
     guard n >= typical else { return nil }
-    // Find the instrument's position in the list via group key
-    let key = splitSuggestionGroupKey(basePart)
-    // Search for any name in the list whose base matches our key
-    if let idx = instrumentNames.firstIndex(where: {
-        splitSuggestionGroupKey(splitSuggestionBaseName($0)) == key ||
-        splitSuggestionGroupKey($0) == key
-    }) {
-        let nextIdx = (idx + 1) % instrumentNames.count
+    // Find the instrument's position in the list via its identity key.
+    let key = instrumentIdentityKey(basePart)
+    if let idx = instrumentNames.firstIndex(where: { instrumentIdentityKey($0) == key }) {
+        // Skip past any further aliases of the *same* instrument (e.g. "Alto Saxophone",
+        // "Sax Alto", "Alto Sax" sit consecutively in the list) so we land on the next
+        // distinct instrument — otherwise "Alto Saxophone 2" would roll to "Alto Saxophone 1".
+        var nextIdx = (idx + 1) % instrumentNames.count
+        var steps = 0
+        while steps < instrumentNames.count,
+              instrumentIdentityKey(instrumentNames[nextIdx]) == key {
+            nextIdx = (nextIdx + 1) % instrumentNames.count
+            steps += 1
+        }
         let rawNextName = splitSuggestionBaseName(instrumentNames[nextIdx])
         // Always suggest the full instrument name (e.g. "Tenor Saxophone", not "Tenor Sax").
         let nextName = preferredInstrumentDisplayName(rawNextName)
