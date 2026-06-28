@@ -9272,6 +9272,18 @@ struct SplitFileNamingRow: View {
     // ── Validation ──────────────────────────────────────────────────────────
     private var suffixError: String? { pdfFilenameError(for: suffix) }
 
+    /// True when this row's (non-empty) suffix matches another row's — the two files
+    /// would be saved with the same name (and overwrite each other). Case-insensitive,
+    /// since macOS filenames collide regardless of case.
+    private var isDuplicateSuffix: Bool {
+        let mine = suffix.trimmingCharacters(in: .whitespaces)
+        guard !mine.isEmpty else { return false }
+        return allSuffixes.contains { index, other in
+            index != fileIndex
+                && other.trimmingCharacters(in: .whitespaces).caseInsensitiveCompare(mine) == .orderedSame
+        }
+    }
+
     // ── Autocomplete ─────────────────────────────────────────────────────────
     /// Index in `instrumentNames` to start suggestions from — the entry just
     /// after the most recently used instrument in the rows above this one.
@@ -9515,7 +9527,15 @@ struct SplitFileNamingRow: View {
                             .font(.caption)
                             .fontWeight(.medium)
                     }
-                    .foregroundColor(suffix.isEmpty ? .secondary : .accentColor)
+                    .foregroundColor(isDuplicateSuffix ? .orange : (suffix.isEmpty ? .secondary : .accentColor))
+                }
+
+                // Duplicate-name warning — another file uses the same name.
+                if isDuplicateSuffix {
+                    Label("Another file already uses this name — they'd overwrite each other",
+                          systemImage: "exclamationmark.triangle.fill")
+                        .font(.caption)
+                        .foregroundColor(.orange)
                 }
 
                 // ── Autocomplete dropdown ────────────────────────────
