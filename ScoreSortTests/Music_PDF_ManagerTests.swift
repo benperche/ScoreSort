@@ -1845,6 +1845,26 @@ struct PreferredInstrumentNameTests {
             #expect(preferredInstrumentDisplayName(name) == name)
         }
     }
+
+    @Test func canonicalisesBaritoneEuphoniumClefs() {
+        for n in ["Baritone BC", "Baritone B.C.", "Baritone Bass Clef"] {
+            #expect(preferredInstrumentDisplayName(n) == "Baritone B.C.")
+        }
+        for n in ["Baritone TC", "Baritone T.C.", "Baritone Treble Clef"] {
+            #expect(preferredInstrumentDisplayName(n) == "Baritone T.C.")
+        }
+        #expect(preferredInstrumentDisplayName("Euphonium BC") == "Euphonium B.C.")
+        #expect(preferredInstrumentDisplayName("Euphonium Treble Clef") == "Euphonium T.C.")
+        #expect(preferredInstrumentDisplayName("Baritone") == "Baritone")
+        #expect(preferredInstrumentDisplayName("Euphonium") == "Euphonium")
+    }
+
+    @Test func baritoneSaxIsSaxNotBrass() {
+        // The bari *sax* must stay a saxophone, distinct from the baritone (euphonium) brass.
+        #expect(preferredInstrumentDisplayName("Baritone Sax") == "Baritone Saxophone")
+        #expect(preferredInstrumentDisplayName("Bari Sax") == "Baritone Saxophone")
+        #expect(instrumentIdentityKey("Baritone Saxophone") != instrumentIdentityKey("Baritone B.C."))
+    }
 }
 
 // MARK: - Next suggestion index (dropdown rotation start)

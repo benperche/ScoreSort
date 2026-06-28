@@ -5621,7 +5621,7 @@ struct InstrumentOrders {
 
     // Bump this whenever the built-in defaults change so existing JSON files
     // are automatically regenerated on next launch.
-    private static let defaultsVersion = 4
+    private static let defaultsVersion = 5
 
     // MARK: - Loaded state (populated by setup())
     private static var loaded: [String: [String]] = [:]
@@ -5734,7 +5734,6 @@ struct InstrumentOrders {
         "saxophone bari",
         "sax baritone",
         "bari",
-        "baritone",
         "bass sax",
         "bass saxophone",
         "cornet",
@@ -5743,17 +5742,21 @@ struct InstrumentOrders {
         "trombone",
         "bass trombone",
         "trombone bass",
-        "euphonium treble clef",
-        "euphonium tc",
-        "euphonium bass clef",
-        "euphonium bc",
-        "euphonium",
-        "eupho",
-        "baritone treble clef",
-        "baritone tc",
+        "baritone b.c.",
         "baritone bass clef",
         "baritone bc",
+        "baritone t.c.",
+        "baritone treble clef",
+        "baritone tc",
         "baritone",
+        "euphonium b.c.",
+        "euphonium bass clef",
+        "euphonium bc",
+        "euphonium t.c.",
+        "euphonium treble clef",
+        "euphonium tc",
+        "euphonium",
+        "eupho",
         "tuba",
         "guitar",
         "electric guitar",
@@ -8979,17 +8982,31 @@ private func clefCompanion(for name: String) -> String? {
 /// Everything that isn't a saxophone is returned unchanged.
 func preferredInstrumentDisplayName(_ name: String) -> String {
     let lower = name.lowercased()
-    guard lower.contains("sax") else { return name }
-    // register-word → canonical full name (checked in this order)
-    let registers: [(needle: String, full: String)] = [
-        ("sop",    "Soprano Saxophone"),
-        ("alto",   "Alto Saxophone"),
-        ("tenor",  "Tenor Saxophone"),
-        ("bari",   "Baritone Saxophone"),   // "bari" or "baritone"
-        ("bass",   "Bass Saxophone"),
-    ]
-    for (needle, full) in registers where lower.contains(needle) { return full }
-    return name   // a bare "sax" with no register — leave as written
+    // Saxophone family → full name (any spelling/order).
+    if lower.contains("sax") {
+        let registers: [(needle: String, full: String)] = [
+            ("sop",    "Soprano Saxophone"),
+            ("alto",   "Alto Saxophone"),
+            ("tenor",  "Tenor Saxophone"),
+            ("bari",   "Baritone Saxophone"),   // "bari" or "baritone"
+            ("bass",   "Bass Saxophone"),
+        ]
+        for (needle, full) in registers where lower.contains(needle) { return full }
+        return name   // a bare "sax" with no register — leave as written
+    }
+    // Euphonium / baritone (the low brass — not the sax). Canonicalise the clef
+    // variants to "X B.C." / "X T.C." with full stops; a bare name stays bare.
+    if lower.contains("euphonium") || lower.contains("baritone") {
+        let family = lower.contains("euphonium") ? "Euphonium" : "Baritone"
+        if lower.contains("treble") || lower.contains("t.c") || lower.contains("tc") {
+            return "\(family) T.C."
+        }
+        if lower.contains("bass") || lower.contains("b.c") || lower.contains("bc") {
+            return "\(family) B.C."
+        }
+        return family
+    }
+    return name
 }
 
 /// A canonical key identifying *which instrument* a name is, collapsing all aliases —
