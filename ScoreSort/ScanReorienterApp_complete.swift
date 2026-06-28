@@ -3999,7 +3999,9 @@ struct BulkRenameView: View {
             && !baseFileName.isEmpty
             && baseNameError == nil
             && !anySuffixError
-            && !hasDuplicateNames
+            // Duplicates only collide on a direct rename; the score-order prefix (Step 3)
+            // keeps same-named files distinct.
+            && !(prefixEnabled == false && hasDuplicateNames)
     }
 
     // ── Body ──────────────────────────────────────────────────────────────
@@ -4146,6 +4148,7 @@ struct BulkRenameView: View {
                                 instrumentNames: instrumentNames,
                                 allSuffixes: suffixes.mapValues { $0 },
                                 ensemble: prefixEnsembleType,
+                                prefixWillDisambiguate: prefixEnabled,
                                 previewOffset: $previewOffset
                             )
                             .id(index)
@@ -4175,8 +4178,8 @@ struct BulkRenameView: View {
                         .foregroundColor(.orange)
                     Spacer()
                 }
-                // Duplicate name error
-                if hasDuplicateNames {
+                // Duplicate name error (only a real collision without the disambiguating prefix)
+                if prefixEnabled == false && hasDuplicateNames {
                     HStack(spacing: 6) {
                         Image(systemName: "xmark.octagon.fill")
                             .foregroundColor(.red)
@@ -8714,10 +8717,22 @@ struct SplitNamingStageView: View {
         customFileNames.values.contains { filenameError(for: $0) != nil }
     }
 
+    /// True when two visible files share a non-empty suffix (case-insensitive) — they'd
+    /// be written with the same name. Only blocks saving when no prefix will be added
+    /// (with the prefix, the score-order number keeps them distinct).
+    private var hasDuplicateSuffixes: Bool {
+        let names = visibleFileIndices
+            .compactMap { customFileNames[$0]?.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .map { $0.lowercased() }
+        return Set(names).count != names.count
+    }
+
     private var canSave: Bool {
         let count = visibleFileIndices.count
         return (count >= 2 || (count >= 1 && !skippedPages.isEmpty))
             && baseNameError == nil && !anySuffixError
+            && !(prefixEnabled == false && hasDuplicateSuffixes)   // would overwrite on direct save
     }
 
     private func filenameError(for text: String) -> String? { pdfFilenameError(for: text) }
@@ -8814,6 +8829,7 @@ struct SplitNamingStageView: View {
                                 instrumentNames: instrumentNames,
                                 allSuffixes: customFileNames,
                                 ensemble: prefixEnsembleType,
+                                prefixWillDisambiguate: prefixEnabled,
                                 previewOffset: $previewOffset,
                                 isLastField: fileIndex == visibleFileIndices.last,
                                 onLastTab: { if canSave { onSave() } }
@@ -9146,6 +9162,10 @@ struct SplitFileNamingRow: View {
     /// Selected ensemble — drives ensemble-specific part counts (e.g. 1 tenor sax in a
     /// band vs 2 in a big band). Defaults to band.
     var ensemble: EnsembleType = .band
+    /// True when a score-order prefix will be added afterwards (Step 3), which keeps
+    /// same-named files distinct — so a duplicate suffix is only a real collision when
+    /// this is false.
+    var prefixWillDisambiguate: Bool = false
     @Binding var previewOffset: CGPoint
     /// True for the last visible row — Tab/Return will call onLastTab instead of advancing focus.
     var isLastField: Bool = false
@@ -9290,8 +9310,11 @@ struct SplitFileNamingRow: View {
     /// Uses alias normalisation so "Alto Sax" and "Alto Saxophone" are treated
     /// as the same instrument family.
     private var nextExpectedIndex: Int {
-        // Instruments already named anywhere (by identity), so we can offer stragglers.
-        let usedKeys = Set(allSuffixes.values
+        // Instruments already named in *other* rows (by identity), so we can offer
+        // stragglers. Excludes this row so arrowing through its own list doesn't shift it.
+        let usedKeys = Set(allSuffixes
+            .filter { $0.key != fileIndex }
+            .values
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
             .map { instrumentIdentityKey($0) })
@@ -9315,11 +9338,14 @@ struct SplitFileNamingRow: View {
             guard !prev.isEmpty else { continue }
 
             // Clef companion takes priority: "Baritone BC" → "Baritone TC" — but only if
-            // that companion clef hasn't been named yet (otherwise fall through to the
-            // next instrument, so "Baritone BC" then "Baritone TC" rolls on to Tuba).
+            // that companion clef hasn't been named in *another* row yet (otherwise fall
+            // through to the next instrument, so "Baritone BC" then "Baritone TC" rolls on
+            // to Tuba). Excludes this row so arrowing onto the companion doesn't make it
+            // vanish from its own list.
             if let companion = clefCompanion(for: prev),
-               !allSuffixes.values.contains(where: {
-                   preferredInstrumentDisplayName($0.trimmingCharacters(in: .whitespaces)) == companion
+               !allSuffixes.contains(where: { index, value in
+                   index != fileIndex
+                       && preferredInstrumentDisplayName(value.trimmingCharacters(in: .whitespaces)) == companion
                }) {
                 return companion
             }
@@ -9530,9 +9556,12 @@ struct SplitFileNamingRow: View {
                     .foregroundColor(isDuplicateSuffix ? .orange : (suffix.isEmpty ? .secondary : .accentColor))
                 }
 
-                // Duplicate-name warning — another file uses the same name.
+                // Duplicate-name warning — another file has the same name. Only a real
+                // collision when no score-order prefix will be added to tell them apart.
                 if isDuplicateSuffix {
-                    Label("Another file already uses this name — they'd overwrite each other",
+                    Label(prefixWillDisambiguate
+                          ? "Another part has the same name — the score-order prefix will keep the files distinct"
+                          : "Another file already uses this name — they'd overwrite each other",
                           systemImage: "exclamationmark.triangle.fill")
                         .font(.caption)
                         .foregroundColor(.orange)
