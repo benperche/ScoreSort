@@ -1848,13 +1848,13 @@ struct PreferredInstrumentNameTests {
 
     @Test func canonicalisesBaritoneEuphoniumClefs() {
         for n in ["Baritone BC", "Baritone B.C.", "Baritone Bass Clef"] {
-            #expect(preferredInstrumentDisplayName(n) == "Baritone B.C.")
+            #expect(preferredInstrumentDisplayName(n) == "Baritone BC")
         }
         for n in ["Baritone TC", "Baritone T.C.", "Baritone Treble Clef"] {
-            #expect(preferredInstrumentDisplayName(n) == "Baritone T.C.")
+            #expect(preferredInstrumentDisplayName(n) == "Baritone TC")
         }
-        #expect(preferredInstrumentDisplayName("Euphonium BC") == "Euphonium B.C.")
-        #expect(preferredInstrumentDisplayName("Euphonium Treble Clef") == "Euphonium T.C.")
+        #expect(preferredInstrumentDisplayName("Euphonium BC") == "Euphonium BC")
+        #expect(preferredInstrumentDisplayName("Euphonium Treble Clef") == "Euphonium TC")
         #expect(preferredInstrumentDisplayName("Baritone") == "Baritone")
         #expect(preferredInstrumentDisplayName("Euphonium") == "Euphonium")
     }
@@ -1863,7 +1863,15 @@ struct PreferredInstrumentNameTests {
         // The bari *sax* must stay a saxophone, distinct from the baritone (euphonium) brass.
         #expect(preferredInstrumentDisplayName("Baritone Sax") == "Baritone Saxophone")
         #expect(preferredInstrumentDisplayName("Bari Sax") == "Baritone Saxophone")
-        #expect(instrumentIdentityKey("Baritone Saxophone") != instrumentIdentityKey("Baritone B.C."))
+        #expect(instrumentIdentityKey("Baritone Saxophone") != instrumentIdentityKey("Baritone BC"))
+    }
+
+    @Test func clefCompanionPairsBcAndTc() {
+        #expect(clefCompanion(for: "Baritone BC") == "Baritone TC")
+        #expect(clefCompanion(for: "Baritone Bass Clef") == "Baritone TC")   // canonicalised
+        #expect(clefCompanion(for: "Euphonium TC") == "Euphonium BC")
+        #expect(clefCompanion(for: "Tenor Saxophone") == nil)
+        #expect(clefCompanion(for: "Flute") == nil)
     }
 }
 

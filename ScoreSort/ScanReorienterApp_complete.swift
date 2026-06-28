@@ -8946,35 +8946,16 @@ private func splitSuggestionGroupKey(_ name: String) -> String {
     return base
 }
 
-/// Returns the natural companion for a clef-paired instrument name, preserving
-/// the exact notation style of the input.
-///
-///   "Euphonium B.C." → "Euphonium T.C."
-///   "Euphonium TC"   → "Euphonium BC"
-///   "Baritone Treble Clef" → "Baritone Bass Clef"
-///
-/// Returns `nil` if the name is not a recognised clef-paired variant.
-private func clefCompanion(for name: String) -> String? {
-    // Each tuple: (bc variant, tc variant) — both directions are handled below.
-    let pairs: [(bc: String, tc: String)] = [
-        ("Euphonium B.C.",    "Euphonium T.C."),
-        ("Euphonium BC",      "Euphonium TC"),
-        ("Euphonium Bass Clef",   "Euphonium Treble Clef"),
-        ("Baritone B.C.",     "Baritone T.C."),
-        ("Baritone BC",       "Baritone TC"),
-        ("Baritone Bass Clef",    "Baritone Treble Clef"),
-    ]
-    let lower = name.trimmingCharacters(in: .whitespaces).lowercased()
-    for pair in pairs {
-        if lower == pair.bc.lowercased() { return pair.tc }
-        if lower == pair.tc.lowercased() { return pair.bc }
-    }
+/// The companion clef for a baritone/euphonium part — "Baritone BC" ↔ "Baritone TC"
+/// (any input spelling). Returns `nil` for anything that isn't a clef-paired instrument.
+/// Built on `preferredInstrumentDisplayName`, which canonicalises every clef spelling.
+func clefCompanion(for name: String) -> String? {
+    let canonical = preferredInstrumentDisplayName(name)
+    if canonical.hasSuffix(" BC") { return canonical.dropLast(2) + "TC" }
+    if canonical.hasSuffix(" TC") { return canonical.dropLast(2) + "BC" }
     return nil
 }
 
-/// Rewrites `name` so that its "sax"/"saxophone" word matches the style used in
-/// `reference`. E.g. if the user typed "Alto Saxophone", the cross-boundary
-/// suggestion "Tenor Sax" becomes "Tenor Saxophone".
 /// The preferred display/suggestion name for an instrument. The saxophone family is
 /// canonicalised to its full name (any spelling/order of "Alto Sax", "Sax Alto",
 /// "Special Alto Sax" → "Alto Saxophone") so suggestions read in full. Detection is
@@ -8995,14 +8976,15 @@ func preferredInstrumentDisplayName(_ name: String) -> String {
         return name   // a bare "sax" with no register — leave as written
     }
     // Euphonium / baritone (the low brass — not the sax). Canonicalise the clef
-    // variants to "X B.C." / "X T.C." with full stops; a bare name stays bare.
+    // variants to "X BC" / "X TC" (no full stops, so they read cleanly before ".pdf");
+    // a bare name stays bare.
     if lower.contains("euphonium") || lower.contains("baritone") {
         let family = lower.contains("euphonium") ? "Euphonium" : "Baritone"
         if lower.contains("treble") || lower.contains("t.c") || lower.contains("tc") {
-            return "\(family) T.C."
+            return "\(family) TC"
         }
         if lower.contains("bass") || lower.contains("b.c") || lower.contains("bc") {
-            return "\(family) B.C."
+            return "\(family) BC"
         }
         return family
     }
@@ -9019,21 +9001,26 @@ func instrumentIdentityKey(_ name: String) -> String {
     return splitSuggestionGroupKey(splitSuggestionBaseName(name))
 }
 
-/// Index in `order` to start instrument suggestions from, given the most-recently-named
-/// instrument `prev` and the identity keys already used. Skips past aliases of `prev`
-/// (so "Tenor Saxophone" rolls to the next *distinct* instrument, not another tenor
-/// spelling); after a bass clarinet, offers a not-yet-used bassoon (some band sets group
-/// the bassoon with the low reeds). Returns nil when `prev` isn't a recognised instrument.
-func nextSuggestionIndex(after prev: String, in order: [String], usedKeys: Set<String>) -> Int? {
+/// Index of the next *distinct* instrument after `prev` in `order` — skips aliases of
+/// `prev` (so "Tenor Saxophone" rolls to the next instrument, not another tenor spelling).
+/// nil when `prev` isn't a recognised instrument.
+func nextDistinctInstrumentIndex(after prev: String, in order: [String]) -> Int? {
     let prevKey = instrumentIdentityKey(prev)
-    if prevKey == "bass clarinet", !usedKeys.contains("bassoon"),
-       let bsn = order.firstIndex(where: { instrumentIdentityKey($0) == "bassoon" }) {
-        return bsn
-    }
     guard let idx = order.firstIndex(where: { instrumentIdentityKey($0) == prevKey }) else { return nil }
     var next = idx + 1
     while next < order.count, instrumentIdentityKey(order[next]) == prevKey { next += 1 }
     return min(next, order.count - 1)
+}
+
+/// Like `nextDistinctInstrumentIndex`, but first offers a not-yet-used bassoon after a
+/// bass clarinet (some band part sets group the bassoon with the low reeds). Drives the
+/// autocomplete dropdown's starting position.
+func nextSuggestionIndex(after prev: String, in order: [String], usedKeys: Set<String>) -> Int? {
+    if instrumentIdentityKey(prev) == "bass clarinet", !usedKeys.contains("bassoon"),
+       let bsn = order.firstIndex(where: { instrumentIdentityKey($0) == "bassoon" }) {
+        return bsn
+    }
+    return nextDistinctInstrumentIndex(after: prev, in: order)
 }
 
 /// Typical number of parts for common instrument families, **per ensemble** (used to
@@ -9041,7 +9028,7 @@ func nextSuggestionIndex(after prev: String, in order: [String], usedKeys: Set<S
 /// band) is the base; jazz (big band) and orchestra override where they differ —
 /// e.g. a band has 1 tenor sax and 3 trumpets, a big band has 2 tenors and 4 trumpets.
 func splitSuggestionTypicalPartCount(_ baseName: String, ensemble: EnsembleType = .band) -> Int {
-    let key = splitSuggestionGroupKey(baseName)
+    let key = instrumentIdentityKey(baseName)
     let band: [String: Int] = [
         "flute": 2, "piccolo": 1, "oboe": 2, "english horn": 1, "bassoon": 2,
         "eb clarinet": 1, "clarinet": 3, "alto clarinet": 1, "bass clarinet": 1, "contrabass clarinet": 1,
@@ -9082,27 +9069,13 @@ func splitSuggestionStartingNumberedName(
     let basePart = parts.dropLast().joined(separator: " ")
     let typical = splitSuggestionTypicalPartCount(basePart, ensemble: ensemble)
     guard n >= typical else { return nil }
-    // Find the instrument's position in the list via its identity key.
-    let key = instrumentIdentityKey(basePart)
-    if let idx = instrumentNames.firstIndex(where: { instrumentIdentityKey($0) == key }) {
-        // Skip past any further aliases of the *same* instrument (e.g. "Alto Saxophone",
-        // "Sax Alto", "Alto Sax" sit consecutively in the list) so we land on the next
-        // distinct instrument — otherwise "Alto Saxophone 2" would roll to "Alto Saxophone 1".
-        var nextIdx = (idx + 1) % instrumentNames.count
-        var steps = 0
-        while steps < instrumentNames.count,
-              instrumentIdentityKey(instrumentNames[nextIdx]) == key {
-            nextIdx = (nextIdx + 1) % instrumentNames.count
-            steps += 1
-        }
-        let rawNextName = splitSuggestionBaseName(instrumentNames[nextIdx])
-        // Always suggest the full instrument name (e.g. "Tenor Saxophone", not "Tenor Sax").
-        let nextName = preferredInstrumentDisplayName(rawNextName)
-        // Only append "1" when the next instrument typically has more than one part.
-        // Single-part instruments (Bass Trombone, Tuba, Piccolo, …) should be bare.
-        return splitSuggestionTypicalPartCount(rawNextName, ensemble: ensemble) > 1 ? "\(nextName) 1" : nextName
-    }
-    return nil
+    // The next distinct instrument after this one (shared with the dropdown logic).
+    guard let nextIdx = nextDistinctInstrumentIndex(after: basePart, in: instrumentNames) else { return nil }
+    let rawNextName = splitSuggestionBaseName(instrumentNames[nextIdx])
+    let nextName = preferredInstrumentDisplayName(rawNextName)   // full name, e.g. "Tenor Saxophone"
+    // Append "1" only when the next instrument typically has more than one part;
+    // single-part instruments (Bass Trombone, Tuba, …) stay bare.
+    return splitSuggestionTypicalPartCount(rawNextName, ensemble: ensemble) > 1 ? "\(nextName) 1" : nextName
 }
 
 /// Deduplicates a list by collapsing numbered variants to their base name.
