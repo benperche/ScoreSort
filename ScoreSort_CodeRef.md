@@ -252,6 +252,8 @@ State:
 
 **Revert/Save:** visible when `isDirty`. Revert discards `editingParts`; Save calls `presetStore.updatePreset(_:)`.
 
+**Sync fix (mirror of the Preferences one):** `.onChange(of: presetStore.selectedPreset)` reloads `draftParts` when the selected preset's contents change externally (e.g. edits in the Preferences window) — so the sidebar updates live instead of only on ensemble switch. Guarded by `!isDirty` so unsaved local sidebar edits are never clobbered.
+
 ### CombinerPreferencesView
 
 Native `Settings` window tab (via SwiftUI `Settings` scene) — `HSplitView` with a left preset list and a right parts editor.

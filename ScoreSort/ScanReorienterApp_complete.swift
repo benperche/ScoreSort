@@ -1845,6 +1845,14 @@ struct PresetSidebarView: View {
         .background(Color(NSColor.controlBackgroundColor))
         .onAppear { loadDraft() }
         .onChange(of: presetStore.selectedPresetId) { loadDraft() }
+        // Keep the parts list in sync when the selected preset is edited
+        // elsewhere (e.g. the Preferences window) — but never clobber unsaved
+        // local edits, so we skip the reload while this sidebar is dirty.
+        .onChange(of: presetStore.selectedPreset) { _, fresh in
+            guard !isDirty, let fresh, fresh.parts != draftParts else { return }
+            draftParts = fresh.parts
+            applyResult = nil
+        }
         .sheet(isPresented: $showingNewPreset) {
             NewPresetSheet { name, parts in
                 presetStore.addPreset(name: name, parts: parts)
