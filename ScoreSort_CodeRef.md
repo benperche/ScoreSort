@@ -279,15 +279,25 @@ Two-phase algorithm:
 **Phase 1 — direct match with roman-numeral normalisation**
 Parts sorted longest-name-first (so "Bass Clarinet" wins over "Clarinet"). For each `CombineFile`:
 - Normalise both `file.name.lowercased()` and each `part.name.lowercased()` through `normalizeRomanNumerals(_:)`.
-- Match = the first part whose normalised name is a substring of the normalised filename.
+- Match = the first part for which `presetPartMatches(part:in:)` is true (qualifier-aware substring — see below, so a "Clarinet" part won't match a "Bass Clarinet" file).
 - On match: `updateCopies(for:copies:)`.
 - On no match: add to `newUnmatched`.
 
 **Phase 2 — single-file consolidation**
-For each base name whose **all** numbered siblings went unmatched (e.g. "Flute 1" and "Flute 2" both unmatched) and exactly **one** unmatched file contains the base name (e.g. one "Flute.pdf"):
-- Sum the siblings' copy counts.
+For each base name whose **all** numbered siblings went unmatched (e.g. "Clarinet 1" and "Clarinet 2" both unmatched) and exactly **one** unmatched file matches the base name via `presetPartMatches` (e.g. one "Clarinet.pdf" — a "Bass Clarinet.pdf" is *not* counted, which is what lets the consolidation still fire when a bass clarinet is also present):
+- Sum the siblings' copy counts (so 7 + 7 → **14** copies on the single "Clarinet.pdf").
 - Apply to that file, remove from `newUnmatched`, mark siblings matched.
 - More complex mismatches (e.g. 3 preset parts, 2 files) remain orange.
+
+**Qualifier-aware matching — `presetPartMatches(part:in:)`**
+```swift
+let instrumentQualifierWords: Set<String>  // bass, alto, contra(bass), soprano(ino), tenor, baritone, piccolo, english
+func presetPartMatches(part: String, in filename: String) -> Bool
+// Substring match, but rejected when the word immediately before the match is an instrument
+// qualifier the part itself lacks — so "clarinet" ✗ "bass clarinet", "saxophone" ✗ "alto saxophone",
+// "horn" ✗ "english horn". Both args must be pre-lowercased + roman-normalised.
+```
+This single guard fixes two symptoms at once: (1) a generic root part being wrongly assigned to a more specific instrument file, and (2) that specific file blocking the numbered-sibling consolidation by looking like a second candidate. Tested in `PresetPartMatchesTests`.
 
 **Supporting free functions:**
 

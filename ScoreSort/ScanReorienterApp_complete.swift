@@ -1135,7 +1135,7 @@ struct CombineView: View {
         for file in combineManager.files {
             let filename = normalizeRomanNumerals(file.name.lowercased())
             if let match = sortedParts.first(where: {
-                filename.contains(normalizeRomanNumerals($0.name.lowercased()))
+                presetPartMatches(part: normalizeRomanNumerals($0.name.lowercased()), in: filename)
             }) {
                 combineManager.updateCopies(for: file.id, copies: match.copies, undoManager: undoManager)
                 matched += 1
@@ -1167,7 +1167,7 @@ struct CombineView: View {
             // Find still-unmatched files that contain the base name
             let candidates = newUnmatched.filter { id in
                 guard let file = combineManager.files.first(where: { $0.id == id }) else { return false }
-                return normalizeRomanNumerals(file.name.lowercased()).contains(base)
+                return presetPartMatches(part: base, in: normalizeRomanNumerals(file.name.lowercased()))
             }
             guard candidates.count == 1, let fileId = candidates.first else { continue }
 
@@ -1550,6 +1550,33 @@ func numberedBase(of name: String) -> String? {
     let words = normalized.split(separator: " ")
     guard words.count >= 2, let lastWord = words.last, Int(String(lastWord)) != nil else { return nil }
     return words.dropLast().joined(separator: " ")
+}
+
+/// Register/size words that turn a root instrument into a *distinct* instrument when they
+/// immediately precede it — "bass clarinet" is not a clarinet, "alto saxophone" is not a
+/// plain saxophone, "english horn" is not a horn. Used to stop a generic preset part
+/// ("Clarinet") from matching a more specific file ("Bass Clarinet") and vice-versa.
+let instrumentQualifierWords: Set<String> = [
+    "bass", "alto", "contra", "contrabass", "sopranino", "soprano",
+    "tenor", "baritone", "piccolo", "english"
+]
+
+/// True when `part` genuinely occurs in `filename` — i.e. not merely as the tail of a
+/// more specific instrument name. Both arguments must already be lowercased and
+/// roman-normalised. Returns false for part "clarinet" against file "bass clarinet",
+/// so a plain-clarinet preset entry won't be assigned to the bass clarinet.
+func presetPartMatches(part: String, in filename: String) -> Bool {
+    guard !part.isEmpty, let range = filename.range(of: part) else { return false }
+    // Look at the whole word immediately before the match. If it's an instrument
+    // qualifier (and the part itself doesn't start with that qualifier), the file
+    // names a different, more specific instrument — reject the match.
+    let before = filename[..<range.lowerBound]
+    guard let lastWord = before.split(whereSeparator: { !$0.isLetter }).last else { return true }
+    let qualifier = String(lastWord)
+    if instrumentQualifierWords.contains(qualifier) && !part.hasPrefix(qualifier) {
+        return false
+    }
+    return true
 }
 
 /// After removing a part, strips the trailing number/numeral from any sibling that is now

@@ -823,6 +823,42 @@ struct NumberedBaseTests {
     }
 }
 
+// MARK: - Preset part matching (qualifier-aware)
+@Suite("presetPartMatches")
+struct PresetPartMatchesTests {
+    @Test("plain substring still matches")
+    func plain() {
+        #expect(presetPartMatches(part: "clarinet", in: "clarinet"))
+        #expect(presetPartMatches(part: "clarinet", in: "bb clarinet"))          // key isn't a qualifier
+        #expect(presetPartMatches(part: "flute", in: "smith - flute"))
+        #expect(presetPartMatches(part: "clarinet 1", in: "clarinet 1"))
+    }
+
+    @Test("generic root does not match a more specific instrument")
+    func rejectsQualified() {
+        #expect(!presetPartMatches(part: "clarinet", in: "bass clarinet"))
+        #expect(!presetPartMatches(part: "clarinet", in: "contrabass clarinet"))
+        #expect(!presetPartMatches(part: "saxophone", in: "alto saxophone"))
+        #expect(!presetPartMatches(part: "saxophone", in: "tenor saxophone"))
+        #expect(!presetPartMatches(part: "horn", in: "english horn"))
+        #expect(!presetPartMatches(part: "trombone", in: "bass trombone"))
+        #expect(!presetPartMatches(part: "guitar", in: "bass guitar"))
+    }
+
+    @Test("qualified part matches its own qualified file")
+    func qualifiedMatchesItself() {
+        #expect(presetPartMatches(part: "bass clarinet", in: "bass clarinet"))
+        #expect(presetPartMatches(part: "alto saxophone", in: "smith - alto saxophone"))
+        // A bass-clarinet part must not leak onto a contrabass clarinet file.
+        #expect(!presetPartMatches(part: "bass clarinet", in: "contrabass clarinet"))
+    }
+
+    @Test("empty part never matches")
+    func empty() {
+        #expect(!presetPartMatches(part: "", in: "clarinet"))
+    }
+}
+
 // MARK: - Renumber After Deletion Tests
 @Suite("renumberAfterDeletion")
 struct RenumberAfterDeletionTests {
