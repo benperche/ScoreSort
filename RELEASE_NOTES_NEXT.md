@@ -14,4 +14,6 @@ _Draft for the next release after 1.7.0. Keep adding to this as more changes lan
 
 ## ✂️ Split PDF
 
+* Added "Aux Percussion" as a naming suggestion for concert band (alongside the existing "Auxiliary").
+
 ## 🐞 Fixed
