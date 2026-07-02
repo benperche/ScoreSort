@@ -800,13 +800,13 @@ struct SplitView: View {
             let canProceed = loaded && !(activeFileCount < 1 || (activeFileCount < 2 && skippedPages.isEmpty))
             slice.primaryTitle = "Continue to Naming"
             slice.primarySave  = canProceed ? { splitStage = .naming } : nil
-            if loaded {
-                slice.tabActions = [
-                    MenuAction(title: "Split as A3\u{2026}", perform: { showingA3Detection = true }),
-                    MenuAction(title: "Fix Booklet Order", isEnabled: canFixBookletOrder, perform: { requestBookletFix() }),
-                    MenuAction(title: "Clear All Splits", isEnabled: !splitMarkers.isEmpty, perform: { clearAllMarkers() }),
-                ]
-            }
+            // Always list the actions (disabled until a PDF is loaded) so the menu
+            // shows what's possible even in the empty state.
+            slice.tabActions = [
+                MenuAction(title: "Split as A3\u{2026}", isEnabled: loaded, perform: { showingA3Detection = true }),
+                MenuAction(title: "Fix Booklet Order", isEnabled: loaded && canFixBookletOrder, perform: { requestBookletFix() }),
+                MenuAction(title: "Clear All Splits", isEnabled: loaded && !splitMarkers.isEmpty, perform: { clearAllMarkers() }),
+            ]
         case .naming:
             slice.primaryTitle = "Save Split Files"
             slice.primarySave  = { saveSplitPDF() }

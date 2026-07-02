@@ -236,19 +236,28 @@ struct ScoreOrderSortView: View {
             resetBatch(); renamerManager.clearFolder(); selectedIDs = []; lastClickedID = nil
         } : nil
 
-        var actions: [MenuAction] = []
-        if reviewing {
-            let hasExcludable = renamerManager.operations.contains { selectedIDs.contains($0.id) && $0.type != .excluded }
-            actions.append(MenuAction(title: "Don't Rename Selected", isEnabled: hasExcludable, perform: { excludeSelected() }))
-            actions.append(MenuAction(title: "Rescan Folder", perform: { renamerManager.scanFolder() }))
-            if isBatchActive { actions.append(MenuAction(title: "Skip Folder", perform: { skipCurrent() })) }
-        }
+        // Always list the actions (disabled when not applicable) so the menu shows what's
+        // possible even before a folder is loaded.
         if renameResult != nil {
-            actions.append(MenuAction(title: "Start Over", perform: {
-                renameResult = nil; resetBatch(); renamerManager.clearFolder()
-            }))
+            // Done screen.
+            slice.tabActions = [
+                MenuAction(title: "Rescan Folder", key: KeyEquivalent("r"), modifiers: .command,
+                           perform: { renameResult = nil; renamerManager.scanFolder() }),
+                MenuAction(title: "Start Over", perform: {
+                    renameResult = nil; resetBatch(); renamerManager.clearFolder()
+                }),
+            ]
+        } else {
+            let hasExcludable = reviewing && renamerManager.operations.contains {
+                selectedIDs.contains($0.id) && $0.type != .excluded
+            }
+            slice.tabActions = [
+                MenuAction(title: "Don't Rename Selected", isEnabled: hasExcludable, perform: { excludeSelected() }),
+                MenuAction(title: "Rescan Folder", key: KeyEquivalent("r"), modifiers: .command,
+                           isEnabled: reviewing, perform: { renamerManager.scanFolder() }),
+                MenuAction(title: "Skip Folder", isEnabled: reviewing && isBatchActive, perform: { skipCurrent() }),
+            ]
         }
-        slice.tabActions = actions
         appState.tabCommands.slice = slice
     }
 
