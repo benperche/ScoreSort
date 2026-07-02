@@ -351,6 +351,17 @@ func splitSuggestionExtraOptions(for ensemble: EnsembleType) -> [String] {
             "Solo Eb", "Solo Bb", "Soli"]
 }
 
+/// After a lead/solo part ("Solo Alto Sax"), the plain instrument at part 1
+/// ("Alto Saxophone 1"), or bare for single-part families. Returns nil when `prev` isn't a
+/// "Solo <recognised instrument>" — so "Solo Eb" (no clear instrument) falls through.
+func splitSuggestionAfterSolo(prev: String, instrumentNames: [String], ensemble: EnsembleType = .band) -> String? {
+    guard prev.lowercased().hasPrefix("solo") else { return nil }
+    let inner = String(prev.dropFirst(4)).trimmingCharacters(in: .whitespaces)
+    guard !inner.isEmpty, nextDistinctInstrumentIndex(after: inner, in: instrumentNames) != nil else { return nil }
+    let full = preferredInstrumentDisplayName(inner)
+    return splitSuggestionTypicalPartCount(inner, ensemble: ensemble) > 1 ? "\(full) 1" : full
+}
+
 /// Cross-boundary suggestion: when the previous instrument's last part has been named,
 /// returns "NextInstrument 1" (or the bare next instrument for single-part families).
 /// "Complete" means either a numbered part at/over its typical count (e.g. "Flute 2",

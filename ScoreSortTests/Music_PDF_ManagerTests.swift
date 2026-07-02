@@ -1746,6 +1746,15 @@ struct JazzSuggestionSequenceTests {
         // Band has no solo options.
         #expect(splitSuggestionExtraOptions(for: .band).isEmpty)
     }
+
+    @Test("after a solo, suggest the plain instrument at part 1")
+    func afterSoloSuggestsNumbered() {
+        #expect(splitSuggestionAfterSolo(prev: "Solo Alto Sax", instrumentNames: jazz, ensemble: .jazz) == "Alto Saxophone 1")
+        #expect(splitSuggestionAfterSolo(prev: "Solo Trumpet", instrumentNames: jazz, ensemble: .jazz) == "Trumpet 1")
+        // Non-instrument solo ("Solo Eb") and non-solo names return nil.
+        #expect(splitSuggestionAfterSolo(prev: "Solo Eb", instrumentNames: jazz, ensemble: .jazz) == nil)
+        #expect(splitSuggestionAfterSolo(prev: "Alto Sax 1", instrumentNames: jazz, ensemble: .jazz) == nil)
+    }
 }
 
 // MARK: - Output dialog default directory

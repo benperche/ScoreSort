@@ -661,6 +661,12 @@ struct SplitFileNamingRow: View {
                 return companion
             }
 
+            // After a lead/solo part ("Solo Alto Sax") the section's numbered parts usually
+            // follow, so suggest the plain instrument at part 1 ("Alto Saxophone 1").
+            if let afterSolo = splitSuggestionAfterSolo(prev: prev, instrumentNames: instrumentNames, ensemble: ensemble) {
+                return afterSolo
+            }
+
             let parts = prev.components(separatedBy: " ")
             if parts.count >= 2, let last = parts.last, let n = Int(last), n > 0 {
                 let basePart = parts.dropLast().joined(separator: " ")
@@ -676,6 +682,15 @@ struct SplitFileNamingRow: View {
                 return cross
             }
             break  // only consider the closest non-empty row
+        }
+        return nil
+    }
+
+    /// The closest non-empty part name in the rows above this one.
+    private var nearestPreviousSuffix: String? {
+        for i in Swift.stride(from: fileIndex - 1, through: 0, by: -1) {
+            let prev = (allSuffixes[i] ?? "").trimmingCharacters(in: .whitespaces)
+            if !prev.isEmpty { return prev }
         }
         return nil
     }
@@ -700,7 +715,13 @@ struct SplitFileNamingRow: View {
 
         var result: [String]
         if queryText.isEmpty {
-            result = Array(deduplicated.prefix(8))
+            // Right after a solo, keep the other solo options visible in the default list
+            // (paired with the numbered "Alto Saxophone 1" that numberedSuggestion prepends).
+            if nearestPreviousSuffix?.lowercased().hasPrefix("solo") == true {
+                result = Array((splitSuggestionExtraOptions(for: ensemble) + deduplicated).prefix(8))
+            } else {
+                result = Array(deduplicated.prefix(8))
+            }
         } else {
             let q = queryText.lowercased()
             // While typing, also offer the "solo" options (jazz) — they're excluded from
