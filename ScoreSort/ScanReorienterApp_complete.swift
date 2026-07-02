@@ -1561,22 +1561,104 @@ let instrumentQualifierWords: Set<String> = [
     "tenor", "baritone", "piccolo", "english"
 ]
 
-/// True when `part` genuinely occurs in `filename` — i.e. not merely as the tail of a
-/// more specific instrument name. Both arguments must already be lowercased and
-/// roman-normalised. Returns false for part "clarinet" against file "bass clarinet",
-/// so a plain-clarinet preset entry won't be assigned to the bass clarinet.
-func presetPartMatches(part: String, in filename: String) -> Bool {
-    guard !part.isEmpty, let range = filename.range(of: part) else { return false }
-    // Look at the whole word immediately before the match. If it's an instrument
-    // qualifier (and the part itself doesn't start with that qualifier), the file
-    // names a different, more specific instrument — reject the match.
+/// The set of filename phrases that mean the same *part to print* as a preset instrument.
+/// This is the Combine tab's own alias table, reusing the splitter's instrument knowledge
+/// (saxophone abbreviations **and reversed word order**, "French Horn" = "Horn", "Vln" =
+/// "Violin", "Bb Clarinet" = "Clarinet", …) — but, unlike the splitter's
+/// `instrumentIdentityKey`, it keeps the euphonium/baritone **BC vs TC clef distinct**,
+/// because for printing it matters which clef the player is handed. `base` must be
+/// lowercased with any trailing part number already stripped. Returns [] for a name we
+/// don't recognise (the caller then matches it literally).
+func instrumentAliasPhrases(forBase base: String) -> [String] {
+    // Saxophone family — any spelling or word order (register needle found anywhere).
+    if base.contains("sax") {
+        let registers: [(needle: String, phrases: [String])] = [
+            ("sop",   ["soprano saxophone", "soprano sax", "sax soprano"]),
+            ("alto",  ["alto saxophone", "alto sax", "sax alto"]),
+            ("tenor", ["tenor saxophone", "tenor sax", "sax tenor"]),
+            ("bari",  ["baritone saxophone", "baritone sax", "bari sax", "bari saxophone", "sax baritone"]),
+            ("bass",  ["bass saxophone", "bass sax", "sax bass"]),
+        ]
+        for (needle, phrases) in registers where base.contains(needle) { return phrases }
+        return ["saxophone", "sax"]   // a bare "sax" with no register
+    }
+    // Euphonium / baritone horn (NOT baritone *sax* — handled above). Same instrument,
+    // but the clef is kept distinct so a BC player never receives the TC part, and a bare
+    // "Euphonium" preset entry (no clef) still matches either clef's file.
+    if base.contains("euphonium") || base.contains("baritone") {
+        let bc = ["euphonium bc", "euphonium b.c.", "euphonium bass clef",
+                  "euph bc", "baritone bc", "baritone b.c.", "baritone bass clef"]
+        let tc = ["euphonium tc", "euphonium t.c.", "euphonium treble clef",
+                  "euph tc", "baritone tc", "baritone t.c.", "baritone treble clef"]
+        if base.contains("treble") || base.contains("t.c") || base.hasSuffix(" tc") { return tc }
+        if base.contains("bass")   || base.contains("b.c") || base.hasSuffix(" bc") { return bc }
+        return ["euphonium", "euph", "baritone"]   // bare — matches either clef's file
+    }
+    // Other common aliases (mirrors the splitter's group-key table, minus sax/euph).
+    // Matched on the *exact* clean base so a qualified variant ("Alto Clarinet",
+    // "Bass Trumpet") never falls through to the plain-root aliases.
+    let exactGroups: [(bases: Set<String>, phrases: [String])] = [
+        (["contrabass clarinet", "contra bass clarinet", "contra clarinet"],
+             ["contrabass clarinet", "contra bass clarinet", "contra clarinet"]),
+        (["bass clarinet", "bass clar"], ["bass clarinet", "bass clar"]),
+        (["clarinet", "bb clarinet", "b-flat clarinet", "clarinet in bb"],
+             ["clarinet", "bb clarinet", "b-flat clarinet", "clarinet in bb"]),
+        (["bass trombone", "bass tbn"], ["bass trombone", "bass tbn"]),
+        (["trombone", "tenor trombone"], ["trombone", "tenor trombone"]),
+        (["trumpet", "bb trumpet", "trumpet in bb", "b-flat trumpet"],
+             ["trumpet", "bb trumpet", "trumpet in bb", "b-flat trumpet"]),
+        (["english horn", "cor anglais"], ["english horn", "cor anglais"]),
+        (["horn", "french horn", "horn in f", "f horn"], ["horn", "french horn", "horn in f", "f horn"]),
+        (["double bass", "string bass", "contrabass"], ["double bass", "string bass", "contrabass"]),
+        (["violin", "vln"], ["violin", "vln"]),
+        (["viola", "vla"], ["viola", "vla"]),
+        (["cello", "violoncello", "vlc"], ["cello", "violoncello", "vlc"]),
+    ]
+    for (bases, phrases) in exactGroups where bases.contains(base) { return phrases }
+    return []
+}
+
+/// Every filename phrase that should count as a match for preset `part` — the instrument's
+/// aliases (see `instrumentAliasPhrases`) with any trailing part number re-attached, plus
+/// the literal base as a fallback for custom/unrecognised names. `part` must already be
+/// lowercased and roman-normalised.
+func presetMatchPhrases(for part: String) -> [String] {
+    let base = splitSuggestionBaseName(part)          // strips a trailing integer
+    let words = part.split(separator: " ")
+    let number = (words.count >= 2 && Int(words.last!) != nil) ? String(words.last!) : nil
+
+    var phrases = instrumentAliasPhrases(forBase: base)
+    if !phrases.contains(base) { phrases.append(base) }   // custom names match themselves
+    guard let n = number else { return phrases }
+    return phrases.map { "\($0) \(n)" }
+}
+
+/// True when `phrase` occurs in `filename` and isn't merely the tail of a more specific
+/// instrument name — a preceding qualifier word the phrase itself lacks ("bass", "alto",
+/// "english"…) means a different instrument, so the match is rejected. Both arguments must
+/// be lowercased and roman-normalised.
+func phraseOccurs(_ phrase: String, in filename: String) -> Bool {
+    guard !phrase.isEmpty, let range = filename.range(of: phrase) else { return false }
     let before = filename[..<range.lowerBound]
     guard let lastWord = before.split(whereSeparator: { !$0.isLetter }).last else { return true }
     let qualifier = String(lastWord)
-    if instrumentQualifierWords.contains(qualifier) && !part.hasPrefix(qualifier) {
+    if instrumentQualifierWords.contains(qualifier) && !phrase.hasPrefix(qualifier) {
         return false
     }
     return true
+}
+
+/// True when preset `part` should be assigned to a file named `filename`. Expands the part
+/// into its equivalent instrument phrases (abbreviations, reversed sax order, aliases,
+/// clef-preserved euphonium/baritone) and checks each against the filename with the
+/// qualifier guard, so "Alto Sax" matches "Alto Saxophone", "Euphonium BC" matches a bass-
+/// clef file but never the treble-clef one, and "Clarinet" never matches "Bass Clarinet".
+/// Both arguments must already be lowercased and roman-normalised.
+func presetPartMatches(part: String, in filename: String) -> Bool {
+    for phrase in presetMatchPhrases(for: part) where phraseOccurs(phrase, in: filename) {
+        return true
+    }
+    return false
 }
 
 /// After removing a part, strips the trailing number/numeral from any sibling that is now
@@ -2564,7 +2646,7 @@ class EnsemblePresetStore: ObservableObject {
         "Trumpet 1", "Trumpet 2", "Trumpet 3",
         "Horn 1", "Horn 2",
         "Trombone 1", "Trombone 2", "Bass Trombone",
-        "Euphonium", "Tuba",
+        "Euphonium BC", "Tuba",
         "Timpani",
         "Percussion 1", "Percussion 2", "Percussion 3",
     ].map { PresetPart(name: $0, copies: 1) }

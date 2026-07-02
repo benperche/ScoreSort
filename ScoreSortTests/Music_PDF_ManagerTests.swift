@@ -857,6 +857,56 @@ struct PresetPartMatchesTests {
     func empty() {
         #expect(!presetPartMatches(part: "", in: "clarinet"))
     }
+
+    // ── Instrument-identity power reused from the splitter ──────────────────
+
+    @Test("saxophone abbreviations and reversed word order")
+    func saxAliases() {
+        // Full name preset ↔ abbreviated file (the direction that used to fail).
+        #expect(presetPartMatches(part: "alto saxophone", in: "smith - alto sax"))
+        #expect(presetPartMatches(part: "alto sax", in: "smith - alto saxophone 1"))
+        // Reversed word order.
+        #expect(presetPartMatches(part: "sax alto 1", in: "concerto - alto saxophone 1"))
+        // Tenor sax stays distinct from a generic "Saxophone" part.
+        #expect(!presetPartMatches(part: "saxophone", in: "tenor saxophone"))
+    }
+
+    @Test("instrument aliases")
+    func aliases() {
+        #expect(presetPartMatches(part: "french horn 2", in: "sym - horn 2"))
+        #expect(presetPartMatches(part: "horn 2", in: "sym - french horn 2"))
+        #expect(presetPartMatches(part: "clarinet 1", in: "march - bb clarinet 1"))
+        #expect(presetPartMatches(part: "violin 1", in: "piece - vln 1"))
+        #expect(presetPartMatches(part: "english horn", in: "piece - cor anglais"))
+        // A qualified variant must not fall through to the plain root.
+        #expect(!presetPartMatches(part: "alto clarinet", in: "piece - clarinet 1"))
+    }
+
+    // ── Euphonium/baritone: clef matters for which part is printed ──────────
+
+    @Test("BC part matches only a bass-clef file, never treble")
+    func euphoniumClef() {
+        #expect(presetPartMatches(part: "euphonium bc", in: "grade 2 - euphonium bc"))
+        #expect(presetPartMatches(part: "euphonium bc", in: "grade 2 - euphonium bass clef"))
+        // Same instrument spelled "Baritone" by the publisher — still a BC match.
+        #expect(presetPartMatches(part: "euphonium bc", in: "grade 2 - baritone bc"))
+        // The whole point: a BC preset entry must NOT grab the treble-clef file.
+        #expect(!presetPartMatches(part: "euphonium bc", in: "grade 2 - euphonium tc"))
+        #expect(!presetPartMatches(part: "euphonium bc", in: "grade 2 - baritone tc"))
+    }
+
+    @Test("TC part matches only a treble-clef file")
+    func euphoniumTrebleClef() {
+        #expect(presetPartMatches(part: "euphonium tc", in: "grade 2 - euphonium tc"))
+        #expect(!presetPartMatches(part: "euphonium tc", in: "grade 2 - euphonium bc"))
+    }
+
+    @Test("bare euphonium part matches either clef's file")
+    func bareEuphonium() {
+        #expect(presetPartMatches(part: "euphonium", in: "grade 2 - euphonium bc"))
+        #expect(presetPartMatches(part: "euphonium", in: "grade 2 - euphonium tc"))
+        #expect(presetPartMatches(part: "euphonium", in: "grade 2 - euphonium"))
+    }
 }
 
 // MARK: - Renumber After Deletion Tests

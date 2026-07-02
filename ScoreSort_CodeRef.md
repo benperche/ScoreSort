@@ -289,15 +289,19 @@ For each base name whose **all** numbered siblings went unmatched (e.g. "Clarine
 - Apply to that file, remove from `newUnmatched`, mark siblings matched.
 - More complex mismatches (e.g. 3 preset parts, 2 files) remain orange.
 
-**Qualifier-aware matching — `presetPartMatches(part:in:)`**
+**Identity-aware matching — `presetPartMatches(part:in:)`**
+Both args must be pre-lowercased + roman-normalised. The matcher reuses the splitter's instrument knowledge by *expanding each preset part into its equivalent filename phrases*, then testing each against the filename with a qualifier guard:
 ```swift
 let instrumentQualifierWords: Set<String>  // bass, alto, contra(bass), soprano(ino), tenor, baritone, piccolo, english
-func presetPartMatches(part: String, in filename: String) -> Bool
-// Substring match, but rejected when the word immediately before the match is an instrument
-// qualifier the part itself lacks — so "clarinet" ✗ "bass clarinet", "saxophone" ✗ "alto saxophone",
-// "horn" ✗ "english horn". Both args must be pre-lowercased + roman-normalised.
+func instrumentAliasPhrases(forBase base: String) -> [String]   // sax abbrev/reversed, French Horn=Horn, Vln=Violin, Bb Clarinet=Clarinet, clef-aware euph/bari; [] if unknown
+func presetMatchPhrases(for part: String) -> [String]           // aliases + trailing number re-attached; falls back to the literal base for custom names
+func phraseOccurs(_ phrase: String, in filename: String) -> Bool // substring, rejected if preceded by a qualifier word the phrase lacks
+func presetPartMatches(part: String, in filename: String) -> Bool // true if ANY phrase occurs
 ```
-This single guard fixes two symptoms at once: (1) a generic root part being wrongly assigned to a more specific instrument file, and (2) that specific file blocking the numbered-sibling consolidation by looking like a second candidate. Tested in `PresetPartMatchesTests`.
+- **Clef matters here, unlike the splitter.** `instrumentIdentityKey` (Step 2) *collapses* Euphonium/Baritone BC and TC into one identity; the Combine matcher keeps them **distinct** because it decides *which part to print*. So "Euphonium BC" matches a bass-clef file (incl. one the publisher spells "Baritone BC") but never the treble-clef one; a bare "Euphonium" preset entry matches either clef.
+- The qualifier guard still prevents a generic root ("Clarinet") from matching a more specific instrument ("Bass Clarinet") — which also stops that specific file from blocking the numbered-sibling consolidation.
+- The default **Wind Band template** ships "Euphonium BC" (not bare "Euphonium") so the common Australian-band case is clef-correct out of the box.
+- Short 1–2 letter abbreviations (Cl, Fl, Tpt) are intentionally *not* aliased (collision-prone); word-level aliases + the sax family + clefs are. Tested in `PresetPartMatchesTests`.
 
 **Supporting free functions:**
 
