@@ -1595,27 +1595,24 @@ func instrumentAliasPhrases(forBase base: String) -> [String] {
         return ["euphonium", "euph", "baritone"]   // bare — matches either clef's file
     }
     // Other common aliases (mirrors the splitter's group-key table, minus sax/euph).
-    // Matched on the *exact* clean base so a qualified variant ("Alto Clarinet",
-    // "Bass Trumpet") never falls through to the plain-root aliases.
-    let exactGroups: [(bases: Set<String>, phrases: [String])] = [
-        (["contrabass clarinet", "contra bass clarinet", "contra clarinet"],
-             ["contrabass clarinet", "contra bass clarinet", "contra clarinet"]),
-        (["bass clarinet", "bass clar"], ["bass clarinet", "bass clar"]),
-        (["clarinet", "bb clarinet", "b-flat clarinet", "clarinet in bb"],
-             ["clarinet", "bb clarinet", "b-flat clarinet", "clarinet in bb"]),
-        (["bass trombone", "bass tbn"], ["bass trombone", "bass tbn"]),
-        (["trombone", "tenor trombone"], ["trombone", "tenor trombone"]),
-        (["trumpet", "bb trumpet", "trumpet in bb", "b-flat trumpet"],
-             ["trumpet", "bb trumpet", "trumpet in bb", "b-flat trumpet"]),
-        (["english horn", "cor anglais"], ["english horn", "cor anglais"]),
-        (["horn", "french horn", "horn in f", "f horn"], ["horn", "french horn", "horn in f", "f horn"]),
-        (["double bass", "string bass", "contrabass"], ["double bass", "string bass", "contrabass"]),
-        (["violin", "vln"], ["violin", "vln"]),
-        (["viola", "vla"], ["viola", "vla"]),
-        (["cello", "violoncello", "vlc"], ["cello", "violoncello", "vlc"]),
+    // Each group is a set of interchangeable spellings: matched on the *exact* clean base
+    // (so a qualified variant like "Alto Clarinet" never falls through to the plain root),
+    // and the same list is what we search the filename for.
+    let aliasGroups: [[String]] = [
+        ["contrabass clarinet", "contra bass clarinet", "contra clarinet"],
+        ["bass clarinet", "bass clar"],
+        ["clarinet", "bb clarinet", "b-flat clarinet", "clarinet in bb"],
+        ["bass trombone", "bass tbn"],
+        ["trombone", "tenor trombone"],
+        ["trumpet", "bb trumpet", "trumpet in bb", "b-flat trumpet"],
+        ["english horn", "cor anglais"],
+        ["horn", "french horn", "horn in f", "f horn"],
+        ["double bass", "string bass", "contrabass"],
+        ["violin", "vln"],
+        ["viola", "vla"],
+        ["cello", "violoncello", "vlc"],
     ]
-    for (bases, phrases) in exactGroups where bases.contains(base) { return phrases }
-    return []
+    return aliasGroups.first { $0.contains(base) } ?? []
 }
 
 /// Every filename phrase that should count as a match for preset `part` — the instrument's
