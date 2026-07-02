@@ -53,6 +53,7 @@ struct TabSlice {
     var primaryTitle: String = "Save"             // File ▸ ⌘S (context: Create PDF / Save Split / …)
     var primarySave: (() -> Void)? = nil
     var openInPreview: (() -> Void)? = nil        // File ▸ ⇧⌘P (Combine)
+    var clearTitle: String = "Clear"              // File ▸ ⌘⌫ label (e.g. "Start Over" on done screens)
     var clear: (() -> Void)? = nil                // File ▸ ⌘⌫
     var togglePresets: (() -> Void)? = nil        // View ▸ ⌥⌘P (Combine)
     var tabActions: [MenuAction] = []             // the adaptive "Actions" menu
@@ -60,6 +61,17 @@ struct TabSlice {
 
 final class TabCommands: ObservableObject {
     @Published var slice = TabSlice()
+}
+
+/// Reveals a file (selected in its parent folder) or opens a folder in Finder. No-op on nil.
+func revealInFinder(_ url: URL?) {
+    guard let url = url else { return }
+    var isDir: ObjCBool = false
+    if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue {
+        NSWorkspace.shared.open(url)
+    } else {
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
 }
 
 // MARK: - Combine Menu State
@@ -110,7 +122,7 @@ struct FileCommands: Commands {
 
             Divider()
 
-            Button("Clear") { commands.slice.clear?() }
+            Button(commands.slice.clearTitle) { commands.slice.clear?() }
                 .keyboardShortcut(.delete, modifiers: .command)
                 .disabled(commands.slice.clear == nil)
         }
@@ -412,7 +424,8 @@ struct ShortcutsHelpView: View {
                     shortcutRow("⌘1 – ⌘4", "Switch tab (Combine / Rename / Split / Rotate)")
                     shortcutRow("⌘O", "Open — add files / choose a PDF or folder")
                     shortcutRow("⌘S", "Primary action — Create PDF / Save / Rename (per tab)")
-                    shortcutRow("⌘⌫", "Clear the current files")
+                    shortcutRow("⇧⌘F", "Show in Finder (the folder we’re working from)")
+                    shortcutRow("⌘⌫", "Clear / Start Over")
                     shortcutRow("⌘,", "Preferences")
                     shortcutRow("⌘/", "Welcome tour")
                     shortcutRow("⌘`", "This shortcuts panel")
@@ -432,6 +445,7 @@ struct ShortcutsHelpView: View {
 
                 shortcutSection("Rename Files") {
                     shortcutRow("⌫", "Move selected files to “Don’t Rename”")
+                    shortcutRow("⌘R", "Rescan the current folder")
                 }
 
                 shortcutSection("Split PDF") {

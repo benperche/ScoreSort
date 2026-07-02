@@ -791,9 +791,10 @@ struct SplitView: View {
         guard appState.selectedTab == 2 else { return }
         let loaded = pdfManager.pdfDocument != nil
         var slice = TabSlice()
-        slice.openTitle = "Choose PDF\u{2026}"
-        slice.open      = { openPDF() }
-        slice.clear     = loaded ? { pdfManager.clearPDF() } : nil
+        slice.openTitle  = "Choose PDF\u{2026}"
+        slice.open       = { openPDF() }
+        slice.clearTitle = "Clear File"
+        slice.clear      = loaded ? { pdfManager.clearPDF() } : nil
 
         switch splitStage {
         case .split:
@@ -814,8 +815,15 @@ struct SplitView: View {
         case .prefix:
             slice.tabActions = [MenuAction(title: "Back to Naming", perform: { splitStage = .naming })]
         case .summary:
-            slice.tabActions = [MenuAction(title: "Start Over", perform: { pdfManager.clearPDF() })]
+            // Start Over is the "clear" action here — reuse ⌘⌫ (File ▸ Start Over).
+            slice.clearTitle = "Start Over"
+            slice.clear = { pdfManager.clearPDF() }
         }
+
+        // Show in Finder — reveal the output folder on the summary, else the source file.
+        let revealTarget = (splitStage == .summary ? pendingFolderURL : nil) ?? pdfManager.sourceURL
+        slice.tabActions.append(MenuAction(title: "Show in Finder", key: KeyEquivalent("f"), modifiers: [.command, .shift],
+                                           isEnabled: revealTarget != nil, perform: { revealInFinder(revealTarget) }))
         appState.tabCommands.slice = slice
     }
 

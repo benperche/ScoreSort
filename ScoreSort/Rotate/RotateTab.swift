@@ -222,12 +222,16 @@ struct RotateView: View {
         slice.open         = { openPDF() }
         slice.primaryTitle = "Save Rotated PDF"
         slice.primarySave  = loaded ? { isShowingSavePanel = true } : nil
+        slice.clearTitle   = "Clear File"
         slice.clear        = loaded ? { pdfManager.clearPDF() } : nil
         // Always list the actions (disabled until a PDF is loaded) so the menu shows
         // what's possible rather than collapsing to nothing in the empty state.
+        let revealTarget = pdfManager.sourceURL
         slice.tabActions = [
             MenuAction(title: "Rotate Left",  isEnabled: loaded, perform: { rotateCurrentPageLeft() }),
             MenuAction(title: "Rotate Right", isEnabled: loaded, perform: { rotateCurrentPageRight() }),
+            MenuAction(title: "Show in Finder", key: KeyEquivalent("f"), modifiers: [.command, .shift],
+                       isEnabled: revealTarget != nil, perform: { revealInFinder(revealTarget) }),
         ]
         appState.tabCommands.slice = slice
     }

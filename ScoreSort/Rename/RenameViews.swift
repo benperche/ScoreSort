@@ -232,22 +232,21 @@ struct ScoreOrderSortView: View {
                 advanceOrFinish(recordResult: (folder: folderURL, names: names))
             }
         } : nil
-        slice.clear = reviewing ? {
-            resetBatch(); renamerManager.clearFolder(); selectedIDs = []; lastClickedID = nil
-        } : nil
-
         // Always list the actions (disabled when not applicable) so the menu shows what's
         // possible even before a folder is loaded.
         if renameResult != nil {
-            // Done screen.
+            // Done screen — Clear becomes Start Over (reuses ⌘⌫).
+            slice.clearTitle = "Start Over"
+            slice.clear = { renameResult = nil; resetBatch(); renamerManager.clearFolder() }
             slice.tabActions = [
                 MenuAction(title: "Rescan Folder", key: KeyEquivalent("r"), modifiers: .command,
                            perform: { renameResult = nil; renamerManager.scanFolder() }),
-                MenuAction(title: "Start Over", perform: {
-                    renameResult = nil; resetBatch(); renamerManager.clearFolder()
-                }),
             ]
         } else {
+            slice.clearTitle = "Clear Files"
+            slice.clear = reviewing ? {
+                resetBatch(); renamerManager.clearFolder(); selectedIDs = []; lastClickedID = nil
+            } : nil
             let hasExcludable = reviewing && renamerManager.operations.contains {
                 selectedIDs.contains($0.id) && $0.type != .excluded
             }
@@ -258,6 +257,9 @@ struct ScoreOrderSortView: View {
                 MenuAction(title: "Skip Folder", isEnabled: reviewing && isBatchActive, perform: { skipCurrent() }),
             ]
         }
+        let revealTarget = renamerManager.folderURL ?? renameResult.flatMap(\.folderURL)
+        slice.tabActions.append(MenuAction(title: "Show in Finder", key: KeyEquivalent("f"), modifiers: [.command, .shift],
+                                           isEnabled: revealTarget != nil, perform: { revealInFinder(revealTarget) }))
         appState.tabCommands.slice = slice
     }
 

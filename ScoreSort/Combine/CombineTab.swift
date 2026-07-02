@@ -783,8 +783,10 @@ struct CombineView: View {
         slice.primaryTitle  = "Create PDF\u{2026}"
         slice.primarySave   = hasFiles ? { createPDF() } : nil
         slice.openInPreview = hasFiles ? { openInPreview() } : nil
+        slice.clearTitle    = "Clear Files"
         slice.clear         = hasFiles ? { combineManager.clearAll(undoManager: undoManager) } : nil
         slice.togglePresets = { withAnimation { showPresetSidebar.toggle() } }
+        let revealTarget = combineManager.files.first?.url
         slice.tabActions = [
             MenuAction(title: "Move Up", key: KeyEquivalent.upArrow, isEnabled: canMoveUp, perform: { moveUp() }),
             MenuAction(title: "Move Down", key: KeyEquivalent.downArrow, isEnabled: canMoveDown, perform: { moveDown() }),
@@ -793,6 +795,8 @@ struct CombineView: View {
             MenuAction(title: "Remove Selected", isEnabled: !selectedFiles.isEmpty, perform: { removeSelected() }),
             MenuAction(title: "Select All", isEnabled: hasFiles, perform: { selectAll() }),
             MenuAction(title: "Select None", isEnabled: hasFiles, perform: { selectNone() }),
+            MenuAction(title: "Show in Finder", key: KeyEquivalent("f"), modifiers: [.command, .shift],
+                       isEnabled: revealTarget != nil, perform: { revealInFinder(revealTarget) }),
         ]
         appState.tabCommands.slice = slice
     }
