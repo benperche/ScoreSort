@@ -18,10 +18,16 @@ import AppKit
 @Suite("View smoke tests")
 struct ViewSmokeTests {
 
-    /// Hosts `view` in an off-screen NSHostingView and forces layout so its `body`
-    /// (and its children's) is evaluated. A construction crash fails the test.
+    /// Hosts `view` in an off-screen NSHostingView (with every app-level environment
+    /// object injected, as ContentView does) and forces layout so its `body` (and its
+    /// children's) is evaluated. A construction crash fails the test.
     private func render<V: View>(_ view: V) {
-        let host = NSHostingView(rootView: view)
+        let host = NSHostingView(
+            rootView: view
+                .environmentObject(AppState())
+                .environmentObject(RenamerManager())
+                .environmentObject(EnsemblePresetStore())
+        )
         host.frame = NSRect(x: 0, y: 0, width: 1000, height: 800)
         host.layoutSubtreeIfNeeded()
         _ = host.fittingSize
@@ -29,35 +35,26 @@ struct ViewSmokeTests {
 
     @Test("Combine tab renders")
     func combineTab() {
-        render(
-            CombineView(showingKeyboardHelp: .constant(false), menuState: CombineMenuState())
-                .environmentObject(EnsemblePresetStore())
-                .environmentObject(AppState())
-        )
+        render(CombineView(showingKeyboardHelp: .constant(false), menuState: CombineMenuState()))
     }
 
     @Test("Rename tab renders")
     func renameTab() {
-        render(RenamerView().environmentObject(RenamerManager()))
+        render(RenamerView())
     }
 
     @Test("Split tab renders")
     func splitTab() {
-        render(SplitView().environmentObject(AppState()))
+        render(SplitView())
     }
 
     @Test("Rotate tab renders")
     func rotateTab() {
-        render(RotateView().environmentObject(AppState()))
+        render(RotateView())
     }
 
     @Test("full ContentView renders")
     func contentView() {
-        render(
-            ContentView()
-                .environmentObject(AppState())
-                .environmentObject(RenamerManager())
-                .environmentObject(EnsemblePresetStore())
-        )
+        render(ContentView())
     }
 }

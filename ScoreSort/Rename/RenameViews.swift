@@ -209,6 +209,50 @@ struct ScoreOrderSortView: View {
     }
 
     var body: some View {
+        content
+            .onAppear { DispatchQueue.main.async { syncTabCommands() } }
+            .onChange(of: appState.selectedTab)        { DispatchQueue.main.async { syncTabCommands() } }
+            .onChange(of: renamerManager.hasContent)   { DispatchQueue.main.async { syncTabCommands() } }
+            .onChange(of: renamerManager.renameCount)  { DispatchQueue.main.async { syncTabCommands() } }
+            .onChange(of: selectedIDs)                 { DispatchQueue.main.async { syncTabCommands() } }
+            .onChange(of: batchFolders)                { DispatchQueue.main.async { syncTabCommands() } }
+            .onChange(of: renameResult == nil)         { DispatchQueue.main.async { syncTabCommands() } }
+    }
+
+    /// Publishes the Score Order Sorter's actions to the menu bridge while Rename is active.
+    private func syncTabCommands() {
+        guard appState.selectedTab == 1 else { return }
+        let reviewing = renamerManager.hasContent && renameResult == nil
+        var slice = TabSlice()
+        slice.openTitle    = "Choose Files or Folder\u{2026}"
+        slice.open         = { selectFolder() }
+        slice.primaryTitle = "Rename Files"
+        slice.primarySave  = (reviewing && renamerManager.renameCount > 0) ? {
+            renamerManager.executeRename { folderURL, names in
+                advanceOrFinish(recordResult: (folder: folderURL, names: names))
+            }
+        } : nil
+        slice.clear = reviewing ? {
+            resetBatch(); renamerManager.clearFolder(); selectedIDs = []; lastClickedID = nil
+        } : nil
+
+        var actions: [MenuAction] = []
+        if reviewing {
+            let hasExcludable = renamerManager.operations.contains { selectedIDs.contains($0.id) && $0.type != .excluded }
+            actions.append(MenuAction(title: "Don't Rename Selected", isEnabled: hasExcludable, perform: { excludeSelected() }))
+            actions.append(MenuAction(title: "Rescan Folder", perform: { renamerManager.scanFolder() }))
+            if isBatchActive { actions.append(MenuAction(title: "Skip Folder", perform: { skipCurrent() })) }
+        }
+        if renameResult != nil {
+            actions.append(MenuAction(title: "Start Over", perform: {
+                renameResult = nil; resetBatch(); renamerManager.clearFolder()
+            }))
+        }
+        slice.tabActions = actions
+        appState.tabCommands.slice = slice
+    }
+
+    @ViewBuilder private var content: some View {
         if let result = renameResult {
             // ── Done screen ───────────────────────────────────────────────
             ScoreOrderRenameSummaryView(

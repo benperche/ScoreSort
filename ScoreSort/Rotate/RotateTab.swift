@@ -156,8 +156,10 @@ struct RotateView: View {
         }
         .focusable()
         .focused($isViewFocused)
-        .onAppear { isViewFocused = true }
+        .onAppear { isViewFocused = true; DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: appState.selectedTab) { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: pdfManager.pdfDocument) { _, newValue in
+            DispatchQueue.main.async { syncTabCommands() }
             if newValue != nil {
                 isViewFocused = true
             } else {
@@ -199,6 +201,33 @@ struct RotateView: View {
                 saveRotatedPDF(document: document)
             }
         }
+    }
+
+    private func openPDF() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.allowsMultipleSelection = false
+        panel.title = "Select PDF"
+        panel.begin { response in
+            if response == .OK, let url = panel.url { pdfManager.loadPDF(from: url) }
+        }
+    }
+
+    /// Publishes Rotate's actions to the menu bridge while Rotate is the active tab.
+    private func syncTabCommands() {
+        guard appState.selectedTab == 3 else { return }
+        let loaded = pdfManager.pdfDocument != nil
+        var slice = TabSlice()
+        slice.openTitle    = "Choose PDF\u{2026}"
+        slice.open         = { openPDF() }
+        slice.primaryTitle = "Save Rotated PDF"
+        slice.primarySave  = loaded ? { isShowingSavePanel = true } : nil
+        slice.clear        = loaded ? { pdfManager.clearPDF() } : nil
+        slice.tabActions = loaded ? [
+            MenuAction(title: "Rotate Left",  isEnabled: true, perform: { rotateCurrentPageLeft() }),
+            MenuAction(title: "Rotate Right", isEnabled: true, perform: { rotateCurrentPageRight() }),
+        ] : []
+        appState.tabCommands.slice = slice
     }
 
     private func rotateCurrentPageLeft() {

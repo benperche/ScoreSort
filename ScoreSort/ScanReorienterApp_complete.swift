@@ -20,6 +20,46 @@ class AppState: ObservableObject {
     @Published var showingKeyboardHelp = false
     @Published var showingWelcomeTour = false
     let combineMenuState = CombineMenuState()
+    /// Bridges the *active* tab's actions to the File/Edit/View/⟨tab⟩ menus.
+    let tabCommands = TabCommands()
+}
+
+// MARK: - Tab Commands (menu bridge for the active tab)
+// The active tab publishes a TabSlice describing the contextual verbs and its own
+// action list; the menu command structs read it. Only the active tab writes (each
+// tab guards its publish on `selectedTab == myTab`), so the slice always reflects
+// whatever tab is on screen. Standard-editing keys (⌘A/⌘Z/⌫) and bare keys are NOT
+// bound here — they stay in each tab's onKeyPress/NSEvent handlers; the menu rows
+// for them are clickable only. See CLAUDE.md on CommandMenu shortcut interception.
+
+/// One row in the adaptive ⟨active-tab⟩ menu.
+struct MenuAction: Identifiable {
+    let id = UUID()
+    let title: String
+    /// A *modifier* shortcut only (nil for none). Never a bare key / standard-editing key.
+    var key: KeyEquivalent? = nil
+    var modifiers: EventModifiers = .command
+    var isEnabled: Bool = true
+    let perform: () -> Void
+}
+
+/// The active tab's contextual menu commands. Closures are nil when unavailable
+/// (the corresponding menu item is then disabled). Editing-ish verbs (Select All,
+/// Undo, Delete/Skip) live in `tabActions` rather than the Edit menu, so the system
+/// Edit menu (text Undo/Cut/Copy/Paste/Select All) is left untouched.
+struct TabSlice {
+    var openTitle: String = "Open\u{2026}"        // File ▸ ⌘O
+    var open: (() -> Void)? = nil
+    var primaryTitle: String = "Save"             // File ▸ ⌘S (context: Create PDF / Save Split / …)
+    var primarySave: (() -> Void)? = nil
+    var openInPreview: (() -> Void)? = nil        // File ▸ ⇧⌘P (Combine)
+    var clear: (() -> Void)? = nil                // File ▸ ⌘⌫
+    var togglePresets: (() -> Void)? = nil        // View ▸ ⌥⌘P (Combine)
+    var tabActions: [MenuAction] = []             // the adaptive "Actions" menu
+}
+
+final class TabCommands: ObservableObject {
+    @Published var slice = TabSlice()
 }
 
 // MARK: - Combine Menu State
@@ -47,13 +87,42 @@ class CombineMenuState: ObservableObject {
     var togglePresetSidebar:     () -> Void = {}
 }
 
-// MARK: - Navigate Commands (tab switching — placed in the Window menu)
-struct NavigateCommands: Commands {
+// MARK: - File Commands (contextual Open / Save / Preview / Clear for the active tab)
+struct FileCommands: Commands {
+    @ObservedObject var commands: TabCommands
+
+    var body: some Commands {
+        // Open… replaces File ▸ New.
+        CommandGroup(replacing: .newItem) {
+            Button(commands.slice.openTitle) { commands.slice.open?() }
+                .keyboardShortcut("o", modifiers: .command)
+                .disabled(commands.slice.open == nil)
+        }
+        // Save / export, preview, clear replace the Save slot.
+        CommandGroup(replacing: .saveItem) {
+            Button(commands.slice.primaryTitle) { commands.slice.primarySave?() }
+                .keyboardShortcut("s", modifiers: .command)
+                .disabled(commands.slice.primarySave == nil)
+
+            Button("Open in Preview") { commands.slice.openInPreview?() }
+                .keyboardShortcut("p", modifiers: [.command, .shift])
+                .disabled(commands.slice.openInPreview == nil)
+
+            Divider()
+
+            Button("Clear") { commands.slice.clear?() }
+                .keyboardShortcut(.delete, modifiers: .command)
+                .disabled(commands.slice.clear == nil)
+        }
+    }
+}
+
+// MARK: - View Commands (tab switching + panel toggles)
+struct ViewCommands: Commands {
     @ObservedObject var appState: AppState
 
     var body: some Commands {
-        CommandGroup(after: .windowArrangement) {
-            Divider()
+        CommandMenu("View") {
             Button("Combine PDFs") { appState.selectedTab = 0 }
                 .keyboardShortcut("1", modifiers: .command)
             Button("Rename Files") { appState.selectedTab = 1 }
@@ -62,64 +131,33 @@ struct NavigateCommands: Commands {
                 .keyboardShortcut("3", modifiers: .command)
             Button("Rotate Pages") { appState.selectedTab = 3 }
                 .keyboardShortcut("4", modifiers: .command)
+
+            Divider()
+
+            Button("Show/Hide Presets") { appState.tabCommands.slice.togglePresets?() }
+                .keyboardShortcut("p", modifiers: [.command, .option])
+                .disabled(appState.tabCommands.slice.togglePresets == nil)
         }
     }
 }
 
-// MARK: - Combiner Commands (file list shortcuts — active whenever the window is frontmost)
-struct CombinerCommands: Commands {
-    @ObservedObject var state: CombineMenuState
+// MARK: - Tab Actions Commands (the adaptive "Actions" menu for the current tab)
+// A single stable-titled menu whose *contents* are the active tab's actions
+// (SwiftUI can't reliably retitle a CommandMenu, so the title stays "Actions").
+struct TabActionsCommands: Commands {
+    @ObservedObject var commands: TabCommands
 
     var body: some Commands {
-        CommandMenu("Combiner") {
-            Button("Select Previous") { state.selectPrevious() }
-                .keyboardShortcut(.upArrow, modifiers: [])
-                .disabled(!state.isActiveTab || state.isPanelOpen || !state.hasFiles)
-
-            Button("Extend Selection Up") { state.selectPreviousExtending() }
-                .keyboardShortcut(.upArrow, modifiers: .shift)
-                .disabled(!state.isActiveTab || state.isPanelOpen || !state.hasFiles)
-
-            Button("Select Next") { state.selectNext() }
-                .keyboardShortcut(.downArrow, modifiers: [])
-                .disabled(!state.isActiveTab || state.isPanelOpen || !state.hasFiles)
-
-            Button("Extend Selection Down") { state.selectNextExtending() }
-                .keyboardShortcut(.downArrow, modifiers: .shift)
-                .disabled(!state.isActiveTab || state.isPanelOpen || !state.hasFiles)
-
-            Divider()
-
-            Button("Move Up") { state.moveUp() }
-                .keyboardShortcut(.upArrow, modifiers: .command)
-                .disabled(!state.isActiveTab || state.isPanelOpen || !state.canMoveUp)
-
-            Button("Move Down") { state.moveDown() }
-                .keyboardShortcut(.downArrow, modifiers: .command)
-                .disabled(!state.isActiveTab || state.isPanelOpen || !state.canMoveDown)
-
-            Divider()
-
-            Button("Remove Selected Files") { state.removeSelected() }
-                .keyboardShortcut(.delete, modifiers: [])
-                .disabled(!state.isActiveTab || state.isPanelOpen || !state.canRemove)
-
-            Divider()
-
-            Button("Group Selected Files") { state.group() }
-                .keyboardShortcut("c", modifiers: [])
-                .disabled(!state.isActiveTab || state.isPanelOpen || !state.canGroup)
-
-            Divider()
-
-            Button("Select All Files") { state.selectAll() }
-                .disabled(!state.isActiveTab || state.isPanelOpen || !state.hasFiles)
-
-            Divider()
-
-            Button("Toggle Presets Panel") { state.togglePresetSidebar() }
-                .keyboardShortcut("p", modifiers: [])
-                .disabled(!state.isActiveTab)
+        CommandMenu("Actions") {
+            ForEach(commands.slice.tabActions) { action in
+                let button = Button(action.title) { action.perform() }
+                    .disabled(!action.isEnabled)
+                if let key = action.key {
+                    button.keyboardShortcut(key, modifiers: action.modifiers)
+                } else {
+                    button
+                }
+            }
         }
     }
 }
@@ -213,9 +251,9 @@ struct ScoreSortApp: App {
                 Button("Check for Updates\u{2026}") { updaterViewModel.checkForUpdates() }
                     .disabled(!updaterViewModel.canCheckForUpdates)
             }
-            CommandGroup(replacing: .newItem) { }
-            NavigateCommands(appState: appState)
-            CombinerCommands(state: appState.combineMenuState)
+            FileCommands(commands: appState.tabCommands)
+            ViewCommands(appState: appState)
+            TabActionsCommands(commands: appState.tabCommands)
             HelpCommands(appState: appState)
         }
 
@@ -370,52 +408,48 @@ struct ShortcutsHelpView: View {
                     .font(.title2)
                     .fontWeight(.semibold)
 
-                shortcutSection("Combine — File List Navigation") {
+                shortcutSection("Global (View & File menus)") {
+                    shortcutRow("⌘1 – ⌘4", "Switch tab (Combine / Rename / Split / Rotate)")
+                    shortcutRow("⌘O", "Open — add files / choose a PDF or folder")
+                    shortcutRow("⌘S", "Primary action — Create PDF / Save / Rename (per tab)")
+                    shortcutRow("⌘⌫", "Clear the current files")
+                    shortcutRow("⌘,", "Preferences")
+                    shortcutRow("⌘/", "Welcome tour")
+                    shortcutRow("⌘`", "This shortcuts panel")
+                }
+
+                shortcutSection("Combine PDFs") {
                     shortcutRow("↑ / ↓", "Select previous / next file")
                     shortcutRow("⇧↑ / ⇧↓", "Extend selection up / down")
                     shortcutRow("⌘A", "Select all files")
-                }
-
-                shortcutSection("Combine — File Management") {
                     shortcutRow("⌫", "Remove selected files")
                     shortcutRow("⌘↑ / ⌘↓", "Move selected files up / down")
-                    shortcutRow("C", "Group selected files into a collate set")
-                    shortcutRow("⌘Z / ⌘⇧Z", "Undo / Redo")
+                    shortcutRow("C", "Collate selected files into a group")
+                    shortcutRow("⌘Z / ⇧⌘Z", "Undo / Redo")
+                    shortcutRow("⌥⌘P", "Show / hide the presets panel (also P)")
+                    shortcutRow("⇧⌘P", "Open the combined PDF in Preview")
                 }
 
-                shortcutSection("Combine — Collate Groups") {
-                    shortcutRow("C", "Create group from selected files")
-                    shortcutRow("↗ button", "Dissolve group (restore files individually)")
+                shortcutSection("Rename Files") {
+                    shortcutRow("⌫", "Move selected files to “Don’t Rename”")
                 }
 
-                shortcutSection("Combine — Ensemble Presets") {
-                    shortcutRow("P", "Toggle preset sidebar")
-                    shortcutRow("⌘,", "Open Preferences — create & edit presets")
-                }
-                
-                shortcutSection("Renamer") {
-                    shortcutRow("⌘,", "Open Preferences")
-                }
-                
                 shortcutSection("Split PDF") {
                     shortcutRow("← / →", "Previous / next page")
                     shortcutRow("⌘← / ⌘→", "First / last page")
-                    shortcutRow("Space", "Toggle split marker")
-                    shortcutRow("R", "Re-stride: apply stride from current page to end")
                     shortcutRow("↑ / ↓", "Jump between output files")
-                    shortcutRow("⌫", "Toggle skip on selected output file(s)")
+                    shortcutRow("⇧↑ / ⇧↓", "Extend the output-file selection")
+                    shortcutRow("Space", "Add / remove a split at the current page")
+                    shortcutRow("S", "Swap the current page with the next")
+                    shortcutRow("R", "Re-stride: apply stride from here to the end")
+                    shortcutRow("⌫", "Skip the current page / output file")
+                    shortcutRow("⌘Z / ⇧⌘Z", "Undo / Redo split edits")
                 }
-                
+
                 shortcutSection("Rotate Pages") {
                     shortcutRow("← / →", "Previous / next page")
+                    shortcutRow("⌘← / ⌘→", "First / last page")
                     shortcutRow(", / .", "Rotate current page left / right")
-                }
-                
-                shortcutSection("Tabs") {
-                    shortcutRow("⌘1", "Combine PDFs")
-                    shortcutRow("⌘2", "Rename Files")
-                    shortcutRow("⌘3", "Split PDF")
-                    shortcutRow("⌘4", "Rotate Pages")
                 }
 
 
@@ -429,8 +463,8 @@ struct ShortcutsHelpView: View {
             }
             .padding(36)
         }
-        .frame(width: 460)
-        .frame(maxHeight: 580)
+        .frame(width: 500)
+        .frame(maxHeight: 620)
         .background(Color(NSColor.windowBackgroundColor))
         .cornerRadius(12)
         .shadow(color: .black.opacity(0.25), radius: 20, x: 0, y: 8)
@@ -450,7 +484,7 @@ struct ShortcutsHelpView: View {
             Text(shortcut)
                 .font(.system(.body, design: .monospaced))
                 .foregroundColor(.secondary)
-                .frame(width: 80, alignment: .leading)
+                .frame(width: 96, alignment: .leading)
             Text(description)
         }
         .padding(.leading, 8)

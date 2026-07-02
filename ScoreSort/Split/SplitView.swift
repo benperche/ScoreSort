@@ -283,6 +283,12 @@ struct SplitView: View {
                 a3HintVisible = false
             }
         }
+        .onAppear { DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: appState.selectedTab)     { DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: splitStage)               { DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: fileSizes)                { DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: skippedPages)             { DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: pdfManager.pdfDocument)   { DispatchQueue.main.async { syncTabCommands() } }
         .sheet(isPresented: $showingA3Detection) {
             A3SplitChoiceView(
                 firstPage: pdfManager.pdfDocument?.page(at: 0),
@@ -767,6 +773,50 @@ struct SplitView: View {
         guard let next = redoStack.popLast() else { return }
         undoStack.append(currentSplitSnapshot())
         restoreSplit(next)
+    }
+
+    private func openPDF() {
+        let panel = NSOpenPanel()
+        panel.allowedContentTypes = [.pdf]
+        panel.allowsMultipleSelection = false
+        panel.title = "Select PDF"
+        panel.begin { response in
+            if response == .OK, let url = panel.url { pdfManager.loadPDF(from: url) }
+        }
+    }
+
+    /// Publishes the Split tab's actions to the menu bridge while Split is active.
+    /// The primary action + tab actions are contextual to the current step.
+    private func syncTabCommands() {
+        guard appState.selectedTab == 2 else { return }
+        let loaded = pdfManager.pdfDocument != nil
+        var slice = TabSlice()
+        slice.openTitle = "Choose PDF\u{2026}"
+        slice.open      = { openPDF() }
+        slice.clear     = loaded ? { pdfManager.clearPDF() } : nil
+
+        switch splitStage {
+        case .split:
+            let canProceed = loaded && !(activeFileCount < 1 || (activeFileCount < 2 && skippedPages.isEmpty))
+            slice.primaryTitle = "Continue to Naming"
+            slice.primarySave  = canProceed ? { splitStage = .naming } : nil
+            if loaded {
+                slice.tabActions = [
+                    MenuAction(title: "Split as A3\u{2026}", perform: { showingA3Detection = true }),
+                    MenuAction(title: "Fix Booklet Order", isEnabled: canFixBookletOrder, perform: { requestBookletFix() }),
+                    MenuAction(title: "Clear All Splits", isEnabled: !splitMarkers.isEmpty, perform: { clearAllMarkers() }),
+                ]
+            }
+        case .naming:
+            slice.primaryTitle = "Save Split Files"
+            slice.primarySave  = { saveSplitPDF() }
+            slice.tabActions   = [MenuAction(title: "Back to Split", perform: { splitStage = .split })]
+        case .prefix:
+            slice.tabActions = [MenuAction(title: "Back to Naming", perform: { splitStage = .naming })]
+        case .summary:
+            slice.tabActions = [MenuAction(title: "Start Over", perform: { pdfManager.clearPDF() })]
+        }
+        appState.tabCommands.slice = slice
     }
 
     private func clearAllMarkers() {

@@ -53,11 +53,11 @@ struct CombineView: View {
             handleDrop(providers: providers)
             return true
         }
-        .onAppear { DispatchQueue.main.async { syncMenuClosures(); syncMenuFlags() } }
-        .onChange(of: selectedFiles)          { DispatchQueue.main.async { syncMenuFlags() } }
-        .onChange(of: combineManager.files)   { DispatchQueue.main.async { syncMenuFlags() } }
-        // Disable the Combiner menu's bare-key shortcuts the instant another tab is shown.
-        .onChange(of: appState.selectedTab)   { DispatchQueue.main.async { syncMenuFlags() } }
+        .onAppear { DispatchQueue.main.async { syncMenuClosures(); syncMenuFlags(); syncTabCommands() } }
+        .onChange(of: selectedFiles)          { DispatchQueue.main.async { syncMenuFlags(); syncTabCommands() } }
+        .onChange(of: combineManager.files)   { DispatchQueue.main.async { syncMenuFlags(); syncTabCommands() } }
+        // Re-publish the moment Combine becomes (or stops being) the active tab.
+        .onChange(of: appState.selectedTab)   { DispatchQueue.main.async { syncMenuFlags(); syncTabCommands() } }
     }
 
     private var mainContent: some View {
@@ -770,6 +770,31 @@ struct CombineView: View {
         menuState.canGroup    = canGroup
         menuState.hasFiles    = !combineManager.files.isEmpty
         menuState.isActiveTab = appState.selectedTab == 0
+    }
+
+    /// Publishes Combine's actions to the app-level menu bridge — but only while Combine
+    /// is the active tab, so the File/View/Actions menus reflect whatever tab is on screen.
+    private func syncTabCommands() {
+        guard appState.selectedTab == 0 else { return }
+        let hasFiles = !combineManager.files.isEmpty
+        var slice = TabSlice()
+        slice.openTitle     = "Add Files\u{2026}"
+        slice.open          = { selectFiles() }
+        slice.primaryTitle  = "Create PDF\u{2026}"
+        slice.primarySave   = hasFiles ? { createPDF() } : nil
+        slice.openInPreview = hasFiles ? { openInPreview() } : nil
+        slice.clear         = hasFiles ? { combineManager.clearAll(undoManager: undoManager) } : nil
+        slice.togglePresets = { withAnimation { showPresetSidebar.toggle() } }
+        slice.tabActions = [
+            MenuAction(title: "Move Up", key: KeyEquivalent.upArrow, isEnabled: canMoveUp, perform: { moveUp() }),
+            MenuAction(title: "Move Down", key: KeyEquivalent.downArrow, isEnabled: canMoveDown, perform: { moveDown() }),
+            MenuAction(title: "Collate", isEnabled: canGroup, perform: { groupSelected() }),
+            MenuAction(title: "Add Blank Page", perform: { addBlankPage() }),
+            MenuAction(title: "Remove Selected", isEnabled: !selectedFiles.isEmpty, perform: { removeSelected() }),
+            MenuAction(title: "Select All", isEnabled: hasFiles, perform: { selectAll() }),
+            MenuAction(title: "Select None", isEnabled: hasFiles, perform: { selectNone() }),
+        ]
+        appState.tabCommands.slice = slice
     }
 
     // MARK: - Apply Preset
