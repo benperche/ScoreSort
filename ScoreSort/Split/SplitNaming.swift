@@ -703,8 +703,11 @@ struct SplitFileNamingRow: View {
             result = Array(deduplicated.prefix(8))
         } else {
             let q = queryText.lowercased()
-            let prefixMatches   = deduplicated.filter { $0.lowercased().hasPrefix(q) }
-            let containsMatches = deduplicated.filter {
+            // While typing, also offer the "solo" options (jazz) — they're excluded from
+            // the empty-field default and the auto-next walk, but surface when searched.
+            let pool = deduplicated + splitSuggestionExtraOptions(for: ensemble)
+            let prefixMatches   = pool.filter { $0.lowercased().hasPrefix(q) }
+            let containsMatches = pool.filter {
                 $0.lowercased().contains(q) && !$0.lowercased().hasPrefix(q)
             }
             result = Array((prefixMatches + containsMatches).prefix(8))

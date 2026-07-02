@@ -1735,6 +1735,17 @@ struct JazzSuggestionSequenceTests {
 
     @Test("Trumpet 3 does not cross in jazz (a 4th is expected)")
     func trumpet3NoCross() { #expect(next("Trumpet 3") == nil) }
+
+    @Test("solo options exist for jazz but stay out of the walk order")
+    func soloOptionsAvailableButNotInWalk() {
+        let solos = splitSuggestionExtraOptions(for: .jazz)
+        #expect(solos.contains("Solo Alto Saxophone"))
+        #expect(solos.contains("Solo Trumpet"))
+        // …but they must never be part of the auto-next order.
+        #expect(!jazz.contains { $0.lowercased().hasPrefix("solo") })
+        // Band has no solo options.
+        #expect(splitSuggestionExtraOptions(for: .band).isEmpty)
+    }
 }
 
 // MARK: - Output dialog default directory

@@ -340,6 +340,17 @@ func splitSuggestionOrder(for ensemble: EnsembleType) -> [String] {
     }
 }
 
+/// Extra naming-dropdown options offered **only while the user is typing** toward them
+/// (never in the auto-next walk or the empty-field default). Big-band charts often lead a
+/// section with a lead/solo part — "Solo Alto Sax", "Solo Trumpet" — but a solo must never
+/// be auto-suggested mid-section, so these are kept out of `splitSuggestionOrder`.
+func splitSuggestionExtraOptions(for ensemble: EnsembleType) -> [String] {
+    guard ensemble == .jazz else { return [] }
+    return ["Solo Alto Saxophone", "Solo Tenor Saxophone", "Solo Baritone Saxophone",
+            "Solo Soprano Saxophone", "Solo Trumpet", "Solo Trombone",
+            "Solo Eb", "Solo Bb", "Soli"]
+}
+
 /// Cross-boundary suggestion: when the previous instrument's last part has been named,
 /// returns "NextInstrument 1" (or the bare next instrument for single-part families).
 /// "Complete" means either a numbered part at/over its typical count (e.g. "Flute 2",
