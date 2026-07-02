@@ -1,7 +1,8 @@
 # ScoreSort — Code Reference
-> UI (views/view models/models): `ScanReorienterApp_complete.swift` (~10 000 lines).
-> Pure logic extracted to `ScoreSort/Logic/`: `InstrumentNames.swift` (preset matching + split instrument suggestions/detection), `SplitLogic.swift` (split maths, A3, bookmarks, booklet), `RenameLogic.swift` (folder-job helpers + score-order numbering), `FileUtilities.swift` (output dir, filename validation, permissions, page-range formatting).
-> One module/target — cross-file calls need no imports; filesystem-synchronized project auto-compiles files added under `ScoreSort/`.
+> Split by feature. Tabs: `Combine/CombineTab.swift`; `Rename/RenameViews.swift` + `Rename/RenamerManager.swift`; `Split/SplitView.swift` + `Split/SplitNaming.swift` + `Split/SplitPrefixStep.swift`; `Rotate/RotateTab.swift`.
+> Pure logic in `ScoreSort/Logic/`: `InstrumentNames.swift` (preset matching + split instrument suggestions/detection), `SplitLogic.swift` (split maths, A3, bookmarks, booklet), `RenameLogic.swift` (folder-job helpers + score-order numbering), `FileUtilities.swift` (output dir, filename validation, permissions, page-range formatting).
+> Shared scaffolding (app entry, ContentView, AppState, menu commands, Sparkle, Preferences panes, DropZone, PDFManager) stays in `ScanReorienterApp_complete.swift` (~1 700 lines).
+> One module/target — cross-file calls need no imports; filesystem-synchronized project auto-compiles files added under `ScoreSort/`. Tests: `ScoreSortTests` incl. `ViewSmokeTests` (host each tab) + `CombineManagerReorderTests`.
 > Xcode project: "ScoreSort"
 
 ---

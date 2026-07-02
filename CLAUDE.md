@@ -12,14 +12,13 @@ ScoreSort is a macOS SwiftUI app for managing music PDFs. It has four tools, eac
 
 ## Code layout
 
-**Almost all UI code (views, view models, models) still lives in one big file: `ScoreSort/ScanReorienterApp_complete.swift` (~10,000 lines).** The tested **pure functions have been extracted** into `ScoreSort/Logic/`:
+The app is split by feature. **Each tab has its own file(s); shared app scaffolding remains in `ScoreSort/ScanReorienterApp_complete.swift` (~1,700 lines).**
 
-- `Logic/InstrumentNames.swift` — preset-to-file matching (Combine) + instrument suggestions, display names & detection (Split).
-- `Logic/SplitLogic.swift` — split-point maths, A3 detect/split, bookmark parsing, booklet deimposition.
-- `Logic/RenameLogic.swift` — renamable-file/folder-job helpers + score-order numbering.
-- `Logic/FileUtilities.swift` — output dir, PDF filename validation, read-only/permission detection, page-range formatting.
+- **Tabs:** `Combine/CombineTab.swift`; `Rename/RenameViews.swift` + `Rename/RenamerManager.swift`; `Split/SplitView.swift` (Step 1) + `Split/SplitNaming.swift` (Step 2) + `Split/SplitPrefixStep.swift` (Step 3, shared with Bulk Rename); `Rotate/RotateTab.swift`.
+- **Pure logic** (`ScoreSort/Logic/`): `InstrumentNames.swift` (preset matching + split instrument suggestions/detection), `SplitLogic.swift` (split maths, A3, bookmarks, booklet), `RenameLogic.swift` (folder-job helpers + score-order numbering), `FileUtilities.swift` (output dir, filename validation, permissions, page-range formatting).
+- **The main file (`ScanReorienterApp_complete.swift`)** now holds only the shared scaffolding: `@main` app + `ContentView`, `AppState`, the menu-command structs + `CombineMenuState`, Sparkle updater, About/AppDelegate, the welcome tour, **all three Preferences panes**, and shared infra (`DropZoneView`, `PDFPageView`, `PDFManager`, Sendable utils). The filename is legacy and doesn't match the app name (renamed from "Music PDF Manager" / "Music PDF Wrangler").
 
-It's all **one module/target**, so functions call across files with no imports and access control is unchanged (`private` free functions used from the big file are `internal`). When searching, grep the whole `ScoreSort/` tree — don't assume everything is in the one file. The Xcode project uses **filesystem-synchronized groups**, so any `.swift` file added under `ScoreSort/` is compiled automatically; no `.pbxproj` edits needed to add files. The `ScanReorienterApp_complete.swift` filename is legacy and doesn't match the app name (renamed from "Music PDF Manager" / "Music PDF Wrangler" to "ScoreSort" — you'll see those old names in the test target and stale `.xcodeproj` workspace files in git status). Splitting the remaining views out of the big file is an ongoing, welcome cleanup — extract along the `// MARK:` boundaries, build + run the full suite after each move.
+It's all **one module/target**, so functions/views call across files with no imports and access control is unchanged (helpers used across files are `internal`, not `private`). **When searching, grep the whole `ScoreSort/` tree.** The Xcode project uses **filesystem-synchronized groups**, so any `.swift` file added under `ScoreSort/` compiles automatically — no `.pbxproj` edits to add files. When extracting further, cut along `// MARK:` boundaries and build + run the full suite (incl. `ViewSmokeTests`, which host each tab and catch a view that fails to construct) after each move.
 
 ## Build, run, test
 
