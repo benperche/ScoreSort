@@ -443,6 +443,9 @@ struct SplitNamingStageView: View {
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
         }
+        // Escape goes back one step. A focused text field consumes Escape first
+        // (cancelling its edit), so this only fires when you're not typing.
+        .onExitCommand { onBack() }
     }
 }
 

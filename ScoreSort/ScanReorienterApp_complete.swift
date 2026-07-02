@@ -458,6 +458,8 @@ struct ShortcutsHelpView: View {
                     shortcutRow("R", "Re-stride: apply stride from here to the end")
                     shortcutRow("⌫", "Skip the current page / output file")
                     shortcutRow("⌘Z / ⇧⌘Z", "Undo / Redo split edits")
+                    shortcutRow("↩", "Next step (Name Files)")
+                    shortcutRow("⎋", "Back to the previous step")
                 }
 
                 shortcutSection("Rotate Pages") {

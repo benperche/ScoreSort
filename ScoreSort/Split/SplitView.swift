@@ -690,6 +690,13 @@ struct SplitView: View {
                                 toggleSplitAt(page: currentPage)
                             }
                             return .handled
+                        case .return:
+                            // Advance to naming (same gate as the "Next: Name Files" button).
+                            if !(activeFileCount < 1 || (activeFileCount < 2 && skippedPages.isEmpty)) {
+                                splitStage = .naming
+                                return .handled
+                            }
+                            return .ignored
                         default:
                             // S — swap current page with the next one
                             if press.characters == "s" || press.characters == "S" {

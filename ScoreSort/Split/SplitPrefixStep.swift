@@ -349,6 +349,9 @@ struct PrefixOrderStepView: View {
                 onCancel: { prefixEditTarget = nil }
             )
         }
+        // Escape goes back one step (Step 3 → Step 2 for the splitter; back to the
+        // base step for Bulk Rename). A focused text field consumes Escape first.
+        .onExitCommand { onBack() }
     }
 }
 
