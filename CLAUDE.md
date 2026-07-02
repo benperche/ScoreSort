@@ -10,9 +10,16 @@ ScoreSort is a macOS SwiftUI app for managing music PDFs. It has four tools, eac
 
 **`ScoreSort_CodeRef.md` is the authoritative map of the codebase** — a detailed, per-tab breakdown of every view, view model, data model, pure function, and known gotcha. Read it before exploring or modifying code; it is far faster than reading the source directly. Keep it updated when you change architecture.
 
-## The single-file architecture
+## Code layout
 
-**Essentially all app code lives in one file: `ScoreSort/ScanReorienterApp_complete.swift` (~9700 lines).** Views, view models, models, and free functions are all here. When searching, grep this one file rather than expecting a multi-file layout. The filename is legacy and does not match the app name (the project was renamed from "Music PDF Manager" / "Music PDF Wrangler" to "ScoreSort" — you'll see those old names in the test target and stale `.xcodeproj` workspace files in git status).
+**Almost all UI code (views, view models, models) still lives in one big file: `ScoreSort/ScanReorienterApp_complete.swift` (~10,000 lines).** The tested **pure functions have been extracted** into `ScoreSort/Logic/`:
+
+- `Logic/InstrumentNames.swift` — preset-to-file matching (Combine) + instrument suggestions, display names & detection (Split).
+- `Logic/SplitLogic.swift` — split-point maths, A3 detect/split, bookmark parsing, booklet deimposition.
+- `Logic/RenameLogic.swift` — renamable-file/folder-job helpers + score-order numbering.
+- `Logic/FileUtilities.swift` — output dir, PDF filename validation, read-only/permission detection, page-range formatting.
+
+It's all **one module/target**, so functions call across files with no imports and access control is unchanged (`private` free functions used from the big file are `internal`). When searching, grep the whole `ScoreSort/` tree — don't assume everything is in the one file. The Xcode project uses **filesystem-synchronized groups**, so any `.swift` file added under `ScoreSort/` is compiled automatically; no `.pbxproj` edits needed to add files. The `ScanReorienterApp_complete.swift` filename is legacy and doesn't match the app name (renamed from "Music PDF Manager" / "Music PDF Wrangler" to "ScoreSort" — you'll see those old names in the test target and stale `.xcodeproj` workspace files in git status). Splitting the remaining views out of the big file is an ongoing, welcome cleanup — extract along the `// MARK:` boundaries, build + run the full suite after each move.
 
 ## Build, run, test
 
