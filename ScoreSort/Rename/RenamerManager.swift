@@ -559,7 +559,7 @@ struct InstrumentOrders {
 
     // Bump this whenever the built-in defaults change so existing JSON files
     // are automatically regenerated on next launch.
-    private static let defaultsVersion = 6
+    private static let defaultsVersion = 7
 
     // MARK: - Loaded state (populated by setup())
     private static var loaded: [String: [String]] = [:]
@@ -722,6 +722,8 @@ struct InstrumentOrders {
         "marimba",
         "drums",
         "drum set",
+        "drum kit",
+        "drumkit",
         "percussion",
         "snare drum",
         "bass drum",
@@ -793,6 +795,8 @@ struct InstrumentOrders {
         "double bass",
         "drums",
         "drum set",
+        "drum kit",
+        "drumkit",
         "aux percussion",
         "auxiliary percussion",
         "congas",

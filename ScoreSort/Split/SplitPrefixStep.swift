@@ -202,6 +202,20 @@ struct PrefixOrderStepView: View {
         items[idx].isSkipped.toggle()
     }
 
+    /// Promotes an unrecognised file into the matched section (so it gets a score-order
+    /// number), placing it at the bottom of the matched list. Triggered by pressing the
+    /// up-arrow on the top unmatched row.
+    private func promoteToMatched(_ item: PrefixItem) {
+        guard unmatchedIds.contains(item.id),
+              let from = items.firstIndex(where: { $0.id == item.id }) else { return }
+        withAnimation {
+            unmatchedIds.remove(item.id)
+            let moved = items.remove(at: from)
+            let insertAt = (items.lastIndex { !unmatchedIds.contains($0.id) }).map { $0 + 1 } ?? 0
+            items.insert(moved, at: insertAt)
+        }
+    }
+
     // MARK: Body
 
     var body: some View {
@@ -295,7 +309,8 @@ struct PrefixOrderStepView: View {
                                 prefixText: prefixText(for: item),
                                 finalName: prefixedName(for: item),
                                 isManual: item.manualNumber != nil,
-                                onMoveUp:   sectionIdx > 0                        ? { items.swapAt(position, position - 1) } : nil,
+                                // Top unmatched row's up-arrow promotes it into the matched section.
+                                onMoveUp:   sectionIdx > 0                        ? { items.swapAt(position, position - 1) } : { promoteToMatched(item) },
                                 onMoveDown: sectionIdx < unmatchedItems.count - 1 ? { items.swapAt(position, position + 1) } : nil,
                                 isUnmatched: true,
                                 onToggleSkip: { toggleSkip(item) },
@@ -324,6 +339,7 @@ struct PrefixOrderStepView: View {
                 }
                 .buttonStyle(.borderedProminent)
                 .controlSize(.large)
+                .keyboardShortcut(.defaultAction)   // Return applies & moves to the save dialog
             }
             .padding()
             .background(Color(NSColor.windowBackgroundColor))
