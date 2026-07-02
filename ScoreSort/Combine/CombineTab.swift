@@ -839,6 +839,14 @@ struct CombineView: View {
     }
 }
 
+extension Color {
+    /// Chrome colour for collate groups — deliberately a fixed hue distinct from the
+    /// system accent (which drives row selection) so a group doesn't read as "selected".
+    /// Indigo isn't one of macOS's selectable accent colours, so it never collides with
+    /// the selection tint whatever accent the user has chosen.
+    static let collateGroup = Color.indigo
+}
+
 // MARK: - Combine File Row
 struct CombineFileRow: View {
     let file: CombineFile
@@ -920,16 +928,16 @@ struct CombineFileRow: View {
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(rowBackground)
-        // Continuous accent spine down the left edge of a collate group, plus a
+        // Continuous collate-colour spine down the left edge of a collate group, plus a
         // closing border under the last member so the group's extent is obvious.
         .overlay(alignment: .leading) {
             if isGrouped {
-                Rectangle().fill(Color.accentColor.opacity(0.55)).frame(width: 3)
+                Rectangle().fill(Color.collateGroup.opacity(0.55)).frame(width: 3)
             }
         }
         .overlay(alignment: .bottom) {
             if isLastInGroup {
-                Rectangle().fill(Color.accentColor.opacity(0.55)).frame(height: 2)
+                Rectangle().fill(Color.collateGroup.opacity(0.55)).frame(height: 2)
             }
         }
         .contentShape(Rectangle())
@@ -940,10 +948,10 @@ struct CombineFileRow: View {
     }
 
     private var rowBackground: Color {
-        if isMergeTarget { return Color.accentColor.opacity(0.22) }   // drag merge highlight
+        if isMergeTarget { return Color.collateGroup.opacity(0.22) }   // drag merge highlight
         if isSelected { return Color.accentColor.opacity(isFocused ? 0.18 : 0.1) }
         if isUnmatched { return Color.orange.opacity(0.12) }
-        if isGrouped { return Color.accentColor.opacity(0.05) }   // faint group fill
+        if isGrouped { return Color.collateGroup.opacity(0.08) }   // faint group fill
         if file.isBlankPage { return Color.gray.opacity(0.08) }
         return Color.clear
     }
@@ -975,7 +983,7 @@ struct CollateGroupHeaderRow: View {
             // Name column ─ icon + label + ungroup button
             HStack(spacing: 6) {
                 Image(systemName: "rectangle.stack.fill")
-                    .foregroundColor(.accentColor)
+                    .foregroundColor(.collateGroup)
                 Text("Collate Group")
                     .fontWeight(.semibold)
                 Text("(\(fileCount) file\(fileCount == 1 ? "" : "s"))")
@@ -1031,10 +1039,10 @@ struct CollateGroupHeaderRow: View {
         }
         .padding(.horizontal)
         .padding(.vertical, 6)
-        .background(Color.accentColor.opacity(isMergeTarget ? 0.22 : 0.07))
-        // Top of the accent spine that runs down the whole collate group.
+        .background(Color.collateGroup.opacity(isMergeTarget ? 0.22 : 0.09))
+        // Top of the collate-colour spine that runs down the whole collate group.
         .overlay(alignment: .leading) {
-            Rectangle().fill(Color.accentColor.opacity(0.55)).frame(width: 3)
+            Rectangle().fill(Color.collateGroup.opacity(0.55)).frame(width: 3)
         }
         .onChange(of: copiesFocused) { _, focused in
             if !focused && isEditingCopies { commitEdit() }
