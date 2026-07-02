@@ -1699,6 +1699,44 @@ struct SplitNumberedSuggestionTests {
     }
 }
 
+// MARK: - Jazz suggestion sequence (curated order, end-to-end)
+
+@Suite("Jazz suggestion sequence")
+struct JazzSuggestionSequenceTests {
+    let jazz = splitSuggestionOrder(for: .jazz)
+
+    private func next(_ prev: String) -> String? {
+        splitSuggestionStartingNumberedName(prevSuffix: prev, instrumentNames: jazz, ensemble: .jazz)
+    }
+
+    @Test("curated jazz order leads with the saxes and has no solo/alias pollution")
+    func cleanOrder() {
+        #expect(jazz.first == "Alto Saxophone")
+        #expect(!jazz.contains { $0.lowercased().contains("solo") })
+    }
+
+    @Test("Alto 2 → Tenor 1")
+    func altoToTenor() { #expect(next("Alto Saxophone 2") == "Tenor Saxophone 1") }
+
+    @Test("Tenor 2 → Baritone Saxophone (single)")
+    func tenorToBari() { #expect(next("Tenor Saxophone 2") == "Baritone Saxophone") }
+
+    @Test("bare Baritone Saxophone → Trumpet 1")
+    func bariToTrumpet() { #expect(next("Baritone Saxophone") == "Trumpet 1") }
+
+    @Test("Trumpet 4 → Trombone 1")
+    func trumpetToTrombone() { #expect(next("Trumpet 4") == "Trombone 1") }
+
+    @Test("Trombone 4 → Guitar (single)")
+    func tromboneToGuitar() { #expect(next("Trombone 4") == "Guitar") }
+
+    @Test("Guitar → Piano (rhythm section stays single)")
+    func guitarToPiano() { #expect(next("Guitar") == "Piano") }
+
+    @Test("Trumpet 3 does not cross in jazz (a 4th is expected)")
+    func trumpet3NoCross() { #expect(next("Trumpet 3") == nil) }
+}
+
 // MARK: - Output dialog default directory
 
 @Suite("Output directory default")

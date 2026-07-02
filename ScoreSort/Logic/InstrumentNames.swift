@@ -303,6 +303,9 @@ func splitSuggestionTypicalPartCount(_ baseName: String, ensemble: EnsembleType 
         "cornet": 3, "trumpet": 3, "horn": 4, "trombone": 3, "bass trombone": 1,
         "euphonium": 1, "baritone": 1, "tuba": 1,
         "percussion": 4, "timpani": 1,
+        // Rhythm section / single-part instruments — one part each everywhere.
+        "guitar": 1, "piano": 1, "bass": 1, "double bass": 1, "drums": 1,
+        "vibraphone": 1, "vibes": 1, "auxiliary percussion": 1,
     ]
     let jazz: [String: Int] = [   // big band
         "soprano saxophone": 1, "alto saxophone": 2, "tenor saxophone": 2, "baritone saxophone": 1,
@@ -319,9 +322,30 @@ func splitSuggestionTypicalPartCount(_ baseName: String, ensemble: EnsembleType 
     }
 }
 
-/// If the previous suffix's number equals the typical part count for that family,
-/// returns "NextInstrument 1" as a cross-boundary numbered suggestion.
-/// E.g. after "Flute 2" (typical=2) → "Oboe 1" if Oboe follows Flute in the list.
+/// Curated instrument order for the Split naming *suggestions* — distinct instruments in
+/// score order. Kept separate from the detection order (`InstrumentOrders.getOrder`), which
+/// is padded with aliases and "solo …"/lead-sheet entries that pollute the next-instrument
+/// walk. Only **jazz** needs curating today: its detection order leads with many "solo alto
+/// sax", "solo eb", … parts that share an identity with the real instruments, so the walk
+/// would start up in that region. Band and orchestra detection orders are already clean, so
+/// they pass straight through (respecting any user customisation).
+func splitSuggestionOrder(for ensemble: EnsembleType) -> [String] {
+    switch ensemble {
+    case .jazz:
+        return ["Alto Saxophone", "Tenor Saxophone", "Baritone Saxophone",
+                "Trumpet", "Trombone", "Guitar", "Piano", "Bass", "Drums",
+                "Vibraphone", "Auxiliary Percussion"]
+    case .band, .orchestra:
+        return InstrumentOrders.getOrder(for: ensemble).map { $0.capitalized }
+    }
+}
+
+/// Cross-boundary suggestion: when the previous instrument's last part has been named,
+/// returns "NextInstrument 1" (or the bare next instrument for single-part families).
+/// "Complete" means either a numbered part at/over its typical count (e.g. "Flute 2",
+/// typical 2 → "Oboe 1") or a bare single-part instrument (e.g. "Baritone Saxophone",
+/// typical 1 → "Trumpet 1"). Returns nil when the previous entry isn't complete or isn't a
+/// recognised instrument.
 func splitSuggestionStartingNumberedName(
     prevSuffix: String,
     instrumentNames: [String],
@@ -330,12 +354,17 @@ func splitSuggestionStartingNumberedName(
     let prev = prevSuffix.trimmingCharacters(in: .whitespaces)
     guard !prev.isEmpty else { return nil }
     let parts = prev.components(separatedBy: " ")
-    guard parts.count >= 2,
-          let last = parts.last, let n = Int(last), n > 0
-    else { return nil }
-    let basePart = parts.dropLast().joined(separator: " ")
-    let typical = splitSuggestionTypicalPartCount(basePart, ensemble: ensemble)
-    guard n >= typical else { return nil }
+    let basePart: String
+    if parts.count >= 2, let last = parts.last, let n = Int(last), n > 0 {
+        // Numbered part — only cross once we're at/past the typical count.
+        basePart = parts.dropLast().joined(separator: " ")
+        guard n >= splitSuggestionTypicalPartCount(basePart, ensemble: ensemble) else { return nil }
+    } else {
+        // Bare name — cross only if it's a recognised *single-part* instrument.
+        basePart = prev
+        guard splitSuggestionTypicalPartCount(basePart, ensemble: ensemble) <= 1,
+              nextDistinctInstrumentIndex(after: basePart, in: instrumentNames) != nil else { return nil }
+    }
     // The next distinct instrument after this one (shared with the dropdown logic).
     guard let nextIdx = nextDistinctInstrumentIndex(after: basePart, in: instrumentNames) else { return nil }
     let rawNextName = splitSuggestionBaseName(instrumentNames[nextIdx])

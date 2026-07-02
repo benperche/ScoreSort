@@ -238,7 +238,7 @@ struct SplitNamingStageView: View {
     /// The selected ensemble's score order, so "next instrument" suggestions follow
     /// that ensemble (e.g. in a band, Horn follows Trumpet; in an orchestra it precedes).
     private var instrumentNames: [String] {
-        InstrumentOrders.getOrder(for: prefixEnsembleType).map { $0.capitalized }
+        splitSuggestionOrder(for: prefixEnsembleType)
     }
 
     private var baseNameError: String? {
@@ -662,22 +662,18 @@ struct SplitFileNamingRow: View {
             }
 
             let parts = prev.components(separatedBy: " ")
-            // Must have at least two tokens and last token must be a positive integer
             if parts.count >= 2, let last = parts.last, let n = Int(last), n > 0 {
                 let basePart = parts.dropLast().joined(separator: " ")
-                let typical = splitSuggestionTypicalPartCount(basePart, ensemble: ensemble)
-                if n >= typical {
-                    // Cross-boundary: suggest the next instrument family at part 1
-                    return splitSuggestionStartingNumberedName(
-                        prevSuffix: prev,
-                        instrumentNames: instrumentNames,
-                        ensemble: ensemble
-                    )
-                } else {
-                    // Same family, next part — preserve the user's sax style
-                    let rawNext = "\(basePart) \(n + 1)"
-                    return rawNext  // basePart already uses the user's own style
+                if n < splitSuggestionTypicalPartCount(basePart, ensemble: ensemble) {
+                    // Same family, next part — preserve the user's sax style.
+                    return "\(basePart) \(n + 1)"
                 }
+            }
+            // Complete instrument (a numbered part at/over its count, or a bare single-part
+            // instrument like "Baritone Saxophone") → cross to the next instrument.
+            if let cross = splitSuggestionStartingNumberedName(
+                prevSuffix: prev, instrumentNames: instrumentNames, ensemble: ensemble) {
+                return cross
             }
             break  // only consider the closest non-empty row
         }
