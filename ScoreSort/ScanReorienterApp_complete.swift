@@ -5520,7 +5520,7 @@ struct InstrumentOrders {
 
     // Bump this whenever the built-in defaults change so existing JSON files
     // are automatically regenerated on next launch.
-    private static let defaultsVersion = 5
+    private static let defaultsVersion = 6
 
     // MARK: - Loaded state (populated by setup())
     private static var loaded: [String: [String]] = [:]
@@ -5691,6 +5691,7 @@ struct InstrumentOrders {
         "suspended cymbal",
         "tambourine",
         "auxiliary",
+        "aux percussion",
     ]
 
     private static let jazzDefault = [
