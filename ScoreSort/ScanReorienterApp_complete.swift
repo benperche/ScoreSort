@@ -258,15 +258,7 @@ struct ScoreSortApp: App {
                     // Standard macOS About panel (icon + name + version from Info.plist).
                     // Avoids a custom Window scene, which would add an entry to the Window menu.
                     NSApp.activate(ignoringOtherApps: true)
-                    NSApp.orderFrontStandardAboutPanel(options: [
-                        .credits: NSAttributedString(
-                            string: "Developed by Ben Perche and Claude",
-                            attributes: [
-                                .font: NSFont.systemFont(ofSize: 11),
-                                .foregroundColor: NSColor.secondaryLabelColor
-                            ]
-                        )
-                    ])
+                    NSApp.orderFrontStandardAboutPanel(options: [.credits: aboutPanelCredits()])
                 }
             }
             CommandGroup(after: .appInfo) {
@@ -285,6 +277,30 @@ struct ScoreSortApp: App {
                 .environmentObject(presetStore)
         }
     }
+}
+
+/// Credits shown in the standard About panel: the date this build was last updated
+/// (from the executable's modification date, so it tracks each release automatically —
+/// Ben ships frequently, so a date reads more meaningfully than the version alone) plus
+/// authorship. Falls back to just the authorship line if the date can't be read.
+func aboutPanelCredits() -> NSAttributedString {
+    let author = "Developed by Ben Perche and Claude"
+    var text = author
+    if let path = Bundle.main.executableURL?.path,
+       let date = (try? FileManager.default.attributesOfItem(atPath: path))?[.modificationDate] as? Date {
+        let df = DateFormatter()
+        df.dateStyle = .long
+        df.timeStyle = .none
+        text = "Updated \(df.string(from: date))\n\(author)"
+    }
+    let para = NSMutableParagraphStyle()
+    para.alignment = .center
+    para.paragraphSpacing = 6
+    return NSAttributedString(string: text, attributes: [
+        .font: NSFont.systemFont(ofSize: 11),
+        .foregroundColor: NSColor.secondaryLabelColor,
+        .paragraphStyle: para
+    ])
 }
 
 // MARK: - App Delegate
