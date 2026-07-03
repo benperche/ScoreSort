@@ -7,6 +7,40 @@
         <language>en</language>
 
         <item>
+            <title>Version 1.8.0</title>
+            <sparkle:version>12</sparkle:version>
+            <sparkle:shortVersionString>1.8.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <pubDate>Fri, 03 Jul 2026 20:01:20 +1000</pubDate>
+            <description><![CDATA[
+                <h2>ScoreSort 1.8.0</h2>
+                <p><b>✨ General</b></p>
+                <ul>
+                    <li><b>Many more keyboard shortcuts!</b> ⌘O/⌘S/⇧⌘P/⌘⌫/⌘R now do what you might expect them to. In the combiner, ⇧⌘P pushes you out to Preview, ready to print with ⌘P. You can also always open the folder you're working in with ⇧⌘F. See the Help menu for a full Keyboard Shortcuts reference.</li>
+                    <li><b>Redesigned menu bar</b> — proper File / View / per-tab Actions menus now cover much more of the app's functionality.</li>
+                    <li>Many more significant but invisible changes under the hood.</li>
+                </ul>
+                <p><b>✂️ Split</b></p>
+                <ul>
+                    <li>Jazz naming suggestions overhauled.</li>
+                    <li>Return / Escape to move between steps with the keyboard.</li>
+                    <li>It's now easier to promote unmatched files in Step 3 using the arrow keys.</li>
+                </ul>
+                <p><b>🔗 Combine</b></p>
+                <ul>
+                    <li>Preset sidebar now live-syncs with Preferences.</li>
+                    <li>Much smarter preset matching between the side panel and the files you've dragged in (abbreviations/aliases are now understood, clef-precise euphonium, "Clarinet" ≠ "Bass Clarinet").</li>
+                    <li>Collate groups get their own colour, distinct from your selection colour.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/benperche/ScoreSort/releases/download/v1.8.0/ScoreSort.dmg"
+                sparkle:edSignature="TATcpRON7Q1zEIccV38pfLaF5rucJiEFGVEIBVTGWFCNeMKQzdvF1n6SJJNR3C/NXltPk52qFhxo8MstP+7ADA=="
+                length="7195129"
+                type="application/octet-stream"/>
+        </item>
+
+        <item>
             <title>Version 1.7.0</title>
             <sparkle:version>11</sparkle:version>
             <sparkle:shortVersionString>1.7.0</sparkle:shortVersionString>
