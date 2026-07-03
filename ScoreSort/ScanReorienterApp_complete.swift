@@ -241,7 +241,6 @@ struct ScoreSortApp: App {
     @StateObject private var renamerManager = RenamerManager()
     @StateObject private var presetStore = EnsemblePresetStore()
     @StateObject private var updaterViewModel = UpdaterViewModel()
-    @Environment(\.openWindow) private var openWindow
 
     var body: some Scene {
         WindowGroup {
@@ -256,7 +255,18 @@ struct ScoreSortApp: App {
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About ScoreSort") {
-                    openWindow(id: "about")
+                    // Standard macOS About panel (icon + name + version from Info.plist).
+                    // Avoids a custom Window scene, which would add an entry to the Window menu.
+                    NSApp.activate(ignoringOtherApps: true)
+                    NSApp.orderFrontStandardAboutPanel(options: [
+                        .credits: NSAttributedString(
+                            string: "Developed by Ben Perche and Claude",
+                            attributes: [
+                                .font: NSFont.systemFont(ofSize: 11),
+                                .foregroundColor: NSColor.secondaryLabelColor
+                            ]
+                        )
+                    ])
                 }
             }
             CommandGroup(after: .appInfo) {
@@ -274,34 +284,6 @@ struct ScoreSortApp: App {
                 .environmentObject(renamerManager)
                 .environmentObject(presetStore)
         }
-
-        Window("About ScoreSort", id: "about") {
-            AboutView()
-        }
-        .windowResizability(.contentSize)
-        .defaultPosition(.center)
-    }
-}
-
-// MARK: - About View
-struct AboutView: View {
-    var body: some View {
-        VStack(spacing: 16) {
-            Image(nsImage: NSApp.applicationIconImage)
-                .resizable()
-                .frame(width: 80, height: 80)
-
-            Text("ScoreSort")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            Text("Version \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "—")")
-                .foregroundStyle(.secondary)
-
-            Text("Developed by Ben Perche and Claude")
-        }
-        .padding(32)
-        .frame(width: 340)
     }
 }
 
