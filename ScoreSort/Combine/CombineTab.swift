@@ -232,6 +232,7 @@ struct CombineView: View {
                                         isLastInGroup: isLastInGroup(file),
                                         isMergeTarget: file.collateGroupId != nil && mergeTargetGroupId == file.collateGroupId,
                                         onToggleSelect: { toggleSelection(file.id) },
+                                        onRowTap: { selectFile(file.id) },
                                         onCopiesChanged: { newValue in
                                             combineManager.updateCopies(for: file.id, copies: newValue, undoManager: undoManager)
                                         },
@@ -275,6 +276,11 @@ struct CombineView: View {
                                 } isTargeted: { isDropAtEnd = $0 }
                         }
                     }
+                    // Clicking the empty space below/around the rows clears the selection.
+                    // Row taps are handled by the rows themselves, so this only fires on
+                    // genuinely blank areas.
+                    .contentShape(Rectangle())
+                    .onTapGesture { selectNone() }
                     .focusable()
                     .focused($listFocused)
                     .onKeyPress { press in
@@ -596,29 +602,44 @@ struct CombineView: View {
         return result.sorted { $0.lastPathComponent < $1.lastPathComponent }
     }
     
-    private func toggleSelection(_ id: UUID) {
-        let isShiftHeld = NSEvent.modifierFlags.contains(.shift)
+    /// A click on the row body. Standard macOS list behaviour:
+    ///   • plain click  → select just this file (replacing the selection)
+    ///   • ⌘ click      → add/remove this file from the selection
+    ///   • ⇧ click      → extend the range from the anchor
+    private func selectFile(_ id: UUID) {
+        let modifiers = NSEvent.modifierFlags
 
-        if isShiftHeld,
+        if modifiers.contains(.shift),
            let anchor = anchorFileId,
            let anchorIndex = combineManager.files.firstIndex(where: { $0.id == anchor }),
            let clickedIndex = combineManager.files.firstIndex(where: { $0.id == id }) {
-            // Range selection: select everything from anchor to clicked item.
-            // Anchor stays fixed so further shift+clicks extend/shrink the range.
+            // Range selection: everything from the anchor to the clicked item. The anchor
+            // stays fixed so further shift-clicks extend/shrink the same range.
             let lo = min(anchorIndex, clickedIndex)
             let hi = max(anchorIndex, clickedIndex)
             selectedFiles = Set(combineManager.files[lo...hi].map { $0.id })
             focusedFileId = id
+        } else if modifiers.contains(.command) {
+            toggleSelection(id)
+            return   // toggleSelection already pulls list focus
         } else {
-            // Plain click: toggle this item and set it as the new anchor.
-            if selectedFiles.contains(id) {
-                selectedFiles.remove(id)
-                if focusedFileId == id { focusedFileId = nil; anchorFileId = nil }
-            } else {
-                selectedFiles.insert(id)
-                focusedFileId = id
-                anchorFileId = id
-            }
+            // Plain click replaces the selection with just this file.
+            selectedFiles = [id]
+            focusedFileId = id
+            anchorFileId = id
+        }
+        listFocused = true  // pull keyboard focus to the list after a click
+    }
+
+    /// Adds/removes a file from the selection — used by the tick box and ⌘-click.
+    private func toggleSelection(_ id: UUID) {
+        if selectedFiles.contains(id) {
+            selectedFiles.remove(id)
+            if focusedFileId == id { focusedFileId = nil; anchorFileId = nil }
+        } else {
+            selectedFiles.insert(id)
+            focusedFileId = id
+            anchorFileId = id
         }
         listFocused = true  // pull keyboard focus to the list after a click
     }
@@ -888,7 +909,10 @@ struct CombineFileRow: View {
     var isLastInGroup: Bool = false
     /// True while a drag is hovering this file's collate group (highlight as merge target).
     var isMergeTarget: Bool = false
+    /// Tapping the tick box always adds/removes this file from the selection.
     let onToggleSelect: () -> Void
+    /// Tapping anywhere else on the row selects just this file (⌘ toggles, ⇧ extends).
+    let onRowTap: () -> Void
     let onCopiesChanged: (Int) -> Void
     let onRemove: () -> Void
 
@@ -898,8 +922,12 @@ struct CombineFileRow: View {
 
     var body: some View {
         HStack {
+            // The tick box is its own hit target: it always toggles membership, so you can
+            // build up a multi-selection without holding ⌘.
             Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                 .foregroundColor(isSelected ? .accentColor : .secondary)
+                .contentShape(Rectangle())
+                .onTapGesture { onToggleSelect() }
 
             Text(file.name)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -970,7 +998,7 @@ struct CombineFileRow: View {
             }
         }
         .contentShape(Rectangle())
-        .onTapGesture { onToggleSelect() }
+        .onTapGesture { onRowTap() }
         .onChange(of: copiesFieldFocused) { _, focused in
             if !focused && isEditingCopies { commitCopiesEdit() }
         }
