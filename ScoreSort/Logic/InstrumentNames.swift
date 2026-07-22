@@ -185,9 +185,17 @@ private func splitSuggestionGroupKey(_ name: String) -> String {
         (["tenor sax", "tenor saxophone", "tenor"], "tenor saxophone"),
         (["soprano sax", "soprano saxophone"], "soprano saxophone"),
         (["baritone sax", "bari sax", "baritone saxophone", "bari"], "baritone saxophone"),
-        (["bb clarinet", "b-flat clarinet", "clarinet in bb"], "clarinet"),
+        // Bb and A clarinets are the same section as the plain clarinet — one identity, so
+        // the walk counts them together and rolls on (not "another round of clarinets").
+        (["bb clarinet", "b-flat clarinet", "clarinet in bb", "clarinet in b-flat",
+          "a clarinet", "clarinet in a"], "clarinet"),
         (["bass clar", "bass clarinet"], "bass clarinet"),
         (["contra clarinet", "contrabass clarinet", "contra bass clarinet"], "contrabass clarinet"),
+        // Pure spelling variants of one instrument (mirror preferredInstrumentDisplayName).
+        (["drums", "drum set", "drumset", "drum kit", "drumkit"], "drums"),
+        (["vibraphone", "vibes"], "vibraphone"),
+        (["mallet", "mallets", "mallet percussion"], "mallets"),
+        (["english horn", "cor anglais"], "english horn"),
         (["bb trumpet", "trumpet in bb", "b-flat trumpet"], "trumpet"),
         (["french horn", "horn in f", "f horn"], "horn"),
         (["trombone", "tenor trombone"], "trombone"),
@@ -230,6 +238,22 @@ func clefCompanion(for name: String) -> String? {
 /// Everything that isn't a saxophone is returned unchanged.
 func preferredInstrumentDisplayName(_ name: String) -> String {
     let lower = name.lowercased()
+    // Combined / shared parts (e.g. early-grade band's "Trombone Baritone Bassoon") are
+    // left exactly as written — the baritone/euphonium canonicalisation below would
+    // otherwise grab them by substring ("baritone", "bass" in "bassoon").
+    if lower.contains("trombone") && lower.contains("bassoon") { return name }
+
+    // Pure spelling variants → one canonical display, so the naming dropdown collapses
+    // them to a single row. (Detection still recognises every spelling via the order
+    // arrays; clef/transposition choices keep distinct displays and are handled below.)
+    switch lower {
+    case "drums", "drum set", "drumset", "drum kit", "drumkit":     return "Drums"
+    case "vibraphone", "vibes":                                     return "Vibraphone"
+    case "mallet", "mallets", "mallet percussion":                  return "Mallet Percussion"
+    case "cor anglais", "english horn":                            return "English Horn"
+    default: break
+    }
+
     // Saxophone family → full name (any spelling/order).
     if lower.contains("sax") {
         let registers: [(needle: String, full: String)] = [
@@ -297,8 +321,10 @@ func nextSuggestionIndex(after prev: String, in order: [String], usedKeys: Set<S
 func splitSuggestionTypicalPartCount(_ baseName: String, ensemble: EnsembleType = .band) -> Int {
     let key = instrumentIdentityKey(baseName)
     let band: [String: Int] = [
-        "flute": 2, "piccolo": 1, "oboe": 2, "english horn": 1, "bassoon": 2,
+        "flute": 2, "alto flute": 1, "bass flute": 1, "piccolo": 1,
+        "oboe": 2, "oboe d'amore": 1, "english horn": 1, "bassoon": 2, "contrabassoon": 1,
         "eb clarinet": 1, "clarinet": 3, "alto clarinet": 1, "bass clarinet": 1, "contrabass clarinet": 1,
+        "trombone baritone bassoon": 1, "mallets": 1,
         "soprano saxophone": 1, "alto saxophone": 2, "tenor saxophone": 1, "baritone saxophone": 1,
         "cornet": 3, "trumpet": 3, "horn": 4, "trombone": 3, "bass trombone": 1,
         "euphonium": 1, "baritone": 1, "tuba": 1,
@@ -334,7 +360,7 @@ func splitSuggestionOrder(for ensemble: EnsembleType) -> [String] {
     case .jazz:
         return ["Alto Saxophone", "Tenor Saxophone", "Baritone Saxophone",
                 "Trumpet", "Trombone", "Guitar", "Piano", "Bass", "Drums",
-                "Vibraphone", "Auxiliary Percussion"]
+                "Vibraphone", "Mallet Percussion", "Auxiliary Percussion"]
     case .band, .orchestra:
         return InstrumentOrders.getOrder(for: ensemble).map { $0.capitalized }
     }

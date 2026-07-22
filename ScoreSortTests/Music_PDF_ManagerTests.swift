@@ -2023,6 +2023,34 @@ struct PreferredInstrumentNameTests {
         #expect(clefCompanion(for: "Tenor Saxophone") == nil)
         #expect(clefCompanion(for: "Flute") == nil)
     }
+
+    @Test func collapsesPureSpellingVariants() {
+        for n in ["Drums", "Drum Set", "Drumset", "Drum Kit", "Drumkit"] {
+            #expect(preferredInstrumentDisplayName(n) == "Drums")
+        }
+        #expect(preferredInstrumentDisplayName("Vibes") == "Vibraphone")
+        #expect(preferredInstrumentDisplayName("Mallets") == "Mallet Percussion")
+        #expect(preferredInstrumentDisplayName("Cor Anglais") == "English Horn")
+        // A snare/bass drum is its own instrument, not the drum kit.
+        #expect(preferredInstrumentDisplayName("Bass Drum") == "Bass Drum")
+        #expect(preferredInstrumentDisplayName("Snare Drum") == "Snare Drum")
+    }
+
+    @Test func combinedLowBrassPartLeftAsWritten() {
+        #expect(preferredInstrumentDisplayName("Trombone Baritone Bassoon") == "Trombone Baritone Bassoon")
+        // Its own instrument — not folded into baritone/euphonium by the substring rule.
+        #expect(instrumentIdentityKey("Trombone Baritone Bassoon") != instrumentIdentityKey("Baritone BC"))
+        #expect(preferredInstrumentDisplayName("Bassoon") == "Bassoon")   // plain bassoon unaffected
+    }
+
+    @Test func clarinetTranspositionsShareTheClarinetIdentity() {
+        // Bb/A clarinet count as clarinet, so after them the walk rolls on (not more clarinets).
+        #expect(instrumentIdentityKey("Clarinet in A") == instrumentIdentityKey("Clarinet"))
+        #expect(instrumentIdentityKey("Clarinet in Bb") == instrumentIdentityKey("Clarinet"))
+        // …but bass/Eb clarinet are genuinely different instruments.
+        #expect(instrumentIdentityKey("Bass Clarinet") != instrumentIdentityKey("Clarinet"))
+        #expect(instrumentIdentityKey("Eb Clarinet") != instrumentIdentityKey("Clarinet"))
+    }
 }
 
 // MARK: - Next suggestion index (dropdown rotation start)
