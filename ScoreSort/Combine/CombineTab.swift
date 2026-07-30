@@ -19,8 +19,10 @@ struct CombineView: View {
     let menuState: CombineMenuState
     @EnvironmentObject var presetStore: EnsemblePresetStore
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject var stampStore: StampStore
     @StateObject private var combineManager = CombineManager()
     @State private var addBlankPages = false
+    @AppStorage("combineStampEnabled") private var stampEnabled = false
     @State private var isTargeted = false
     @State private var selectedFiles: Set<UUID> = []
     @State private var removalNoticeVisible = false
@@ -339,7 +341,9 @@ struct CombineView: View {
 
                         Toggle("For double-sided printing: add blank page after files with an odd number of pages", isOn: $addBlankPages)
                             .toggleStyle(.checkbox)
-                        
+
+                        StampOptionRow(isEnabled: $stampEnabled)
+
                         HStack {
                             Text("\(combineManager.totalFiles) file(s) • \(combineManager.totalPages) total page(s)")
                                 .font(.callout)
@@ -744,7 +748,7 @@ struct CombineView: View {
         panel.beginSheetModal(for: window) { response in
             menuState.isPanelOpen = false
             if response == .OK, let url = panel.url {
-                combineManager.createCombinedPDF(to: url, addBlankPages: addBlankPages) { title, message, isError in
+                combineManager.createCombinedPDF(to: url, addBlankPages: addBlankPages, stamp: activeStamp) { title, message, isError in
                     if isError {
                         showNSAlert(title: title, message: message, isError: true)
                     } else {
@@ -764,9 +768,14 @@ struct CombineView: View {
     }
     
     private func openInPreview() {
-        combineManager.openInPreview(addBlankPages: addBlankPages) { title, message, isError in
+        combineManager.openInPreview(addBlankPages: addBlankPages, stamp: activeStamp) { title, message, isError in
             showNSAlert(title: title, message: message, isError: isError)
         }
+    }
+
+    /// The stamp to apply to output, or nil when stamping is switched off.
+    private var activeStamp: Stamp? {
+        stampEnabled ? stampStore.selectedStamp : nil
     }
 
     // MARK: - Menu state sync
@@ -2031,8 +2040,13 @@ class CombineManager: ObservableObject {
     // Standalone files: all copies of that file together (existing behaviour).
     // Collate groups: the set of files repeats N times interleaved —
     //   [file1, file2, file3] × 4 → f1,f2,f3, f1,f2,f3, f1,f2,f3, f1,f2,f3
-    func createCombinedPDF(to url: URL, addBlankPages: Bool, completion: PDFAlertHandler) {
-        let doc = PDFDocument()
+    /// Assembles the combined document. Shared by "Create PDF" and "Open in Preview" so the
+    /// two can never drift apart. Returns the document, its page count, and the bookmark
+    /// labels with the page index each part starts at — those indices double as "first page
+    /// of each part" for stamping.
+    private func buildDocument(addBlankPages: Bool, stamp: Stamp?)
+        -> (doc: PDFDocument, pageCount: Int, bookmarks: [(label: String, pageIndex: Int)]) {
+        var doc = PDFDocument()
         var idx = 0
         var bookmarks: [(label: String, pageIndex: Int)] = []
 
@@ -2070,6 +2084,19 @@ class CombineManager: ObservableObject {
             }
         }
 
+        let pageCount = idx
+
+        // Stamp *before* the outline is built — flattening rebuilds the pages and drops any
+        // existing outline, but leaves page indices untouched, so the bookmark loop below
+        // still lines up.
+        if let stamp, stamp.isDrawable {
+            let indices = stampPageIndices(for: stamp, pageCount: pageCount,
+                                           partFirstPages: bookmarks.map { $0.pageIndex })
+            if let stamped = stampedDocument(doc, stamp: stamp, pageIndices: indices) {
+                doc = stamped
+            }
+        }
+
         let root = PDFOutline()
         for (label, pageIndex) in bookmarks {
             if let page = doc.page(at: pageIndex) {
@@ -2081,66 +2108,23 @@ class CombineManager: ObservableObject {
         }
         doc.outlineRoot = root
 
-        if doc.write(to: url) {
+        return (doc, pageCount, bookmarks)
+    }
+
+    func createCombinedPDF(to url: URL, addBlankPages: Bool, stamp: Stamp? = nil, completion: PDFAlertHandler) {
+        let built = buildDocument(addBlankPages: addBlankPages, stamp: stamp)
+        if built.doc.write(to: url) {
             completion("PDF Created Successfully",
-                       "Combined PDF with \(idx) pages saved to:\n\(url.path)", false)
+                       "Combined PDF with \(built.pageCount) pages saved to:\n\(url.path)", false)
         } else {
             completion("Error", "Failed to create PDF", true)
         }
     }
 
-    func openInPreview(addBlankPages: Bool, onError: PDFAlertHandler) {
-        let doc = PDFDocument()
-        var idx = 0
-        var bookmarks: [(label: String, pageIndex: Int)] = []
-
-        func addPages(from file: CombineFile, copyIndex: Int, totalCopies: Int) {
-            if file.isBlankPage {
-                if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
-                return
-            }
-            let ext = file.url.pathExtension.lowercased()
-            let baseName = file.name.hasSuffix(".pdf") ? String(file.name.dropLast(4)) : file.name
-            let label = totalCopies > 1 ? "\(baseName) \(copyIndex + 1)/\(totalCopies)" : baseName
-            bookmarks.append((label: label, pageIndex: idx))
-            if ext != "pdf" {
-                for page in pdfPages(fromImageAt: file.url) { doc.insert(page, at: idx); idx += 1 }
-            } else {
-                guard let src = PDFDocument(url: file.url) else { return }
-                for p in 0..<src.pageCount {
-                    if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
-                }
-                if addBlankPages && src.pageCount % 2 == 1 {
-                    if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
-                }
-            }
-        }
-
-        var i = 0
-        while i < files.count {
-            if let gid = files[i].collateGroupId, let group = collateGroups[gid] {
-                var groupFiles: [CombineFile] = []
-                while i < files.count && files[i].collateGroupId == gid { groupFiles.append(files[i]); i += 1 }
-                for ci in 0..<group.copies { for f in groupFiles { addPages(from: f, copyIndex: ci, totalCopies: group.copies) } }
-            } else {
-                let file = files[i]; i += 1
-                for ci in 0..<file.copies { addPages(from: file, copyIndex: ci, totalCopies: file.copies) }
-            }
-        }
-
-        let root = PDFOutline()
-        for (label, pageIndex) in bookmarks {
-            if let page = doc.page(at: pageIndex) {
-                let item = PDFOutline()
-                item.label = label
-                item.destination = PDFDestination(page: page, at: .zero)
-                root.insertChild(item, at: root.numberOfChildren)
-            }
-        }
-        doc.outlineRoot = root
-
+    func openInPreview(addBlankPages: Bool, stamp: Stamp? = nil, onError: PDFAlertHandler) {
+        let built = buildDocument(addBlankPages: addBlankPages, stamp: stamp)
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedForPrint.pdf")
-        guard doc.write(to: tempURL) else { onError("Error", "Failed to create temporary PDF", true); return }
+        guard built.doc.write(to: tempURL) else { onError("Error", "Failed to create temporary PDF", true); return }
         NSWorkspace.shared.open(tempURL)
     }
 

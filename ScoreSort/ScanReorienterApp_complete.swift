@@ -19,6 +19,8 @@ class AppState: ObservableObject {
     @Published var selectedTab = 0
     @Published var showingKeyboardHelp = false
     @Published var showingWelcomeTour = false
+    /// Non-nil while the stamp designer sheet is up (`.sheet(item:)`, not isPresented:).
+    @Published var stampSheet: StampSheetToken?
     let combineMenuState = CombineMenuState()
     /// Bridges the *active* tab's actions to the File/Edit/View/⟨tab⟩ menus.
     let tabCommands = TabCommands()
@@ -101,6 +103,7 @@ class CombineMenuState: ObservableObject {
 
 // MARK: - File Commands (contextual Open / Save / Preview / Clear for the active tab)
 struct FileCommands: Commands {
+    @ObservedObject var appState: AppState
     @ObservedObject var commands: TabCommands
 
     var body: some Commands {
@@ -119,6 +122,13 @@ struct FileCommands: Commands {
             Button("Open in Preview") { commands.slice.openInPreview?() }
                 .keyboardShortcut("p", modifiers: [.command, .shift])
                 .disabled(commands.slice.openInPreview == nil)
+
+            Divider()
+
+            // Global, not per-tab: the stamp designer edits saved stamps that every
+            // tool shares, so it belongs in File rather than the Actions menu.
+            Button("Stamp\u{2026}") { appState.stampSheet = StampSheetToken() }
+                .keyboardShortcut("s", modifiers: [.command, .option])
 
             Divider()
 
@@ -240,6 +250,7 @@ struct ScoreSortApp: App {
     @StateObject private var appState = AppState()
     @StateObject private var renamerManager = RenamerManager()
     @StateObject private var presetStore = EnsemblePresetStore()
+    @StateObject private var stampStore = StampStore()
     @StateObject private var updaterViewModel = UpdaterViewModel()
 
     var body: some Scene {
@@ -248,6 +259,7 @@ struct ScoreSortApp: App {
                 .environmentObject(appState)
                 .environmentObject(renamerManager)
                 .environmentObject(presetStore)
+                .environmentObject(stampStore)
         }
         // Default window size on first launch. Users can resize freely and the size is
         // then remembered. (Temporarily set to 1280×800 when taking App Store screenshots.)
@@ -265,7 +277,7 @@ struct ScoreSortApp: App {
                 Button("Check for Updates\u{2026}") { updaterViewModel.checkForUpdates() }
                     .disabled(!updaterViewModel.canCheckForUpdates)
             }
-            FileCommands(commands: appState.tabCommands)
+            FileCommands(appState: appState, commands: appState.tabCommands)
             ViewCommands(appState: appState)
             TabActionsCommands(commands: appState.tabCommands)
             HelpCommands(appState: appState)
@@ -275,6 +287,7 @@ struct ScoreSortApp: App {
             AppPreferencesView()
                 .environmentObject(renamerManager)
                 .environmentObject(presetStore)
+                .environmentObject(stampStore)
         }
     }
 }
@@ -404,6 +417,9 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.15), value: appState.showingKeyboardHelp)
         .animation(.easeInOut(duration: 0.2), value: appState.showingWelcomeTour)
+        .sheet(item: $appState.stampSheet) { _ in
+            StampDesignerView()
+        }
     }
 }
 
@@ -424,6 +440,7 @@ struct ShortcutsHelpView: View {
                     shortcutRow("⌘S", "Primary action — Create PDF / Save / Rename (per tab)")
                     shortcutRow("⇧⌘F", "Show in Finder (the folder we’re working from)")
                     shortcutRow("⌘⌫", "Clear / Start Over")
+                    shortcutRow("⌥⌘S", "Design stamps / stamp existing files")
                     shortcutRow("⌘,", "Preferences")
                     shortcutRow("⌘/", "Welcome tour")
                     shortcutRow("⌘`", "This shortcuts panel")
@@ -1637,7 +1654,7 @@ class PDFManager: ObservableObject {
         }
     }
     
-    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], skippedPages: Set<Int> = [], separator: String = "_", completion: PDFAlertHandler) {
+    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], skippedPages: Set<Int> = [], separator: String = "_", stamp: Stamp? = nil, completion: PDFAlertHandler) {
         guard let document = pdfDocument else { return }
 
         let numberOfFiles = (pageToFileMapping.values.max() ?? 0) + 1
@@ -1665,8 +1682,16 @@ class PDFManager: ObservableObject {
         var errors: [String] = []
 
         for fileIndex in 0..<numberOfFiles {
-            guard let doc = fileDocuments[fileIndex],
+            guard var doc = fileDocuments[fileIndex],
                   doc.pageCount > 0 else { continue }
+
+            // Each output file is one "part", so first-page scope means its page 1.
+            if let stamp, stamp.isDrawable {
+                let indices = stampPageIndices(for: stamp, pageCount: doc.pageCount, partFirstPages: [0])
+                if let stamped = stampedDocument(doc, stamp: stamp, pageIndices: indices) {
+                    doc = stamped
+                }
+            }
 
             let fileName: String
             if let customSuffix = customFileNames[fileIndex], !customSuffix.isEmpty {

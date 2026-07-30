@@ -1,6 +1,7 @@
 # ScoreSort — Code Reference
 > Split by feature. Tabs: `Combine/CombineTab.swift`; `Rename/RenameViews.swift` + `Rename/RenamerManager.swift`; `Split/SplitView.swift` + `Split/SplitNaming.swift` + `Split/SplitPrefixStep.swift`; `Rotate/RotateTab.swift`.
-> Pure logic in `ScoreSort/Logic/`: `InstrumentNames.swift` (preset matching + split instrument suggestions/detection), `SplitLogic.swift` (split maths, A3, bookmarks, booklet), `RenameLogic.swift` (folder-job helpers + score-order numbering), `FileUtilities.swift` (output dir, filename validation, permissions, page-range formatting).
+> Cross-tab tool: `Stamp/StampStore.swift` + `Stamp/StampDesignerView.swift` (the ⌥⌘S stamp designer, `StampOptionRow`).
+> Pure logic in `ScoreSort/Logic/`: `InstrumentNames.swift` (preset matching + split instrument suggestions/detection), `SplitLogic.swift` (split maths, A3, bookmarks, booklet), `RenameLogic.swift` (folder-job helpers + score-order numbering), `FileUtilities.swift` (output dir, filename validation, permissions, page-range formatting), `StampLogic.swift` (stamp model, placement, drawing, flattening).
 > Shared scaffolding (app entry, ContentView, AppState, menu commands, Sparkle, Preferences panes, DropZone, PDFManager) stays in `ScanReorienterApp_complete.swift` (~1 700 lines).
 > One module/target — cross-file calls need no imports; filesystem-synchronized project auto-compiles files added under `ScoreSort/`. Tests: `ScoreSortTests` incl. `ViewSmokeTests` (host each tab) + `CombineManagerReorderTests`.
 > Xcode project: "ScoreSort"
@@ -30,6 +31,7 @@ Window min size: 900×700.
 - `AppState` — `selectedTab`, `showingKeyboardHelp`, `combineMenuState`
 - `RenamerManager` — used by both `RenamerView` and `AppPreferencesView`
 - `EnsemblePresetStore` — used by `CombineView`, `PresetSidebarView`, `CombinerPreferencesView`
+- `StampStore` — used by `StampDesignerView`, `StampOptionRow`, `CombineView`, `SplitView`
 
 ### Menu Bar Commands
 
@@ -597,6 +599,44 @@ enum RotationMode { case odd, even, none }
 
 ---
 
+## Cross-tab tool — Stamping
+
+A reusable **text stamp** ("Example School Band", "Property of XYZ") burned onto output pages. Not a tab: it's a sheet (**File ▸ Stamp… / ⌥⌘S**, or the *Edit…* link beside the Combine/Split toggles) plus an export option in two tabs.
+
+### Model & logic — `Logic/StampLogic.swift`
+
+| Symbol | Purpose |
+|--------|---------|
+| `Stamp` | `Codable` design: `name`, `text` (newlines honoured), `anchor`, `margin`, `fontFamily`/`isBold`/`isItalic`/`fontSize`, `colourHex`, `hasBorder`, `scope`. `isDrawable` is false for all-whitespace text. Add new appearance fields **with defaults** — `stamps.json` decodes without migration. |
+| `StampAnchor` | 3×3 grid of positions; `StampAnchor.grid` is the row-major layout the picker draws. |
+| `StampScope` | `.everyPage` or `.firstPageOfEachPart`. |
+| `stampRect(for:textSize:in:)` | Anchor + margin placement. **PDF user space is y-up**, so "top" anchors sit at `maxY`. Adds `stampPaddingH/V` only when `hasBorder`. |
+| `drawStamp(_:in:pageBox:)` | The single drawing routine — CoreText frame + optional rounded border. Used by **both** the flattener and the preview, so they can't diverge. |
+| `stampedDocument(_:stamp:pageIndices:)` | The flattener (below). Returns nil for an empty doc or a blank stamp. |
+| `stampPageIndices(for:pageCount:partFirstPages:)` | Resolves a scope into the page set to stamp. |
+| `stampPreviewImage(_:page:maxDimension:)` | Bitmap preview of page 1 (or a blank A4 sheet) with the stamp applied. |
+| `nsColor(fromHex:)` / `hexString(from:)` | `#RRGGBB` round trip for storage and the `ColorPicker` binding. |
+
+**How flattening works** — `doc.dataRepresentation()` → `CGPDFDocument` → redraw every page into one multi-page `CGPDFContext`, stamping the listed pages. Going via CGPDF (not `PDFPage.pageRef`) is deliberate: Combine's image pages (`PDFPage(image:)`) and blank pages (bare `PDFPage()`) have no `pageRef`. Each output page uses `visualPageBox` — the **crop box**, w/h swapped when `rotationAngle % 180 != 0` — and `getDrawingTransform`, which absorbs the page's `/Rotate`, so the stamp is placed in *visual* coordinates. Two consequences: **source annotations/links are dropped**, and **outlines don't survive** (so Combine stamps *before* building its `PDFOutline`; page indices are unchanged).
+
+### Store & UI — `Stamp/`
+
+- **`StampStore: ObservableObject`** → `stamps.json` in `~/Library/Application Support/ScoreSort/` — the **third** independent store (see `EnsemblePresetStore`, `InstrumentOrders`). Same shape as `EnsemblePresetStore`; seeds one starter stamp so the picker is never empty. `updateStamp` early-returns when nothing changed, so typing doesn't thrash the disk.
+- **`StampDesignerView`** — presented from `ContentView` via `.sheet(item: $appState.stampSheet)` (`StampSheetToken`). Keeps a `draft: Stamp?` and pushes it back to the store `.onChange`. Also owns the **standalone batch path**: dropped/chosen PDFs → output folder → `writeStampedFiles`, which suffixes " (stamped)" when the destination is the source folder so originals are never overwritten. A standalone file is one "part", so first-page scope means its page 1.
+- **`StampOptionRow`** — the shared checkbox ("Stamp output with “X” on …") plus *Edit…*; used by Combine's bottom controls and Split Step 2's bottom bar, bound to `@AppStorage("combineStampEnabled")` / `("splitStampEnabled")`.
+
+### Where it applies
+
+| Tool | Insertion point | "Each part" means |
+|------|-----------------|-------------------|
+| Combine | `CombineManager.buildDocument(addBlankPages:stamp:)` — shared by `createCombinedPDF` and `openInPreview` | each source file per copy (the existing `bookmarks` page indices) |
+| Split | `PDFManager.saveSplitPDF(… stamp:)` — the one choke point for both save routes | page 0 of each output file |
+| Standalone | `StampDesignerView.writeStampedFiles` | page 0 of each dropped file |
+
+The Rotate tab is deliberately excluded — it works in rotation *metadata*, which flattening would bake in.
+
+---
+
 ## Shared Infrastructure
 
 **`PDFAlertHandler`** — `typealias PDFAlertHandler = (_ title: String, _ message: String, _ isError: Bool) -> Void`. All PDF save/export methods take this callback; they never show UI directly.
@@ -641,6 +681,8 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 - **`SkipMode.page` after A3 split** — because A3 scanning produces interleaved left/right halves, blank pages tend to appear one at a time rather than whole-file. Page-skip mode is therefore the more useful default after splitting.
 - **`editMode` is unavailable on macOS** — SwiftUI's `\.editMode` environment key is iOS-only. On macOS, `ForEach.onMove` inside a `List` enables drag-to-reorder natively with no extra configuration.
 - **PDF `page.rotation` is clockwise** — the PDF spec defines `Rotate` as clockwise degrees. So `rotation = 90` means 90° CW: the native top edge swings to the visual right. When splitting A3 pages with a 90° rotation flag, the visual left half corresponds to the native *bottom* half (low Y). This is counterintuitive but matches Preview.app behaviour. The inverse holds for 270°.
+- **Stamping flattens, so it must run before outlines are built** — `stampedDocument` rebuilds page content via a `CGPDFContext`, which drops the document's `PDFOutline` and any source-page annotations. Page indices survive, so `CombineManager.buildDocument` stamps first and then builds the outline from the same bookmark indices. Anything else that adds document-level structure must do the same.
+- **The stamp flattener reads the crop box, not the media box** — A3-split pages keep a full-sheet media box with a half-sheet crop box, so using the media box would resurrect the discarded half. `visualPageBox` also swaps w/h for 90°/270° pages, and `getDrawingTransform` bakes the rotation, so stamps land where the user *sees* them.
 - **ScoreSort's Rotate tab uses `page.rotation` metadata** — it does not geometrically transform page content. This is the standard PDF approach and is correctly handled by Preview. The consequence is that rotated pages have a portrait native mediaBox with a rotation flag, so `isA3Landscape` must swap w/h before measuring, and `splitA3Pages` must split along the Y axis rather than X.
 
 ---
@@ -658,6 +700,10 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `FilenameValidationTests` | `pdfFilenameError(for:)` — valid names, illegal chars (`/` `:` `\` null) |
 | `InstrumentDetectionTests` | `detectInstrument(in:)` — case insensitivity, leftmost match, length-sort, nil on no match, order index |
 | `ManualOverrideTests` | `setManualOverride(for:number:)` — assign, replace, conflict shift, chain shift |
+| `StampPlacementTests` | `stampRect` — all nine anchors stay on the page, margins per edge, border padding, non-zero page origin (`StampLogicTests.swift`) |
+| `StampScopeTests` | `stampPageIndices` — every-page vs first-page-of-each-part, out-of-range part pages dropped |
+| `StampFlatteningTests` | `stampedDocument` — page count preserved, partial stamping, blank stamp/empty doc rejected, write-reload round trip, 90°-rotated page comes out landscape, A3 crop box wins over media box |
+| `StampColourTests` | `nsColor(fromHex:)` / `hexString(from:)` round trip and black fallback |
 | `ScanFolderTests` | `loadFolder(url:)` pipeline — score prefix, sequential prefixes, undetected, manual override, already-prefixed skip |
 | `ToggleSplitTests` | `toggleSplit(in:at:)` — mid-file split, boundary merge, edge cases (page 0, first page, empty array) |
 | `SplitSizesTests` | `splitSizes(totalPages:stride:)` — even division, remainder, stride > total, zero pages |

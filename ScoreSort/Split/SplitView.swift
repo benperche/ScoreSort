@@ -42,6 +42,7 @@ struct BookletFixRequest: Identifiable {
 
 struct SplitView: View {
     @EnvironmentObject private var appState: AppState
+    @EnvironmentObject private var stampStore: StampStore
     @StateObject private var pdfManager = PDFManager()
     // fileSizes stores the page count for each output file in order.
     // e.g. [2, 2, 1, 3] means 4 files with 2, 2, 1, and 3 pages respectively.
@@ -103,6 +104,7 @@ struct SplitView: View {
     /// Persisted so users who always want it don't re-tick every time; it's recoverable
     /// (Trash, not permanent delete) and the summary screen confirms when it happened.
     @AppStorage("deleteSourceAfterSplit") private var deleteSourceAfterSplit: Bool = false
+    @AppStorage("splitStampEnabled") private var stampEnabled: Bool = false
     /// Set true after a successful save when the source file was actually trashed, so the
     /// summary screen can confirm it. Reset whenever a new save round begins.
     @State private var sourceWasTrashed = false
@@ -997,6 +999,11 @@ struct SplitView: View {
         return true
     }
 
+    /// The stamp to burn into each output file, or nil when stamping is switched off.
+    private var activeStamp: Stamp? {
+        stampEnabled ? stampStore.selectedStamp : nil
+    }
+
     func saveSplitPDF() {
         guard let document = pdfManager.pdfDocument,
               activeFileCount >= 1,
@@ -1045,7 +1052,8 @@ struct SplitView: View {
                     customFileNames: customFileNames,
                     pageToFileMapping: pageToFileMapping,
                     skippedPages: skippedPages,
-                    separator: filenameSeparator
+                    separator: filenameSeparator,
+                    stamp: activeStamp
                 ) { title, message, isError in
                     if isError {
                         showNSAlert(title: title, message: message, isError: true)
@@ -1308,7 +1316,8 @@ struct SplitView: View {
             customFileNames: finalCustomNames,
             pageToFileMapping: pageToFileMapping,
             skippedPages: omittedPages,
-            separator: ""
+            separator: "",
+            stamp: activeStamp
         ) { _, _, isError in
             if isError {
                 showNSAlert(title: "Save Failed",

@@ -27,6 +27,7 @@ struct ViewSmokeTests {
                 .environmentObject(AppState())
                 .environmentObject(RenamerManager())
                 .environmentObject(EnsemblePresetStore())
+                .environmentObject(StampStore())
         )
         host.frame = NSRect(x: 0, y: 0, width: 1000, height: 800)
         host.layoutSubtreeIfNeeded()
@@ -51,6 +52,11 @@ struct ViewSmokeTests {
     @Test("Rotate tab renders")
     func rotateTab() {
         render(RotateView())
+    }
+
+    @Test("stamp designer renders")
+    func stampDesigner() {
+        render(StampDesignerView())
     }
 
     @Test("full ContentView renders")
