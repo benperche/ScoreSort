@@ -428,9 +428,12 @@ func visualPageBox(for page: PDFPage?) -> CGRect {
     return CGRect(x: 0, y: 0, width: w, height: h)
 }
 
-/// Renders `page` (or a blank A4 sheet when nil) with the stamp applied, for the designer's
-/// live preview. Uses the same `drawStamp` as the flattener, so the preview is faithful.
-func stampPreviewImage(_ stamp: Stamp, page: PDFPage?, maxDimension: CGFloat = 460) -> NSImage? {
+/// Renders `page` (or a blank A4 sheet when nil) as a bitmap, **without** any stamp.
+///
+/// The designer draws the stamp as a separate live layer on top of this (see
+/// `StampPreviewCanvas`): rendering a dense score page costs tens of milliseconds, so it's
+/// cached per page while dragging redraws only the stamp.
+func stampPagePreviewImage(page: PDFPage?, maxDimension: CGFloat = 1400) -> NSImage? {
     let pageBox = visualPageBox(for: page)
     guard pageBox.width > 0, pageBox.height > 0 else { return nil }
 
@@ -457,8 +460,6 @@ func stampPreviewImage(_ stamp: Stamp, page: PDFPage?, maxDimension: CGFloat = 4
         ctx.drawPDFPage(ref)
         ctx.restoreGState()
     }
-
-    drawStamp(stamp, in: ctx, pageBox: pageBox)
 
     guard let image = ctx.makeImage() else { return nil }
     return NSImage(cgImage: image, size: NSSize(width: CGFloat(pixelWidth), height: CGFloat(pixelHeight)))

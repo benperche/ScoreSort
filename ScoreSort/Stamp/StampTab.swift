@@ -6,8 +6,8 @@
 //  that already exist. The same saved stamps are used by the Combine and Split tabs via
 //  `StampMenuButton`, so a design made here is immediately available when exporting there.
 //
-//  The preview is rendered by `stampPreviewImage`, which shares its drawing routine with
-//  the flattener — so what's shown here is what gets written.
+//  The preview draws the stamp through the same `drawStamp` routine as the flattener, so
+//  what's shown here is what gets written.
 //
 
 import SwiftUI
@@ -54,6 +54,9 @@ struct StampView: View {
     @State private var items: [StampFileItem] = []
     @State private var isTargeted = false
     @AppStorage("stampOutputMode") private var outputMode: StampOutputMode = .replaceOriginal
+    /// Page 1 of the first queued file, held so the preview doesn't reload it per redraw.
+    @State private var previewPage: PDFPage?
+    @State private var previewDocument: PDFDocument?
     /// Scope for *this* tab's batch job — a per-job choice, not part of the saved design.
     @AppStorage("stampTabScope") private var scope: StampScope = .everyPage
 
@@ -95,7 +98,10 @@ struct StampView: View {
             DispatchQueue.main.async { syncTabCommands() }
         }
         .onChange(of: appState.selectedTab) { DispatchQueue.main.async { syncTabCommands() } }
-        .onChange(of: items) { DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: items) {
+            refreshPreviewPage()
+            DispatchQueue.main.async { syncTabCommands() }
+        }
         .onChange(of: stampStore.selectedStampId) { _, _ in draft = stampStore.selectedStamp }
         .onChange(of: draft) { _, newValue in
             if let newValue { stampStore.updateStamp(newValue) }
@@ -258,48 +264,56 @@ struct StampView: View {
     // MARK: - Preview + files
 
     private var previewColumn: some View {
-        VStack(spacing: 12) {
-            Text("Preview")
-                .font(.headline)
-                .padding(.top, 16)
-
+        VStack(spacing: 8) {
+            // The preview takes every point the bottom section doesn't need.
             if let binding = draftBinding {
-                StampPreviewCanvas(stamp: binding, page: previewPage, height: 300)
+                StampPreviewCanvas(stamp: binding, page: previewPage)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.top, 12)
+                    .padding(.horizontal, 12)
             } else {
                 RoundedRectangle(cornerRadius: 6)
                     .fill(Color.secondary.opacity(0.08))
-                    .frame(height: 300)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                     .overlay(Text("Nothing to preview").foregroundColor(.secondary))
+                    .padding(12)
             }
 
             Text(previewPage == nil
-                 ? "Shown on a blank A4 page — drag the stamp to move it. Add a PDF below to preview on a real page."
-                 : "Shown on page 1 of \(items[0].url.lastPathComponent) — drag the stamp to move it.")
+                 ? "Blank A4 page — drag the stamp to move it. Add a PDF below to preview on a real page."
+                 : "Page 1 of \(items[0].url.lastPathComponent) — drag the stamp to move it.")
                 .font(.caption)
                 .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
+                .lineLimit(1)
+                .truncationMode(.middle)
                 .padding(.horizontal, 12)
 
             Divider()
 
             filesSection
                 .padding(.horizontal, 16)
-                .padding(.bottom, 16)
+                .padding(.bottom, 12)
         }
-        .frame(maxWidth: .infinity)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
     private var filesSection: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Stamp existing files")
-                .font(.headline)
+            HStack {
+                Text("Stamp existing files")
+                    .font(.subheadline)
+                    .fontWeight(.semibold)
+                Spacer()
+                Button("Add Files\u{2026}") { chooseFiles() }
+                    .controlSize(.small)
+            }
 
             if items.isEmpty {
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(isTargeted ? Color.accentColor : Color.gray.opacity(0.35),
                                   style: StrokeStyle(lineWidth: 2, dash: [6]))
-                    .frame(height: 60)
-                    .overlay(Text("Drop PDFs here").foregroundColor(.secondary))
+                    .frame(height: 44)
+                    .overlay(Text("Drop PDFs here").font(.callout).foregroundColor(.secondary))
                     .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
                         loadDroppedFiles(providers)
                         return true
@@ -308,76 +322,87 @@ struct StampView: View {
                 fileList
             }
 
-            Picker("Stamp on", selection: $scope) {
-                ForEach(StampScope.allCases) { option in
-                    Text(option.label).tag(option)
+            // Two columns: the two choices sit side by side rather than stacking four rows.
+            HStack(alignment: .top, spacing: 20) {
+                Picker("Stamp on", selection: $scope) {
+                    ForEach(StampScope.allCases) { option in
+                        Text(option.label).tag(option)
+                    }
                 }
-            }
-            .pickerStyle(.radioGroup)
-            Text("Each file is one part, so “first page of each part” stamps page 1 only.")
-                .font(.caption)
-                .foregroundColor(.secondary)
+                .pickerStyle(.radioGroup)
 
-            Picker("Output", selection: $outputMode) {
-                ForEach(StampOutputMode.allCases) { mode in
-                    Text(mode.label).tag(mode)
+                Picker("Output", selection: $outputMode) {
+                    ForEach(StampOutputMode.allCases) { mode in
+                        Text(mode.label).tag(mode)
+                    }
+                }
+                .pickerStyle(.radioGroup)
+
+                Spacer()
+
+                VStack(alignment: .trailing) {
+                    Spacer()
+                    Button(outputMode == .replaceOriginal ? "Stamp Files" : "Stamp Files\u{2026}") {
+                        stampFiles()
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canStamp)
                 }
             }
-            .pickerStyle(.radioGroup)
 
             if let problem = nameProblem {
                 Label(problem, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundColor(.orange)
             }
-
-            HStack {
-                Button("Add Files\u{2026}") { chooseFiles() }
-                Spacer()
-                Button(outputMode == .replaceOriginal ? "Stamp Files" : "Stamp Files\u{2026}") {
-                    stampFiles()
-                }
-                .buttonStyle(.borderedProminent)
-                .disabled(!canStamp)
-            }
         }
+        .help("Each file is one part, so “first page of each part” stamps page 1 only.")
     }
 
     /// One row per queued file. Names are editable only when saving as new files —
     /// when replacing, the file keeps its own name by definition.
     private var fileList: some View {
-        VStack(spacing: 0) {
-            ForEach($items) { $item in
-                HStack(spacing: 8) {
-                    Image(systemName: "doc.text")
-                        .foregroundColor(.secondary)
-
-                    if outputMode == .saveAsNew {
-                        TextField("Filename", text: $item.outputName)
-                            .textFieldStyle(.roundedBorder)
-                        Text(".pdf")
+        // Top-aligned scroll so one file doesn't float in the middle of a tall box, and a
+        // long list stays scrollable without pushing the preview out of the window.
+        ScrollView {
+            VStack(spacing: 2) {
+                ForEach($items) { $item in
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.text")
                             .foregroundColor(.secondary)
-                    } else {
-                        Text(item.url.lastPathComponent)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                        Spacer()
-                    }
 
-                    Button {
-                        items.removeAll { $0.id == item.id }
-                    } label: {
-                        Image(systemName: "xmark.circle.fill")
+                        if outputMode == .saveAsNew {
+                            TextField("Filename", text: $item.outputName)
+                                .textFieldStyle(.roundedBorder)
+                                .controlSize(.small)
+                            Text(".pdf")
+                                .font(.callout)
+                                .foregroundColor(.secondary)
+                        } else {
+                            Text(item.url.lastPathComponent)
+                                .font(.callout)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                            Spacer()
+                        }
+
+                        Button {
+                            items.removeAll { $0.id == item.id }
+                        } label: {
+                            Image(systemName: "xmark.circle.fill")
+                        }
+                        .buttonStyle(.plain)
+                        .foregroundColor(.secondary)
+                        .help("Remove this file")
                     }
-                    .buttonStyle(.plain)
-                    .foregroundColor(.secondary)
-                    .help("Remove this file")
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
                 }
-                .padding(.vertical, 4)
-                .padding(.horizontal, 6)
             }
+            .padding(.vertical, 4)
+            .frame(maxWidth: .infinity)
         }
-        .frame(maxHeight: 140)
+        .frame(height: min(CGFloat(items.count) * 28 + 8, 92))
         .background(
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color(NSColor.controlBackgroundColor))
@@ -424,10 +449,19 @@ struct StampView: View {
         )
     }
 
-    /// The page shown behind the stamp in the preview: page 1 of the first file added.
-    private var previewPage: PDFPage? {
-        guard let url = items.first?.url, let doc = PDFDocument(url: url) else { return nil }
-        return doc.page(at: 0)
+    /// Loads page 1 of the first queued file for the preview. Cached in `previewPage` rather
+    /// than computed per redraw — reading the PDF off disk on every frame made dragging the
+    /// stamp crawl. `previewDocument` is retained because a PDFPage can't be drawn once its
+    /// document is released.
+    private func refreshPreviewPage() {
+        guard let url = items.first?.url else {
+            previewDocument = nil
+            previewPage = nil
+            return
+        }
+        guard url != previewDocument?.documentURL else { return }
+        previewDocument = PDFDocument(url: url)
+        previewPage = previewDocument?.page(at: 0)
     }
 
     /// Keeps the saved family in the list even if it isn't installed on this Mac, so the
@@ -603,38 +637,75 @@ struct StampView: View {
 
 // MARK: - Draggable preview
 
-/// The page preview with the stamp drawn on it (by `stampPreviewImage`, the same routine
-/// the flattener uses) plus an invisible drag handle over the stamp itself, so the stamp can
-/// be dragged to any position rather than only the nine presets.
+/// The page preview with the stamp on top and a drag handle over the stamp, so it can be
+/// dragged anywhere rather than only to the nine presets.
+///
+/// Deliberately three layers, for drag performance: the **page** is a bitmap rendered once
+/// per page and cached (rendering a dense score page costs tens of milliseconds — doing it
+/// per frame made dragging crawl); the **stamp** is a `Canvas` calling the same `drawStamp`
+/// the flattener uses, so it stays faithful while being cheap to redraw; the **handle** is
+/// transparent and only tracks the gesture.
 private struct StampPreviewCanvas: View {
     @Binding var stamp: Stamp
     let page: PDFPage?
-    let height: CGFloat
 
     /// Fractional position when the current drag began.
     @State private var dragOrigin: (x: Double, y: Double)?
     @State private var isHovering = false
+    /// Cached page bitmap, re-rendered only when the page itself changes.
+    @State private var pageImage: NSImage?
+    @State private var renderedPage: PDFPage?
 
     var body: some View {
-        let pageBox = visualPageBox(for: page)
-        let scale = height / pageBox.height
-        let viewSize = CGSize(width: pageBox.width * scale, height: height)
+        GeometryReader { geo in
+            let pageBox = visualPageBox(for: page)
+            let scale = min(geo.size.width / pageBox.width, geo.size.height / pageBox.height)
+            let viewSize = CGSize(width: pageBox.width * scale, height: pageBox.height * scale)
 
-        ZStack(alignment: .topLeading) {
-            if let image = stampPreviewImage(stamp, page: page, maxDimension: max(viewSize.width, viewSize.height) * 2) {
-                Image(nsImage: image)
-                    .resizable()
-                    .frame(width: viewSize.width, height: viewSize.height)
-            } else {
-                Rectangle().fill(Color.white)
-                    .frame(width: viewSize.width, height: viewSize.height)
+            ZStack(alignment: .topLeading) {
+                if let pageImage {
+                    Image(nsImage: pageImage)
+                        .resizable()
+                        .frame(width: viewSize.width, height: viewSize.height)
+                } else {
+                    Rectangle().fill(Color.white)
+                        .frame(width: viewSize.width, height: viewSize.height)
+                }
+
+                stampLayer(pageBox: pageBox, scale: scale, viewSize: viewSize)
+
+                handle(pageBox: pageBox, scale: scale)
             }
+            .frame(width: viewSize.width, height: viewSize.height)
+            .overlay(Rectangle().strokeBorder(Color.secondary.opacity(0.3)))
+            .shadow(radius: 2, y: 1)
+            // Centre the page inside whatever space the layout gave us.
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onAppear { refreshPageImage() }
+        .onChange(of: page) { _, _ in refreshPageImage() }
+    }
 
-            handle(pageBox: pageBox, scale: scale)
+    private func refreshPageImage() {
+        guard page !== renderedPage || pageImage == nil else { return }
+        renderedPage = page
+        pageImage = stampPagePreviewImage(page: page)
+    }
+
+    /// The stamp itself, drawn through the shared `drawStamp` so the preview can't drift from
+    /// the written PDF. Only this layer redraws while dragging.
+    private func stampLayer(pageBox: CGRect, scale: CGFloat, viewSize: CGSize) -> some View {
+        Canvas { context, _ in
+            context.withCGContext { cg in
+                // Canvas is y-down from the top-left; PDF space is y-up from the bottom-left.
+                cg.translateBy(x: 0, y: viewSize.height)
+                cg.scaleBy(x: 1, y: -1)
+                cg.scaleBy(x: scale, y: scale)
+                drawStamp(stamp, in: cg, pageBox: pageBox)
+            }
         }
         .frame(width: viewSize.width, height: viewSize.height)
-        .overlay(Rectangle().strokeBorder(Color.secondary.opacity(0.3)))
-        .shadow(radius: 2, y: 1)
+        .allowsHitTesting(false)
     }
 
     /// A transparent hit area sitting exactly over the drawn stamp. Highlighted on hover so
