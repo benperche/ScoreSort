@@ -54,9 +54,13 @@ struct StampView: View {
     @State private var items: [StampFileItem] = []
     @State private var isTargeted = false
     @AppStorage("stampOutputMode") private var outputMode: StampOutputMode = .replaceOriginal
-    /// Page 1 of the first queued file, held so the preview doesn't reload it per redraw.
+    /// The page being previewed, held so the preview doesn't reload it per redraw.
     @State private var previewPage: PDFPage?
     @State private var previewDocument: PDFDocument?
+    /// Which queued file, and which of its pages, the preview is showing.
+    @State private var fileIndex = 0
+    @State private var pageIndex = 0
+    @FocusState private var isViewFocused: Bool
     /// Scope for *this* tab's batch job — a per-job choice, not part of the saved design.
     @AppStorage("stampTabScope") private var scope: StampScope = .everyPage
 
@@ -95,15 +99,46 @@ struct StampView: View {
         }
         // Drop anywhere in the tab, not just on the drop zone.
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in handleDrop(providers) }
+        .focusable()
+        .focused($isViewFocused)
+        // Same key map as the Split and Rotate tabs: ← → step pages, ⌘← ⌘→ jump to the ends,
+        // ↑ ↓ move between files.
+        .onKeyPress { press in
+            guard appState.selectedTab == 4 else { return .ignored }   // Stamp tab only
+            // The stamp text editor is an NSTextView — arrows belong to it while it's being
+            // typed in, so never intercept them then.
+            guard !(NSApp.keyWindow?.firstResponder is NSTextView) else { return .ignored }
+            guard !items.isEmpty else { return .ignored }
+
+            switch press.key {
+            case .leftArrow:
+                if press.modifiers.contains(.command) { firstPage() } else { previousPage() }
+                return .handled
+            case .rightArrow:
+                if press.modifiers.contains(.command) { lastPage() } else { nextPage() }
+                return .handled
+            case .upArrow:
+                previousFile()
+                return .handled
+            case .downArrow:
+                nextFile()
+                return .handled
+            default:
+                return .ignored
+            }
+        }
         .onAppear {
             draft = stampStore.selectedStamp
+            isViewFocused = true
             DispatchQueue.main.async { syncTabCommands() }
         }
         .onChange(of: appState.selectedTab) { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: items) {
-            refreshPreviewPage()
+            clampPreviewPosition()
             DispatchQueue.main.async { syncTabCommands() }
         }
+        .onChange(of: fileIndex) { DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: pageIndex) { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: stampStore.selectedStampId) { _, _ in draft = stampStore.selectedStamp }
         .onChange(of: draft) { _, newValue in
             if let newValue { stampStore.updateStamp(newValue) }
@@ -311,12 +346,17 @@ struct StampView: View {
                     .padding(12)
             }
 
-            Text(previewCaption)
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .padding(.horizontal, 12)
+            if items.isEmpty {
+                Text(previewCaption)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .padding(.horizontal, 12)
+            } else {
+                pageNavigationBar
+                    .padding(.horizontal, 12)
+            }
 
             Divider()
 
@@ -327,14 +367,122 @@ struct StampView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    /// Driven by `items`, never by `previewPage` — the two are briefly out of step when the
-    /// list changes (the body re-runs before `.onChange` clears the page), and indexing
-    /// `items` on the strength of `previewPage` crashed when the last file was removed.
     private var previewCaption: String {
-        if let name = items.first?.url.lastPathComponent {
-            return "Page 1 of \(name) — drag the stamp to move it."
+        "Blank A4 page — drag the stamp to move it. Add a PDF below to preview on a real page."
+    }
+
+    /// Page/file navigation over the queued files, laid out like the Split and Rotate tabs:
+    /// jump-to-end and step buttons flanking the position label.
+    private var pageNavigationBar: some View {
+        HStack(spacing: 6) {
+            Button(action: firstPage) { Image(systemName: "chevron.backward.to.line") }
+                .disabled(!canGoBack)
+                .help("First page (⌘←)")
+            Button(action: previousPage) { Image(systemName: "chevron.left") }
+                .disabled(!canGoBack)
+                .help("Previous page (←)")
+
+            Spacer()
+
+            VStack(spacing: 1) {
+                Text(items.count > 1
+                     ? "Page \(pageIndex + 1) of \(pageCount) — file \(fileIndex + 1) of \(items.count)"
+                     : "Page \(pageIndex + 1) of \(pageCount)")
+                    .font(.callout)
+                    .monospacedDigit()
+                // In first-page mode the stamp is still drawn on later pages (so it can be
+                // positioned from any of them), but say plainly that they won't get one.
+                if pageWillBeStamped {
+                    Text(currentFileName)
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                } else {
+                    Text("This page won’t be stamped — only page 1 of each file")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                        .lineLimit(1)
+                }
+            }
+
+            Spacer()
+
+            Button(action: nextPage) { Image(systemName: "chevron.right") }
+                .disabled(!canGoForward)
+                .help("Next page (→)")
+            Button(action: lastPage) { Image(systemName: "chevron.forward.to.line") }
+                .disabled(!canGoForward)
+                .help("Last page (⌘→)")
         }
-        return "Blank A4 page — drag the stamp to move it. Add a PDF below to preview on a real page."
+    }
+
+    // MARK: - Preview navigation
+
+    private var pageCount: Int { previewDocument?.pageCount ?? 0 }
+    /// Whether the page on screen is one the current scope would actually stamp.
+    private var pageWillBeStamped: Bool { scope == .everyPage || pageIndex == 0 }
+    private var currentFileName: String { previewFileURL?.lastPathComponent ?? "" }
+    /// The file the preview is currently on — also what "Show in Finder" reveals.
+    private var previewFileURL: URL? {
+        items.indices.contains(fileIndex) ? items[fileIndex].url : nil
+    }
+    /// Navigation runs over the whole queue, so the ends are the first page of the first file
+    /// and the last page of the last.
+    private var canGoBack: Bool { pageIndex > 0 || fileIndex > 0 }
+    private var canGoForward: Bool { pageIndex < pageCount - 1 || fileIndex < items.count - 1 }
+
+    private func previousPage() {
+        if pageIndex > 0 {
+            pageIndex -= 1
+        } else if fileIndex > 0 {
+            // Step back into the previous file, landing on its last page.
+            fileIndex -= 1
+            loadPreviewDocument()
+            pageIndex = max(0, pageCount - 1)
+        }
+        refreshPreviewPage()
+    }
+
+    private func nextPage() {
+        if pageIndex < pageCount - 1 {
+            pageIndex += 1
+        } else if fileIndex < items.count - 1 {
+            fileIndex += 1
+            pageIndex = 0
+            loadPreviewDocument()
+        }
+        refreshPreviewPage()
+    }
+
+    private func firstPage() {
+        fileIndex = 0
+        pageIndex = 0
+        loadPreviewDocument()
+        refreshPreviewPage()
+    }
+
+    private func lastPage() {
+        fileIndex = max(0, items.count - 1)
+        loadPreviewDocument()
+        pageIndex = max(0, pageCount - 1)
+        refreshPreviewPage()
+    }
+
+    private func previousFile() {
+        guard fileIndex > 0 else { return }
+        fileIndex -= 1
+        pageIndex = 0
+        loadPreviewDocument()
+        refreshPreviewPage()
+    }
+
+    private func nextFile() {
+        guard fileIndex < items.count - 1 else { return }
+        fileIndex += 1
+        pageIndex = 0
+        loadPreviewDocument()
+        refreshPreviewPage()
     }
 
     private var filesSection: some View {
@@ -510,19 +658,46 @@ struct StampView: View {
         )
     }
 
-    /// Loads page 1 of the first queued file for the preview. Cached in `previewPage` rather
-    /// than computed per redraw — reading the PDF off disk on every frame made dragging the
-    /// stamp crawl. `previewDocument` is retained because a PDFPage can't be drawn once its
-    /// document is released.
-    private func refreshPreviewPage() {
-        guard let url = items.first?.url else {
+    /// Loads the document for `fileIndex`, unless it's already loaded. Retained in
+    /// `previewDocument` because a `PDFPage` can't be drawn once its document is released.
+    private func loadPreviewDocument() {
+        guard items.indices.contains(fileIndex) else {
             previewDocument = nil
             previewPage = nil
             return
         }
+        let url = items[fileIndex].url
         guard url != previewDocument?.documentURL else { return }
         previewDocument = PDFDocument(url: url)
-        previewPage = previewDocument?.page(at: 0)
+    }
+
+    /// Points `previewPage` at the current file/page. Cached rather than computed per redraw —
+    /// reading the PDF off disk on every frame made dragging the stamp crawl.
+    private func refreshPreviewPage() {
+        loadPreviewDocument()
+        guard let doc = previewDocument, doc.pageCount > 0 else {
+            previewPage = nil
+            return
+        }
+        pageIndex = min(max(pageIndex, 0), doc.pageCount - 1)
+        previewPage = doc.page(at: pageIndex)
+    }
+
+    /// Keeps the preview pointing somewhere valid after the queue changes (files added,
+    /// removed, or cleared).
+    private func clampPreviewPosition() {
+        guard !items.isEmpty else {
+            fileIndex = 0
+            pageIndex = 0
+            previewDocument = nil
+            previewPage = nil
+            return
+        }
+        if !items.indices.contains(fileIndex) {
+            fileIndex = min(fileIndex, items.count - 1)
+            pageIndex = 0
+        }
+        refreshPreviewPage()
     }
 
     /// Keeps the saved family in the list even if it isn't installed on this Mac, so the
@@ -572,14 +747,22 @@ struct StampView: View {
         slice.primarySave  = canStamp ? { stampFiles() } : nil
         slice.clearTitle   = "Clear Files"
         slice.clear        = items.isEmpty ? nil : { items = [] }
+        // ⌘N and ⌘D are free app-wide (File ▸ New is replaced by "Add Files…" on ⌘O), and
+        // these rows only exist while Stamp is the active tab, so they can't fire elsewhere.
         slice.tabActions = [
-            MenuAction(title: "New Stamp", perform: { addStamp() }),
-            MenuAction(title: "Duplicate Stamp", isEnabled: stampStore.selectedStampId != nil,
+            MenuAction(title: "New Stamp", key: KeyEquivalent("n"), perform: { addStamp() }),
+            MenuAction(title: "Duplicate Stamp", key: KeyEquivalent("d"),
+                       isEnabled: stampStore.selectedStampId != nil,
                        perform: { duplicateStamp() }),
             MenuAction(title: "Delete Stamp", isEnabled: stampStore.stamps.count > 1,
                        perform: { deleteStamp() }),
+            // Page nav stays bare-key (← →) like the other tabs; these rows exist for
+            // discoverability, without shortcuts that would fire app-wide.
+            MenuAction(title: "Previous Page", isEnabled: canGoBack, perform: { previousPage() }),
+            MenuAction(title: "Next Page", isEnabled: canGoForward, perform: { nextPage() }),
             MenuAction(title: "Show in Finder", key: KeyEquivalent("f"), modifiers: [.command, .shift],
-                       isEnabled: items.first != nil, perform: { revealInFinder(items.first?.url) }),
+                       isEnabled: items.indices.contains(fileIndex),
+                       perform: { revealInFinder(previewFileURL) }),
         ]
         appState.tabCommands.slice = slice
     }
@@ -601,6 +784,11 @@ struct StampView: View {
         }
         for url in pdfs where !items.contains(where: { $0.url == url }) {
             items.append(StampFileItem(url: url))
+        }
+        // Take focus so the arrow keys page through straight away — unless the user is
+        // mid-sentence in the stamp text, in which case leave them alone.
+        if !(NSApp.keyWindow?.firstResponder is NSTextView) {
+            isViewFocused = true
         }
     }
 

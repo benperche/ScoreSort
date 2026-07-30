@@ -504,9 +504,16 @@ struct ShortcutsHelpView: View {
                 }
 
                 shortcutSection("Stamp") {
-                    shortcutRow("⌘O", "Add PDFs to stamp")
+                    shortcutRow("⌘O", "Add PDFs or a folder to stamp")
                     shortcutRow("⌘S", "Stamp the added files")
                     shortcutRow("⌘⌫", "Clear the file list")
+                    shortcutRow("← / →", "Previous / next page")
+                    shortcutRow("⌘← / ⌘→", "First / last page of the whole queue")
+                    shortcutRow("↑ / ↓", "Previous / next file")
+                    shortcutRow("⌘B / ⌘I", "Bold / italic the selected stamp text")
+                    shortcutRow("⌘N", "New stamp")
+                    shortcutRow("⌘D", "Duplicate this stamp")
+                    shortcutRow("⇧⌘F", "Show the previewed file in Finder")
                 }
 
 
