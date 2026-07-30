@@ -13,41 +13,90 @@
 ```
 ScoreSortApp (@main)
   └── AppDelegate  — quits on window close
-  └── WindowGroup  — ContentView
+  └── WindowGroup  — ContentView            (.defaultSize 940×800)
         └── ContentView  — TabView (tags 0–3)
               ├── 0: CombineView
               ├── 1: RenamerView
               ├── 2: SplitView
               └── 3: RotateView
+        └── sheets: ShortcutsHelpView (⌘`), WelcomeTourView (⌘/),
+                    StampDesignerView (⌥⌘S, via .sheet(item: appState.stampSheet))
   └── Settings  — AppPreferencesView (⌘,)
-        ├── Tab "Combine Presets"  — CombinerPreferencesView
-        └── Tab "Renamer"          — RenamerPreferencesView (placeholder)
-  └── Window("about")  — AboutView (custom About panel)
+        ├── Tab "Combiner"  (tag "combiner") — CombinerPreferencesView
+        └── Tab "Renamer"   (tag "renamer")  — PreferencesView (renamer instrument order)
 ```
 
-Window min size: 900×700.
+Window min size: 900×700 (`.defaultSize(940, 800)` on the `WindowGroup`).
+
+**There is no About window scene.** `CommandGroup(replacing: .appInfo)` calls `NSApp.orderFrontStandardAboutPanel(options: [.credits: aboutPanelCredits()])` — the standard macOS panel. A titled `Window` scene was removed because it added an unwanted entry to the Window menu. `aboutPanelCredits()` builds the credits string from the executable's modification date + authorship.
+
+`AppPreferencesView` deep-links via `@AppStorage("preferredPrefsTab")` — write `"combiner"` or `"renamer"` before opening Preferences and `.onChange` selects that tab even if the window is already open.
 
 **App-level shared state** (held as `@StateObject` on `ScoreSortApp`, injected via `.environmentObject()`):
-- `AppState` — `selectedTab`, `showingKeyboardHelp`, `combineMenuState`
+- `AppState` — `selectedTab`, `showingKeyboardHelp`, `showingWelcomeTour`, `stampSheet`, plus two menu objects: `tabCommands` (`TabCommands`, the active tab's menu bridge) and `combineMenuState` (`CombineMenuState`)
 - `RenamerManager` — used by both `RenamerView` and `AppPreferencesView`
 - `EnsemblePresetStore` — used by `CombineView`, `PresetSidebarView`, `CombinerPreferencesView`
 - `StampStore` — used by `StampDesignerView`, `StampOptionRow`, `CombineView`, `SplitView`
 
 ### Menu Bar Commands
 
-| Struct | Menu | Purpose |
-|--------|------|---------|
-| `NavigateCommands` | Navigate | Tab switching (⌘1–⌘4) |
-| `CombinerCommands` | Combiner | File list shortcuts (arrow keys, ⌘↑/↓, ⌫, ⌘A, C) |
-| `HelpCommands` | Help | Opens `ShortcutsHelpView` sheet |
+The menu bar is **standard File / Edit / View plus one adaptive "Actions" menu** (redesigned in 1.8.0). There are no per-tab menus.
 
-`CommandGroup(replacing: .appInfo)` replaces the system About panel with a button that calls `openWindow(id: "about")`, opening `AboutView` as a separate `Window` scene.
+| Struct | Menu | Contents |
+|--------|------|----------|
+| `FileCommands` | File | `Open…` (⌘O, replaces `.newItem`) · `Save` (⌘S) · `Open in Preview` (⇧⌘P) · `Stamp…` (⌥⌘S) · `Clear` (⌘⌫) — all replacing `.saveItem`. Titles and enablement come from the active tab's slice; `Stamp…` is the one global item (it edits the shared stamp library, so it lives in File rather than Actions). |
+| `ViewCommands` | View | Tab switching — Combine PDFs ⌘1 / Rename Files ⌘2 / Split PDF ⌘3 / Rotate Pages ⌘4 — plus `Show/Hide Presets` (⌥⌘P, disabled unless the active tab supplies `togglePresets`). |
+| `TabActionsCommands` | Actions | `ForEach` over the active tab's `slice.tabActions`. The title is fixed at "Actions" — SwiftUI can't reliably retitle a `CommandMenu` — only the contents swap per tab. |
+| `HelpCommands` | Help | Replaces `.help` (the default item errors): `Welcome Tour…` (⌘/) and `Keyboard Shortcuts…` (⌘\`). |
 
-**`CombineMenuState`** — `ObservableObject` shared between `CombineView` (writes) and `CombinerCommands` (reads). Carries `canRemove`, `canMoveUp`, `canMoveDown`, `canGroup`, `hasFiles`, `isPanelOpen`, `isActiveTab` flags plus action closures (`removeSelected`, `moveUp`, `moveDown`, `group`, `selectAll`, navigation closures). `CombineView.syncMenuFlags()` + `syncMenuClosures()` keep it in sync via `.onAppear` and `.onChange` (incl. `appState.selectedTab`).
+`CommandGroup(replacing: .appInfo)` → standard About panel (see above); `CommandGroup(after: .appInfo)` → `Check for Updates…` (Sparkle, disabled until `canCheckForUpdates`).
 
-**Keyboard handlers are tab-scoped.** TabView keeps hidden tabs mounted, so handlers leak across tabs unless gated. Two mechanisms: (1) `CombinerCommands`' bare-key menu shortcuts (↑ ↓ ⇧↑ ⇧↓ ⌫ `c` `p`) are global menu key-equivalents that fire on any tab — every one is `.disabled(!state.isActiveTab || …)`, where `isActiveTab = appState.selectedTab == 0`. (2) Each tab's in-view `.onKeyPress` (Combine/Split/Rotate) and **app-global `NSEvent` local monitors** (renamer delete, splitter delete+⌘Z) early-out with `guard appState.selectedTab == <tab> else { return … }`. (Combine 0, Rename 1, Split 2, Rotate 3.) This fixed a bug where a populated Combine list captured ↑/↓ while the Split tab was on screen.
+#### The `TabCommands` / `TabSlice` / `MenuAction` bridge
 
-**`ShortcutsHelpView`** — modal sheet listing all shortcuts grouped by Combine navigation, Combine file management, Combine collate groups, Combine presets, Tabs, Split/Rotate, and Renamer.
+```swift
+struct MenuAction: Identifiable {        // one row in the Actions menu
+    let id = UUID()
+    let title: String
+    var key: KeyEquivalent? = nil        // a *modifier* shortcut only, never a bare key
+    var modifiers: EventModifiers = .command
+    var isEnabled: Bool = true
+    let perform: () -> Void
+}
+
+struct TabSlice {
+    var openTitle = "Open…";   var open: (() -> Void)?          // File ▸ ⌘O
+    var primaryTitle = "Save"; var primarySave: (() -> Void)?   // File ▸ ⌘S
+    var openInPreview: (() -> Void)?                            // File ▸ ⇧⌘P
+    var clearTitle = "Clear";  var clear: (() -> Void)?         // File ▸ ⌘⌫
+    var togglePresets: (() -> Void)?                            // View ▸ ⌥⌘P
+    var tabActions: [MenuAction] = []                           // the Actions menu
+}
+
+final class TabCommands: ObservableObject { @Published var slice = TabSlice() }
+```
+
+`AppState.tabCommands` holds the single `TabCommands`; the command structs observe it and read `commands.slice`. A **nil closure disables** its menu item, so tabs express "not available yet" by leaving the closure nil rather than by flag plumbing.
+
+**Only the active tab writes.** Each tab has a private `syncTabCommands()` that starts with `guard appState.selectedTab == <myTab> else { return }`, builds a fresh `TabSlice`, and assigns `appState.tabCommands.slice`. It's called from `.onAppear` and from `.onChange` of `appState.selectedTab` plus whatever state affects enablement — always wrapped in `DispatchQueue.main.async { … }` so publishing happens after the view body completes. Because hidden tabs stay mounted, the guard is what keeps the menus showing the on-screen tab.
+
+Per-tab slices (see each tab's `syncTabCommands()`):
+
+| Tab | ⌘O | ⌘S | ⌘⌫ | Actions menu |
+|-----|----|----|----|--------------|
+| 0 Combine (`CombineTab.swift:807`) | Add Files… | Create PDF… | Clear Files | Move Up ⌘↑ · Move Down ⌘↓ · Collate · Add Blank Page · Remove Selected · Select All · Select None · Show in Finder ⇧⌘F. Also supplies `openInPreview` and `togglePresets`. |
+| 1 Rename (`RenameViews.swift:223`) | Choose Files or Folder… | Rename Files | Clear Files / **Start Over** on the done screen | Don't Rename Selected · Rescan Folder ⌘R · Skip Folder · Show in Finder ⇧⌘F |
+| 2 Split (`SplitView.swift:799`) | Choose PDF… | per stage: Continue to Naming / Save Split Files | Clear File / **Start Over** on the summary | stage-dependent — Split: Split as A3… · Fix Booklet Order · Clear All Splits; Naming: Back to Split; Prefix: Back to Naming. Always ends with Show in Finder ⇧⌘F. |
+| 3 Rotate (`RotateTab.swift:217`) | Choose PDF… | Save Rotated PDF | Clear File | Rotate Left · Rotate Right · Show in Finder ⇧⌘F |
+
+Convention: actions are **listed even when unusable** (`isEnabled: false`) rather than omitted, so the menu advertises what a tab can do in its empty state. "Show in Finder" reveals the most relevant target — output folder on done/summary screens, else the source file/folder.
+
+**Menus bind only non-editing modifier shortcuts** (⌘S/⌘O/⇧⌘P/⌘⌫/⌥⌘S/⌥⌘P/⇧⌘F/⌘R/⌘1–4, plus Combine's ⌘↑/⌘↓). Standard-editing keys (⌘A/⌘Z/⌫) and all bare keys stay in the tabs' own handlers — a `CommandMenu` shortcut intercepts globally *even when the item is `.disabled()`*, which broke ⌘A inside a save panel's text field. Hence `MenuAction.key` is documented as modifier-only.
+
+**`CombineMenuState`** — no longer the menu bridge. It survives for Combine's in-view keyboard handling: `isPanelOpen` (set around the open/save panels; the `.onKeyPress` early-outs while a panel is up) and the `canRemove`/`canMoveUp`/`canMoveDown`/`canGroup`/`hasFiles`/`isActiveTab` flags plus action closures kept in sync by `syncMenuFlags()` / `syncMenuClosures()`. Nothing outside `CombineTab.swift` reads the flags or closures now that `CombinerCommands` is gone.
+
+**Keyboard handlers are tab-scoped.** TabView keeps hidden tabs mounted, so handlers leak across tabs unless gated. Every one is gated the same way: Combine's `.onKeyPress` (`guard appState.selectedTab == 0`, then `guard !menuState.isPanelOpen`), Split's and Rotate's `.onKeyPress`, and the **app-global `NSEvent` local monitors** (renamer delete in `RenameViews.swift`, splitter delete + ⌘Z in `SplitView.swift`) which early-out with `guard appState.selectedTab == <tab> else { return … }`. (Combine 0, Rename 1, Split 2, Rotate 3.)
+
+**`ShortcutsHelpView`** (⌘\`) — modal sheet, and **the complete shortcut reference**: a per-tab table with sections "Global (View & File menus)", "Combine PDFs", "Rename Files", "Split PDF", "Rotate Pages". Any new shortcut — menu-bound or in-view — should be added here.
 
 ---
 
@@ -165,7 +214,7 @@ The `ForEach(combineManager.files)` body uses a `@ViewBuilder` to optionally emi
 #### Navigation
 **`navigateSelection(direction:extending:)`** — navigates the flat `combineManager.files` array (group headers are virtual and not part of navigation). Selecting a grouped file and pressing ⌘↑/↓ triggers `moveUp/Down` via `expandForGroups`, moving the whole group.
 
-**Keyboard shortcuts (in-view `.onKeyPress`):** ↑/↓ (navigate), ⇧↑/⇧↓ (extend), ⌘A (select all), `c` (group — only `.handled` if `canGroup`). ⌘↑/↓ and ⌫ come from `CombinerCommands`.
+**Keyboard shortcuts (in-view `.onKeyPress`):** ↑/↓ (navigate), ⇧↑/⇧↓ (extend), ⌘A (select all), `c` (group — only `.handled` if `canGroup`). The whole handler is skipped unless `selectedTab == 0` and no file panel is open (`menuState.isPanelOpen`). ⌘↑/⌘↓ (Move Up/Down) and Remove Selected come from the Actions menu via `syncTabCommands()`.
 
 #### Removal notice
 `showRemovalNotice(count:undoManager:)` — auto-dismisses after 5 s; Undo button invokes `undoManager.undo()`.
