@@ -224,16 +224,18 @@ struct StampView: View {
                 Text("Position")
                     .font(.headline)
 
-                VStack(spacing: 4) {
+                // Portrait proportions inside a page-like outline, so the grid reads as
+                // "where on the page" rather than as nine anonymous buttons.
+                VStack(spacing: 3) {
                     ForEach(Array(StampAnchor.grid.enumerated()), id: \.offset) { _, row in
-                        HStack(spacing: 4) {
+                        HStack(spacing: 3) {
                             ForEach(row) { anchor in
                                 Button {
                                     draft?.move(to: anchor)
                                 } label: {
-                                    RoundedRectangle(cornerRadius: 3)
-                                        .fill(stamp.matches(anchor) ? Color.accentColor : Color.secondary.opacity(0.15))
-                                        .frame(width: 34, height: 24)
+                                    RoundedRectangle(cornerRadius: 2)
+                                        .fill(stamp.matches(anchor) ? Color.accentColor : Color.secondary.opacity(0.14))
+                                        .frame(width: 30, height: 38)
                                 }
                                 .buttonStyle(.plain)
                                 .help(anchor.label)
@@ -241,6 +243,11 @@ struct StampView: View {
                         }
                     }
                 }
+                .padding(4)
+                .background(
+                    RoundedRectangle(cornerRadius: 5)
+                        .strokeBorder(Color.secondary.opacity(0.35))
+                )
 
                 Text("Or drag the stamp around on the preview.")
                     .font(.caption)
@@ -279,9 +286,7 @@ struct StampView: View {
                     .padding(12)
             }
 
-            Text(previewPage == nil
-                 ? "Blank A4 page — drag the stamp to move it. Add a PDF below to preview on a real page."
-                 : "Page 1 of \(items[0].url.lastPathComponent) — drag the stamp to move it.")
+            Text(previewCaption)
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .lineLimit(1)
@@ -295,6 +300,16 @@ struct StampView: View {
                 .padding(.bottom, 12)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    /// Driven by `items`, never by `previewPage` — the two are briefly out of step when the
+    /// list changes (the body re-runs before `.onChange` clears the page), and indexing
+    /// `items` on the strength of `previewPage` crashed when the last file was removed.
+    private var previewCaption: String {
+        if let name = items.first?.url.lastPathComponent {
+            return "Page 1 of \(name) — drag the stamp to move it."
+        }
+        return "Blank A4 page — drag the stamp to move it. Add a PDF below to preview on a real page."
     }
 
     private var filesSection: some View {
@@ -322,14 +337,20 @@ struct StampView: View {
                 fileList
             }
 
-            // Two columns: the two choices sit side by side rather than stacking four rows.
-            HStack(alignment: .top, spacing: 20) {
+            // The two choices sit side by side rather than as four stacked rows, spread
+            // across the width with the action at the trailing edge. No Spacer may be
+            // *vertical* here — a greedy one stretches this whole section and steals the
+            // height the preview should be getting.
+            HStack(alignment: .top, spacing: 16) {
                 Picker("Stamp on", selection: $scope) {
                     ForEach(StampScope.allCases) { option in
                         Text(option.label).tag(option)
                     }
                 }
                 .pickerStyle(.radioGroup)
+                .fixedSize()
+
+                Spacer(minLength: 12)
 
                 Picker("Output", selection: $outputMode) {
                     ForEach(StampOutputMode.allCases) { mode in
@@ -337,17 +358,15 @@ struct StampView: View {
                     }
                 }
                 .pickerStyle(.radioGroup)
+                .fixedSize()
 
-                Spacer()
+                Spacer(minLength: 12)
 
-                VStack(alignment: .trailing) {
-                    Spacer()
-                    Button(outputMode == .replaceOriginal ? "Stamp Files" : "Stamp Files\u{2026}") {
-                        stampFiles()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canStamp)
+                Button(outputMode == .replaceOriginal ? "Stamp Files" : "Stamp Files\u{2026}") {
+                    stampFiles()
                 }
+                .buttonStyle(.borderedProminent)
+                .disabled(!canStamp)
             }
 
             if let problem = nameProblem {
