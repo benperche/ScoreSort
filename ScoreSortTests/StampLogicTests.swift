@@ -446,3 +446,111 @@ struct ExpandToFilesTests {
         #expect(found.map { $0.lastPathComponent } == ["a.pdf", "c.pdf"])
     }
 }
+
+// MARK: - Rich text
+
+@Suite("Stamp rich text")
+struct StampRichTextTests {
+
+    /// "Plain " + bold "Bold" + red italic "Italic", the shape the editor produces.
+    private func mixedAttributedString() -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        result.append(NSAttributedString(string: "Plain ", attributes: [
+            .font: NSFont(name: "Helvetica", size: 12)!,
+            .foregroundColor: NSColor.black]))
+        result.append(NSAttributedString(string: "Bold", attributes: [
+            .font: NSFont(name: "Helvetica-Bold", size: 12)!,
+            .foregroundColor: NSColor.black]))
+        result.append(NSAttributedString(string: "Italic", attributes: [
+            .font: NSFont(name: "Helvetica-Oblique", size: 14)!,
+            .foregroundColor: NSColor(srgbRed: 1, green: 0, blue: 0, alpha: 1)]))
+        return result
+    }
+
+    private func fontRuns(_ attributed: NSAttributedString) -> [(name: String, size: Double, text: String)] {
+        var runs: [(String, Double, String)] = []
+        attributed.enumerateAttribute(.font, in: NSRange(location: 0, length: attributed.length)) { value, range, _ in
+            let font = value as! NSFont
+            runs.append((font.fontName, Double(font.pointSize),
+                         (attributed.string as NSString).substring(with: range)))
+        }
+        return runs
+    }
+
+    @Test("RTF round trips the per-run fonts and colours")
+    func rtfRoundTrip() throws {
+        let data = try #require(stampRTFData(from: mixedAttributedString()))
+        let stamp = Stamp(name: "Mixed", text: "Plain BoldItalic", richTextData: data)
+        let decoded = try #require(stampRichText(stamp))
+
+        let runs = fontRuns(decoded)
+        #expect(runs.count == 3)
+        #expect(runs[0].name == "Helvetica")
+        #expect(runs[1].name == "Helvetica-Bold")
+        #expect(runs[2].name == "Helvetica-Oblique")
+        #expect(runs[2].size == 14)   // the per-run size survives, not just the traits
+    }
+
+    @Test("rich text wins over the plain text and base attributes")
+    func richTextTakesPrecedence() throws {
+        let data = try #require(stampRTFData(from: mixedAttributedString()))
+        var stamp = Stamp(name: "Mixed", text: "Plain BoldItalic", richTextData: data)
+        stamp.isBold = false          // base attributes say "not bold"…
+        stamp.fontSize = 30           // …and 30 pt
+
+        let drawn = stampAttributedString(stamp)
+        let runs = fontRuns(drawn)
+        // …but the rich runs are what get drawn.
+        #expect(runs.contains { $0.name == "Helvetica-Bold" })
+        #expect(runs.allSatisfy { $0.size != 30 })
+    }
+
+    @Test("applying alignment doesn't flatten the per-run styling")
+    func alignmentPreservesRuns() throws {
+        let data = try #require(stampRTFData(from: mixedAttributedString()))
+        var stamp = Stamp(name: "Mixed", text: "Plain BoldItalic", richTextData: data)
+        stamp.positionX = 1   // right-hand side → right-aligned block
+
+        let drawn = stampAttributedString(stamp)
+        #expect(fontRuns(drawn).count == 3)
+        let para = drawn.attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+        #expect(para?.alignment == .right)
+        // The colour of the last run must also survive.
+        let colour = drawn.attribute(.foregroundColor, at: drawn.length - 1,
+                                     effectiveRange: nil) as? NSColor
+        #expect(colour?.usingColorSpace(.sRGB)?.redComponent ?? 0 > 0.9)
+    }
+
+    @Test("without rich text the base attributes are used")
+    func fallsBackToBaseAttributes() {
+        var stamp = testStamp()
+        stamp.richTextData = nil
+        stamp.isBold = true
+        stamp.fontSize = 20
+
+        let drawn = stampAttributedString(stamp)
+        let runs = fontRuns(drawn)
+        #expect(runs.count == 1)
+        #expect(runs[0].size == 20)
+        #expect(NSFontManager.shared.traits(of: NSFont(name: runs[0].name, size: 20)!)
+            .contains(.boldFontMask))
+    }
+
+    @Test("empty rich text falls back rather than drawing nothing")
+    func emptyRichTextIsIgnored() throws {
+        let empty = try #require(stampRTFData(from: NSAttributedString(string: "")))
+        var stamp = testStamp()
+        stamp.richTextData = empty
+        #expect(stampRichText(stamp) == nil)
+        #expect(stampAttributedString(stamp).string == stamp.text)
+    }
+
+    @Test("rich text survives the stamp's own encode / decode")
+    func survivesStampCoding() throws {
+        let data = try #require(stampRTFData(from: mixedAttributedString()))
+        let stamp = Stamp(name: "Mixed", text: "Plain BoldItalic", richTextData: data)
+        let coded = try JSONDecoder().decode(Stamp.self, from: try JSONEncoder().encode(stamp))
+        #expect(coded.richTextData == data)
+        #expect(fontRuns(try #require(stampRichText(coded))).count == 3)
+    }
+}

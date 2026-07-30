@@ -20,6 +20,9 @@ class AppState: ObservableObject {
     @Published var showingKeyboardHelp = false
     @Published var showingWelcomeTour = false
     let combineMenuState = CombineMenuState()
+    /// Formats the selection in the Stamp tab's text editor. App-level so the Format menu
+    /// (⌘B / ⌘I) can reach it; inert whenever no stamp editor is on screen.
+    let stampFormatter = StampTextFormatter()
     /// Bridges the *active* tab's actions to the File/Edit/View/⟨tab⟩ menus.
     let tabCommands = TabCommands()
 }
@@ -177,6 +180,25 @@ struct TabActionsCommands: Commands {
     }
 }
 
+// MARK: - Format Commands (text styling in the Stamp tab's editor)
+// ⌘B / ⌘I are safe to bind here even though they're editing keys: nothing else in the app
+// uses them, and the formatter is inert unless a stamp text view exists, so they can't
+// steal a keystroke from another field.
+struct FormatCommands: Commands {
+    @ObservedObject var formatter: StampTextFormatter
+
+    var body: some Commands {
+        CommandMenu("Format") {
+            Button("Bold") { formatter.toggleBold() }
+                .keyboardShortcut("b", modifiers: .command)
+                .disabled(!formatter.isAvailable)
+            Button("Italic") { formatter.toggleItalic() }
+                .keyboardShortcut("i", modifiers: .command)
+                .disabled(!formatter.isAvailable)
+        }
+    }
+}
+
 // MARK: - Help Commands
 struct HelpCommands: Commands {
     @ObservedObject var appState: AppState
@@ -273,6 +295,7 @@ struct ScoreSortApp: App {
             FileCommands(appState: appState, commands: appState.tabCommands)
             ViewCommands(appState: appState)
             TabActionsCommands(commands: appState.tabCommands)
+            FormatCommands(formatter: appState.stampFormatter)
             HelpCommands(appState: appState)
         }
 
@@ -368,7 +391,9 @@ struct ContentView: View {
                     }
                     .tag(4)
             }
-            .frame(minWidth: 900, minHeight: 700)
+            // Raised from 900 for the Stamp tab: its fixed-width designer column plus the
+            // preview and the two output choices below don't fit any narrower.
+            .frame(minWidth: 1020, minHeight: 700)
             .onAppear {
                 // Now that the main window is on screen, allow quit-on-last-window-close.
                 AppDelegate.mainWindowHasAppeared = true

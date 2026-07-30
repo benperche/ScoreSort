@@ -177,10 +177,9 @@ struct StampView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Text("Text")
                     .font(.headline)
-                TextField("e.g. Example School Band", text: binding.text, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...3)
-                    .help("Press ⌥⏎ for a second line.")
+                StampTextEditor(stamp: binding, formatter: appState.stampFormatter)
+                    .frame(height: 54)
+                    .help("Select text and use the style buttons below (or ⌘B / ⌘I) to format part of the stamp. Return starts a new line.")
             }
         }
     }
@@ -192,20 +191,50 @@ struct StampView: View {
                 Text("Appearance")
                     .font(.headline)
 
-                Picker("Font", selection: binding.fontFamily) {
+                Picker("Font", selection: Binding(
+                    get: { stamp.fontFamily },
+                    set: { newValue in
+                        draft?.fontFamily = newValue
+                        appState.stampFormatter.apply(fontFamily: newValue)
+                    }
+                )) {
                     ForEach(fontFamilyOptions(current: stamp.fontFamily), id: \.self) { family in
                         Text(family).tag(family)
                     }
                 }
 
-                HStack(spacing: 12) {
-                    Toggle("Bold", isOn: binding.isBold)
-                    Toggle("Italic", isOn: binding.isItalic)
+                // Toggle buttons rather than checkboxes — this is text formatting, and it
+                // acts on the selection (or the whole stamp when nothing is selected).
+                HStack(spacing: 8) {
+                    Text("Style")
+                    Toggle(isOn: Binding(
+                        get: { appState.stampFormatter.isBold },
+                        set: { _ in appState.stampFormatter.toggleBold() }
+                    )) {
+                        Image(systemName: "bold")
+                    }
+                    .toggleStyle(.button)
+                    .help("Bold (⌘B) — applies to the selected text")
+
+                    Toggle(isOn: Binding(
+                        get: { appState.stampFormatter.isItalic },
+                        set: { _ in appState.stampFormatter.toggleItalic() }
+                    )) {
+                        Image(systemName: "italic")
+                    }
+                    .toggleStyle(.button)
+                    .help("Italic (⌘I) — applies to the selected text")
                 }
 
                 HStack {
                     Text("Size")
-                    Stepper(value: binding.fontSize, in: 6...48, step: 1) {
+                    Stepper(value: Binding(
+                        get: { stamp.fontSize },
+                        set: { newValue in
+                            draft?.fontSize = newValue
+                            appState.stampFormatter.apply(fontSize: newValue)
+                        }
+                    ), in: 6...48, step: 1) {
                         Text("\(Int(stamp.fontSize)) pt")
                             .monospacedDigit()
                     }
@@ -330,40 +359,25 @@ struct StampView: View {
                 fileList
             }
 
-            // The two choices sit side by side rather than as four stacked rows, spread
-            // across the width with the action at the trailing edge. No Spacer may be
-            // *vertical* here — a greedy one stretches this whole section and steals the
-            // height the preview should be getting.
-            HStack(alignment: .top, spacing: 16) {
-                Picker("Stamp on", selection: $scope) {
-                    ForEach(StampScope.allCases) { option in
-                        Text(option.label).tag(option)
+            // Side by side when there's room, stacked when there isn't — the window can be
+            // narrower than the two radio groups plus the button.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    scopePicker
+                    Spacer(minLength: 12)
+                    outputPicker
+                    Spacer(minLength: 12)
+                    stampButton
+                }
+
+                HStack(alignment: .bottom, spacing: 16) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        scopePicker
+                        outputPicker
                     }
+                    Spacer(minLength: 8)
+                    stampButton
                 }
-                .pickerStyle(.radioGroup)
-                .fixedSize()
-
-                Spacer(minLength: 12)
-
-                Picker("Output", selection: $outputMode) {
-                    ForEach(StampOutputMode.allCases) { mode in
-                        Text(mode.label).tag(mode)
-                    }
-                }
-                .pickerStyle(.radioGroup)
-                .fixedSize()
-
-                Spacer(minLength: 12)
-
-                Button(outputMode == .replaceOriginal ? "Stamp Files" : "Stamp Files\u{2026}") {
-                    stampFiles()
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-                // Without fixedSize the Spacers take all the slack and squeeze the button
-                // down to a sliver.
-                .fixedSize()
-                .disabled(!canStamp)
             }
 
             if let problem = nameProblem {
@@ -373,6 +387,37 @@ struct StampView: View {
             }
         }
         .help("Each file is one part, so “first page of each part” stamps page 1 only.")
+    }
+
+    private var scopePicker: some View {
+        Picker("Stamp on", selection: $scope) {
+            ForEach(StampScope.allCases) { option in
+                Text(option.label).tag(option)
+            }
+        }
+        .pickerStyle(.radioGroup)
+        .fixedSize()
+    }
+
+    private var outputPicker: some View {
+        Picker("Output", selection: $outputMode) {
+            ForEach(StampOutputMode.allCases) { mode in
+                Text(mode.label).tag(mode)
+            }
+        }
+        .pickerStyle(.radioGroup)
+        .fixedSize()
+    }
+
+    private var stampButton: some View {
+        Button(outputMode == .replaceOriginal ? "Stamp Files" : "Stamp Files\u{2026}") {
+            stampFiles()
+        }
+        .buttonStyle(.borderedProminent)
+        .controlSize(.large)
+        // Without fixedSize the Spacers take all the slack and squeeze the button to a sliver.
+        .fixedSize()
+        .disabled(!canStamp)
     }
 
     /// One row per queued file. Names are editable only when saving as new files —
@@ -457,7 +502,11 @@ struct StampView: View {
     private var colourBinding: Binding<Color> {
         Binding(
             get: { Color(nsColor: nsColor(fromHex: draft?.colourHex ?? "#000000")) },
-            set: { draft?.colourHex = hexString(from: NSColor($0)) }
+            set: { newValue in
+                let colour = NSColor(newValue)
+                draft?.colourHex = hexString(from: colour)
+                appState.stampFormatter.apply(colour: colour)
+            }
         )
     }
 

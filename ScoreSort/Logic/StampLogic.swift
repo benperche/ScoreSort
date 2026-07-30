@@ -91,8 +91,15 @@ struct Stamp: Identifiable, Codable, Equatable {
     var id = UUID()
     /// Preset name shown in the picker (not drawn on the page).
     var name: String
-    /// The stamped text. Newlines are honoured.
+    /// The stamped text as plain characters. Newlines are honoured. Kept in sync with
+    /// `richTextData` — used for labels, `isDrawable`, and as the fallback when there's no
+    /// rich text yet.
     var text: String
+    /// The stamped text as RTF, and the source of truth when present: bold, italic, font,
+    /// size and colour can vary **run by run** inside one stamp. `nil` until the text has
+    /// been edited in the rich editor, in which case the fields below supply the attributes
+    /// for the whole string.
+    var richTextData: Data?
     /// Free position inside the margin-inset area: 0 = hard left / bottom, 1 = hard right /
     /// top. Set by the nine preset buttons or by dragging the stamp on the preview. Stored
     /// as fractions of the *inset* area so a stamp keeps its margins on any page size and
@@ -102,6 +109,8 @@ struct Stamp: Identifiable, Codable, Equatable {
     /// Minimum gap between the stamp and the page edge, in points. Also bounds how far the
     /// stamp can be dragged.
     var margin: Double = 24
+    // Base attributes: what the whole string looks like before any per-run formatting, and
+    // what newly typed text inherits.
     var fontFamily: String = "Helvetica"
     var isBold: Bool = true
     var isItalic: Bool = false
@@ -136,8 +145,9 @@ struct Stamp: Identifiable, Codable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id          = try c.decodeIfPresent(UUID.self,   forKey: .id) ?? UUID()
         name        = try c.decodeIfPresent(String.self, forKey: .name) ?? "Stamp"
-        text        = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
-        margin      = try c.decodeIfPresent(Double.self, forKey: .margin) ?? 24
+        text          = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        richTextData  = try c.decodeIfPresent(Data.self,   forKey: .richTextData)
+        margin        = try c.decodeIfPresent(Double.self, forKey: .margin) ?? 24
         fontFamily  = try c.decodeIfPresent(String.self, forKey: .fontFamily) ?? "Helvetica"
         isBold      = try c.decodeIfPresent(Bool.self,   forKey: .isBold) ?? true
         isItalic    = try c.decodeIfPresent(Bool.self,   forKey: .isItalic) ?? false
@@ -159,13 +169,14 @@ struct Stamp: Identifiable, Codable, Equatable {
         }
     }
 
-    init(id: UUID = UUID(), name: String, text: String,
+    init(id: UUID = UUID(), name: String, text: String, richTextData: Data? = nil,
          positionX: Double = 1, positionY: Double = 1, margin: Double = 24,
          fontFamily: String = "Helvetica", isBold: Bool = true, isItalic: Bool = false,
          fontSize: Double = 11, colourHex: String = "#000000", hasBorder: Bool = true) {
         self.id = id
         self.name = name
         self.text = text
+        self.richTextData = richTextData
         self.positionX = positionX
         self.positionY = positionY
         self.margin = margin
@@ -237,7 +248,7 @@ func hexString(from color: NSColor) -> String {
 
 /// Resolves the stamp's font family + traits, falling back to the system font when the
 /// family isn't available (e.g. a stamp designed on another Mac).
-private func stampFont(_ stamp: Stamp) -> NSFont {
+func stampFont(_ stamp: Stamp) -> NSFont {
     let size = CGFloat(stamp.fontSize)
     var traits: NSFontTraitMask = []
     if stamp.isBold { traits.insert(.boldFontMask) }
@@ -259,15 +270,44 @@ private func stampAlignment(_ stamp: Stamp) -> NSTextAlignment {
     return .center
 }
 
+/// The attributes newly typed (or unformatted) stamp text takes: the stamp's base font,
+/// traits and colour.
+func stampBaseAttributes(_ stamp: Stamp) -> [NSAttributedString.Key: Any] {
+    [.font: stampFont(stamp), .foregroundColor: nsColor(fromHex: stamp.colourHex)]
+}
+
+/// Decodes the stamp's rich text, or nil when it has none yet.
+func stampRichText(_ stamp: Stamp) -> NSAttributedString? {
+    guard let data = stamp.richTextData,
+          let rich = NSAttributedString(rtf: data, documentAttributes: nil),
+          rich.length > 0 else { return nil }
+    return rich
+}
+
+/// The string that actually gets drawn — the rich text when there is any, otherwise the
+/// plain text in the stamp's base attributes.
+///
+/// Alignment is applied here rather than stored, because it follows the stamp's position on
+/// the page (a right-hand stamp reads as a right-aligned block). It's added over the whole
+/// range *without* touching the per-run font and colour attributes.
 func stampAttributedString(_ stamp: Stamp) -> NSAttributedString {
+    let base = stampRichText(stamp)
+        ?? NSAttributedString(string: stamp.text, attributes: stampBaseAttributes(stamp))
+
     let para = NSMutableParagraphStyle()
     para.alignment = stampAlignment(stamp)
     para.lineBreakMode = .byWordWrapping
-    return NSAttributedString(string: stamp.text, attributes: [
-        .font: stampFont(stamp),
-        .foregroundColor: nsColor(fromHex: stamp.colourHex),
-        .paragraphStyle: para
-    ])
+
+    let result = NSMutableAttributedString(attributedString: base)
+    result.addAttribute(.paragraphStyle, value: para,
+                        range: NSRange(location: 0, length: result.length))
+    return result
+}
+
+/// Serialises an edited attributed string for storage in `stamps.json`.
+func stampRTFData(from attributed: NSAttributedString) -> Data? {
+    attributed.rtf(from: NSRange(location: 0, length: attributed.length),
+                   documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
 }
 
 /// The laid-out size of the stamp's text, wrapped to fit inside the page's margins.
