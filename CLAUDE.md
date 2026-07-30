@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-ScoreSort is a macOS SwiftUI app for managing music PDFs. It has four tools, each a tab: Combine PDFs, Sheet Music Renamer, Split PDF, Rotate Pages. macOS 14.0+, Xcode 16+. Bundle id `benperche.ScoreSort`. Distributed via GitHub releases with Sparkle auto-update; App Store planned.
+ScoreSort is a macOS SwiftUI app for managing music PDFs. It has five tools, each a tab: Combine PDFs, Sheet Music Renamer, Split PDF, Rotate Pages, Stamp. macOS 14.0+, Xcode 16+. Bundle id `benperche.ScoreSort`. Distributed via GitHub releases with Sparkle auto-update; App Store planned.
 
 ## Read this first
 
@@ -14,8 +14,7 @@ ScoreSort is a macOS SwiftUI app for managing music PDFs. It has four tools, eac
 
 The app is split by feature. **Each tab has its own file(s); shared app scaffolding remains in `ScoreSort/ScanReorienterApp_complete.swift` (~1,700 lines).**
 
-- **Tabs:** `Combine/CombineTab.swift`; `Rename/RenameViews.swift` + `Rename/RenamerManager.swift`; `Split/SplitView.swift` (Step 1) + `Split/SplitNaming.swift` (Step 2) + `Split/SplitPrefixStep.swift` (Step 3, shared with Bulk Rename); `Rotate/RotateTab.swift`.
-- **Cross-tab tool:** `Stamp/StampStore.swift` + `Stamp/StampDesignerView.swift` — the stamp designer sheet (File ▸ Stamp…, ⌥⌘S) and the shared `StampOptionRow` checkbox used by Combine and Split.
+- **Tabs:** `Combine/CombineTab.swift`; `Rename/RenameViews.swift` + `Rename/RenamerManager.swift`; `Split/SplitView.swift` (Step 1) + `Split/SplitNaming.swift` (Step 2) + `Split/SplitPrefixStep.swift` (Step 3, shared with Bulk Rename); `Rotate/RotateTab.swift`; `Stamp/StampTab.swift` (⌘5 — designs stamps + stamps existing PDFs) + `Stamp/StampStore.swift`. `StampTab.swift` also holds `StampMenuButton`, the toolbar pull-down Combine and Split use to stamp their own output.
 - **Pure logic** (`ScoreSort/Logic/`): `InstrumentNames.swift` (preset matching + split instrument suggestions/detection), `SplitLogic.swift` (split maths, A3, bookmarks, booklet), `RenameLogic.swift` (folder-job helpers + score-order numbering), `FileUtilities.swift` (output dir, filename validation, permissions, page-range formatting), `StampLogic.swift` (stamp model, placement, drawing, flattening).
 - **The main file (`ScanReorienterApp_complete.swift`)** now holds only the shared scaffolding: `@main` app + `ContentView`, `AppState`, the menu-command structs + `CombineMenuState`, Sparkle updater, About/AppDelegate, the welcome tour, **all three Preferences panes**, and shared infra (`DropZoneView`, `PDFPageView`, `PDFManager`, Sendable utils). The filename is legacy and doesn't match the app name (renamed from "Music PDF Manager" / "Music PDF Wrangler").
 
@@ -46,11 +45,11 @@ Day-to-day, the app is normally built and run from Xcode with ⌘R.
 
 ## Architecture notes that span files/concepts
 
-- **MVVM with `ObservableObject` view models**, injected as `@EnvironmentObject` at app level: `AppState`, `RenamerManager`, `EnsemblePresetStore`. `PDFManager` is shared by the Split and Rotate tabs as *separate* `@StateObject` instances. `CombineManager` backs the Combine tab.
+- **MVVM with `ObservableObject` view models**, injected as `@EnvironmentObject` at app level: `AppState`, `RenamerManager`, `EnsemblePresetStore`, `StampStore`. `PDFManager` is shared by the Split and Rotate tabs as *separate* `@StateObject` instances. `CombineManager` backs the Combine tab.
 - **Three independent persistence files** in `~/Library/Application Support/ScoreSort/`: `ensemble-presets.json` (Combine tab presets — names + per-part copy counts), `instrument-orders.json` (Renamer tab instrument order — name strings only, versioned, regenerated on launch if stale), and `stamps.json` (saved stamp designs, `StampStore`). These systems do not interact.
 - **Stamping flattens into page content** (`Logic/StampLogic.swift`) — it rebuilds pages through a `CGPDFContext`, so it **drops document outlines and source annotations**. Anything that stamps must do so *before* building a `PDFOutline` (page indices survive). It reads the **crop box**, not the media box, or A3-split halves come back.
 - **The menu bar is standard File / Edit / View + one adaptive "Actions" menu.** Each tab publishes a `TabSlice` (contextual Open/Save/Preview/Clear closures + a `[MenuAction]` list) into the app-level `TabCommands` bridge (`AppState.tabCommands`) via its own `syncTabCommands()`, called on `.onAppear` and relevant `.onChange`. **Only the active tab writes** — every `syncTabCommands()` guards on `appState.selectedTab == myTab`, so the slice always reflects the on-screen tab. The command structs (`FileCommands`/`ViewCommands`/`TabActionsCommands` in the main file) read the slice. `CombineMenuState` still exists for Combine's bare-key `onKeyPress` selection nav (arrows/c) + `isPanelOpen`.
-- **Menus bind only non-editing modifier shortcuts** (⌘S/⌘O/⇧⌘P/⌘⌫/⌥⌘P/⌘1–4). Standard-editing keys (⌘A/⌘Z/⌫) and all bare keys (Space, S, R, `,` `.`, arrows) stay in each tab's `onKeyPress`/`NSEvent` handlers with their text-field guards, and are documented in `ShortcutsHelpView` (the ⌘` overlay) — the complete shortcut reference. The "Actions" menu title is fixed (SwiftUI can't reliably retitle a `CommandMenu`); its contents swap per tab.
+- **Menus bind only non-editing modifier shortcuts** (⌘S/⌘O/⇧⌘P/⌘⌫/⌥⌘P/⌘1–5). Standard-editing keys (⌘A/⌘Z/⌫) and all bare keys (Space, S, R, `,` `.`, arrows) stay in each tab's `onKeyPress`/`NSEvent` handlers with their text-field guards, and are documented in `ShortcutsHelpView` (the ⌘` overlay) — the complete shortcut reference. The "Actions" menu title is fixed (SwiftUI can't reliably retitle a `CommandMenu`); its contents swap per tab.
 - **PDF export methods never show UI** — they take a `PDFAlertHandler` callback (`(title, message, isError) -> Void`). Surface errors through that, not directly.
 - **Instrument detection is leftmost-match** (not longest-match), with a length-descending sort as tie-breaker so "bass clarinet" beats "clarinet". The static order arrays' ordering also matters as a secondary tie-break.
 

@@ -1,6 +1,6 @@
 # ScoreSort — Code Reference
 > Split by feature. Tabs: `Combine/CombineTab.swift`; `Rename/RenameViews.swift` + `Rename/RenamerManager.swift`; `Split/SplitView.swift` + `Split/SplitNaming.swift` + `Split/SplitPrefixStep.swift`; `Rotate/RotateTab.swift`.
-> Cross-tab tool: `Stamp/StampStore.swift` + `Stamp/StampDesignerView.swift` (the ⌥⌘S stamp designer, `StampOptionRow`).
+> Tab 4 — Stamp: `Stamp/StampStore.swift` + `Stamp/StampTab.swift` (`StampView` designer/batch tool, plus `StampMenuButton` used by the Combine and Split toolbars).
 > Pure logic in `ScoreSort/Logic/`: `InstrumentNames.swift` (preset matching + split instrument suggestions/detection), `SplitLogic.swift` (split maths, A3, bookmarks, booklet), `RenameLogic.swift` (folder-job helpers + score-order numbering), `FileUtilities.swift` (output dir, filename validation, permissions, page-range formatting), `StampLogic.swift` (stamp model, placement, drawing, flattening).
 > Shared scaffolding (app entry, ContentView, AppState, menu commands, Sparkle, Preferences panes, DropZone, PDFManager) stays in `ScanReorienterApp_complete.swift` (~1 700 lines).
 > One module/target — cross-file calls need no imports; filesystem-synchronized project auto-compiles files added under `ScoreSort/`. Tests: `ScoreSortTests` incl. `ViewSmokeTests` (host each tab) + `CombineManagerReorderTests`.
@@ -14,11 +14,12 @@
 ScoreSortApp (@main)
   └── AppDelegate  — quits on window close
   └── WindowGroup  — ContentView            (.defaultSize 940×800)
-        └── ContentView  — TabView (tags 0–3)
+        └── ContentView  — TabView (tags 0–4)
               ├── 0: CombineView
               ├── 1: RenamerView
               ├── 2: SplitView
-              └── 3: RotateView
+              ├── 3: RotateView
+              └── 4: StampView
         └── sheets: ShortcutsHelpView (⌘`), WelcomeTourView (⌘/),
                     StampDesignerView (⌥⌘S, via .sheet(item: appState.stampSheet))
   └── Settings  — AppPreferencesView (⌘,)
@@ -36,7 +37,7 @@ Window min size: 900×700 (`.defaultSize(940, 800)` on the `WindowGroup`).
 - `AppState` — `selectedTab`, `showingKeyboardHelp`, `showingWelcomeTour`, `stampSheet`, plus two menu objects: `tabCommands` (`TabCommands`, the active tab's menu bridge) and `combineMenuState` (`CombineMenuState`)
 - `RenamerManager` — used by both `RenamerView` and `AppPreferencesView`
 - `EnsemblePresetStore` — used by `CombineView`, `PresetSidebarView`, `CombinerPreferencesView`
-- `StampStore` — used by `StampDesignerView`, `StampOptionRow`, `CombineView`, `SplitView`
+- `StampStore` — used by `StampView`, `StampMenuButton`, `CombineView`, `SplitView`
 
 ### Menu Bar Commands
 
@@ -90,7 +91,7 @@ Per-tab slices (see each tab's `syncTabCommands()`):
 
 Convention: actions are **listed even when unusable** (`isEnabled: false`) rather than omitted, so the menu advertises what a tab can do in its empty state. "Show in Finder" reveals the most relevant target — output folder on done/summary screens, else the source file/folder.
 
-**Menus bind only non-editing modifier shortcuts** (⌘S/⌘O/⇧⌘P/⌘⌫/⌥⌘S/⌥⌘P/⇧⌘F/⌘R/⌘1–4, plus Combine's ⌘↑/⌘↓). Standard-editing keys (⌘A/⌘Z/⌫) and all bare keys stay in the tabs' own handlers — a `CommandMenu` shortcut intercepts globally *even when the item is `.disabled()`*, which broke ⌘A inside a save panel's text field. Hence `MenuAction.key` is documented as modifier-only.
+**Menus bind only non-editing modifier shortcuts** (⌘S/⌘O/⇧⌘P/⌘⌫/⌥⌘P/⇧⌘F/⌘R/⌘1–5, plus Combine's ⌘↑/⌘↓). Standard-editing keys (⌘A/⌘Z/⌫) and all bare keys stay in the tabs' own handlers — a `CommandMenu` shortcut intercepts globally *even when the item is `.disabled()`*, which broke ⌘A inside a save panel's text field. Hence `MenuAction.key` is documented as modifier-only.
 
 **`CombineMenuState`** — no longer the menu bridge. It survives for Combine's in-view keyboard handling: `isPanelOpen` (set around the open/save panels; the `.onKeyPress` early-outs while a panel is up) and the `canRemove`/`canMoveUp`/`canMoveDown`/`canGroup`/`hasFiles`/`isActiveTab` flags plus action closures kept in sync by `syncMenuFlags()` / `syncMenuClosures()`. Nothing outside `CombineTab.swift` reads the flags or closures now that `CombinerCommands` is gone.
 
@@ -650,21 +651,22 @@ enum RotationMode { case odd, even, none }
 
 ---
 
-## Cross-tab tool — Stamping
+## Tab 4 — Stamp
 
-A reusable **text stamp** ("Example School Band", "Property of XYZ") burned onto output pages. Not a tab: it's a sheet (**File ▸ Stamp… / ⌥⌘S**, or the *Edit…* link beside the Combine/Split toggles) plus an export option in two tabs.
+A reusable **text stamp** ("Example School Band", "Property of XYZ") burned onto output pages. Its own tab (⌘5) designs the stamps and applies them to PDFs that already exist; **Combine and Split reuse the same saved stamps** via the `StampMenuButton` in their top toolbars.
 
 ### Model & logic — `Logic/StampLogic.swift`
 
 | Symbol | Purpose |
 |--------|---------|
-| `Stamp` | `Codable` design: `name`, `text` (newlines honoured), `anchor`, `margin`, `fontFamily`/`isBold`/`isItalic`/`fontSize`, `colourHex`, `hasBorder`, `scope`. `isDrawable` is false for all-whitespace text. Add new appearance fields **with defaults** — `stamps.json` decodes without migration. |
+| `Stamp` | `Codable` design: `name`, `text` (newlines honoured), `anchor`, `margin`, `fontFamily`/`isBold`/`isItalic`/`fontSize`, `colourHex`, `hasBorder`. `isDrawable` is false for all-whitespace text. Add new appearance fields **with defaults** — `stamps.json` decodes without migration. **Scope is deliberately not here** (see `StampJob`). |
+| `StampJob` | `stamp` + `scope` — one stamping request. Keeps every export API to a single optional parameter (`nil` = don't stamp). `pageIndices(pageCount:partFirstPages:)` resolves the scope to a page set. |
 | `StampAnchor` | 3×3 grid of positions; `StampAnchor.grid` is the row-major layout the picker draws. |
-| `StampScope` | `.everyPage` or `.firstPageOfEachPart`. |
+| `StampScope` | `.everyPage` or `.firstPageOfEachPart` — a **per-job** choice, stored per tool in `@AppStorage` (`combineStampScope`, `splitStampScope`, `stampTabScope`), never on the design. |
 | `stampRect(for:textSize:in:)` | Anchor + margin placement. **PDF user space is y-up**, so "top" anchors sit at `maxY`. Adds `stampPaddingH/V` only when `hasBorder`. |
 | `drawStamp(_:in:pageBox:)` | The single drawing routine — CoreText frame + optional rounded border. Used by **both** the flattener and the preview, so they can't diverge. |
 | `stampedDocument(_:stamp:pageIndices:)` | The flattener (below). Returns nil for an empty doc or a blank stamp. |
-| `stampPageIndices(for:pageCount:partFirstPages:)` | Resolves a scope into the page set to stamp. |
+| `applyingStamp(_:to:partFirstPages:)` | The call-site helper: applies a `StampJob?` inline, returning the document **unchanged** when there's nothing to stamp or the flatten fails. This is what every export path calls. |
 | `stampPreviewImage(_:page:maxDimension:)` | Bitmap preview of page 1 (or a blank A4 sheet) with the stamp applied. |
 | `nsColor(fromHex:)` / `hexString(from:)` | `#RRGGBB` round trip for storage and the `ColorPicker` binding. |
 
@@ -673,16 +675,16 @@ A reusable **text stamp** ("Example School Band", "Property of XYZ") burned onto
 ### Store & UI — `Stamp/`
 
 - **`StampStore: ObservableObject`** → `stamps.json` in `~/Library/Application Support/ScoreSort/` — the **third** independent store (see `EnsemblePresetStore`, `InstrumentOrders`). Same shape as `EnsemblePresetStore`; seeds one starter stamp so the picker is never empty. `updateStamp` early-returns when nothing changed, so typing doesn't thrash the disk.
-- **`StampDesignerView`** — presented from `ContentView` via `.sheet(item: $appState.stampSheet)` (`StampSheetToken`). Keeps a `draft: Stamp?` and pushes it back to the store `.onChange`. Also owns the **standalone batch path**: dropped/chosen PDFs → output folder → `writeStampedFiles`, which suffixes " (stamped)" when the destination is the source folder so originals are never overwritten. A standalone file is one "part", so first-page scope means its page 1.
-- **`StampOptionRow`** — the shared checkbox ("Stamp output with “X” on …") plus *Edit…*; used by Combine's bottom controls and Split Step 2's bottom bar, bound to `@AppStorage("combineStampEnabled")` / `("splitStampEnabled")`.
+- **`StampView`** (tab 4) — left column is the designer (stamp picker, name, text, font/size/colour/border, 3×3 anchor grid, margin) driving a `draft: Stamp?` pushed back to the store `.onChange`; right column is the live preview plus the **batch path**: dropped/chosen PDFs → scope picker → output folder → `writeStampedFiles`, which suffixes " (stamped)" when the destination is the source folder so originals are never overwritten. A standalone file is one "part", so first-page scope means its page 1. Publishes a `TabSlice` (Add Files ⌘O / Stamp Files ⌘S / Clear ⌘⌫ + New/Duplicate/Delete Stamp actions) guarded on `selectedTab == 4`.
+- **`StampMenuButton`** — the pull-down in Combine's and Split Step 1's top toolbars: on/off toggle, which saved stamp, which pages, and "Edit Stamps…" (switches to tab 4 — tabs stay mounted, so no work is lost). Label reads "Stamp" or "Stamp: ⟨name⟩"; icon is `seal`/`seal.fill`.
 
 ### Where it applies
 
 | Tool | Insertion point | "Each part" means |
 |------|-----------------|-------------------|
-| Combine | `CombineManager.buildDocument(addBlankPages:stamp:)` — shared by `createCombinedPDF` and `openInPreview` | each source file per copy (the existing `bookmarks` page indices) |
-| Split | `PDFManager.saveSplitPDF(… stamp:)` — the one choke point for both save routes | page 0 of each output file |
-| Standalone | `StampDesignerView.writeStampedFiles` | page 0 of each dropped file |
+| Combine | `CombineManager.buildDocument(addBlankPages:stampJob:)` — shared by `createCombinedPDF` and `openInPreview` | each source file per copy (the existing `bookmarks` page indices) |
+| Split | `PDFManager.saveSplitPDF(… stampJob:)` — the one choke point for both save routes | page 0 of each output file |
+| Stamp tab | `StampView.writeStampedFiles` | page 0 of each added file |
 
 The Rotate tab is deliberately excluded — it works in rotation *metadata*, which flattening would bake in.
 
@@ -752,7 +754,8 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `InstrumentDetectionTests` | `detectInstrument(in:)` — case insensitivity, leftmost match, length-sort, nil on no match, order index |
 | `ManualOverrideTests` | `setManualOverride(for:number:)` — assign, replace, conflict shift, chain shift |
 | `StampPlacementTests` | `stampRect` — all nine anchors stay on the page, margins per edge, border padding, non-zero page origin (`StampLogicTests.swift`) |
-| `StampScopeTests` | `stampPageIndices` — every-page vs first-page-of-each-part, out-of-range part pages dropped |
+| `StampScopeTests` | `StampJob.pageIndices` — every-page vs first-page-of-each-part, out-of-range part pages dropped, blank-job detection |
+| `ApplyingStampTests` | `applyingStamp` — nil and blank jobs pass the document through by identity; a drawable job returns a new document with the same page count |
 | `StampFlatteningTests` | `stampedDocument` — page count preserved, partial stamping, blank stamp/empty doc rejected, write-reload round trip, 90°-rotated page comes out landscape, A3 crop box wins over media box |
 | `StampColourTests` | `nsColor(fromHex:)` / `hexString(from:)` round trip and black fallback |
 | `ScanFolderTests` | `loadFolder(url:)` pipeline — score prefix, sequential prefixes, undetected, manual override, already-prefixed skip |
