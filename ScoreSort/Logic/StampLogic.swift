@@ -18,7 +18,9 @@ import CoreText
 
 // MARK: - Model
 
-/// Where on the page the stamp sits — a 3×3 grid of anchors.
+/// The nine quick positions offered as buttons. These are *presets* that set a stamp's
+/// free `positionX`/`positionY` — the stamp itself stores the fractions, so it can also be
+/// dragged anywhere in between on the preview.
 enum StampAnchor: String, Codable, CaseIterable, Identifiable {
     case topLeft, topCentre, topRight
     case middleLeft, centre, middleRight
@@ -32,6 +34,35 @@ enum StampAnchor: String, Codable, CaseIterable, Identifiable {
         [.middleLeft, .centre, .middleRight],
         [.bottomLeft, .bottomCentre, .bottomRight]
     ]
+
+    /// The fractional position this preset corresponds to (x: 0 = left, y: 0 = bottom).
+    var position: (x: Double, y: Double) {
+        switch self {
+        case .topLeft:      return (0,   1)
+        case .topCentre:    return (0.5, 1)
+        case .topRight:     return (1,   1)
+        case .middleLeft:   return (0,   0.5)
+        case .centre:       return (0.5, 0.5)
+        case .middleRight:  return (1,   0.5)
+        case .bottomLeft:   return (0,   0)
+        case .bottomCentre: return (0.5, 0)
+        case .bottomRight:  return (1,   0)
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .topLeft:      return "Top left"
+        case .topCentre:    return "Top centre"
+        case .topRight:     return "Top right"
+        case .middleLeft:   return "Middle left"
+        case .centre:       return "Centre"
+        case .middleRight:  return "Middle right"
+        case .bottomLeft:   return "Bottom left"
+        case .bottomCentre: return "Bottom centre"
+        case .bottomRight:  return "Bottom right"
+        }
+    }
 }
 
 /// Which pages of a document get stamped. Chosen **per job**, not saved on the stamp — the
@@ -62,8 +93,14 @@ struct Stamp: Identifiable, Codable, Equatable {
     var name: String
     /// The stamped text. Newlines are honoured.
     var text: String
-    var anchor: StampAnchor = .topRight
-    /// Distance from the page edge, in points.
+    /// Free position inside the margin-inset area: 0 = hard left / bottom, 1 = hard right /
+    /// top. Set by the nine preset buttons or by dragging the stamp on the preview. Stored
+    /// as fractions of the *inset* area so a stamp keeps its margins on any page size and
+    /// doesn't drift as the text length changes.
+    var positionX: Double = 1
+    var positionY: Double = 1
+    /// Minimum gap between the stamp and the page edge, in points. Also bounds how far the
+    /// stamp can be dragged.
     var margin: Double = 24
     var fontFamily: String = "Helvetica"
     var isBold: Bool = true
@@ -75,6 +112,77 @@ struct Stamp: Identifiable, Codable, Equatable {
     /// Nothing to draw for an all-whitespace stamp.
     var isDrawable: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// True when the stamp sits on one of the nine presets, so the grid can show which
+    /// button is active (and nothing after a free drag in between).
+    func matches(_ anchor: StampAnchor) -> Bool {
+        let p = anchor.position
+        return abs(positionX - p.x) < 0.005 && abs(positionY - p.y) < 0.005
+    }
+
+    mutating func move(to anchor: StampAnchor) {
+        let p = anchor.position
+        positionX = p.x
+        positionY = p.y
+    }
+
+    // Hand-written decoding so fields can be added over time without invalidating an
+    // existing stamps.json: every key is optional, and the pre-drag `anchor` field is
+    // migrated to the free position.
+    private enum LegacyKeys: String, CodingKey { case anchor }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id          = try c.decodeIfPresent(UUID.self,   forKey: .id) ?? UUID()
+        name        = try c.decodeIfPresent(String.self, forKey: .name) ?? "Stamp"
+        text        = try c.decodeIfPresent(String.self, forKey: .text) ?? ""
+        margin      = try c.decodeIfPresent(Double.self, forKey: .margin) ?? 24
+        fontFamily  = try c.decodeIfPresent(String.self, forKey: .fontFamily) ?? "Helvetica"
+        isBold      = try c.decodeIfPresent(Bool.self,   forKey: .isBold) ?? true
+        isItalic    = try c.decodeIfPresent(Bool.self,   forKey: .isItalic) ?? false
+        fontSize    = try c.decodeIfPresent(Double.self, forKey: .fontSize) ?? 11
+        colourHex   = try c.decodeIfPresent(String.self, forKey: .colourHex) ?? "#000000"
+        hasBorder   = try c.decodeIfPresent(Bool.self,   forKey: .hasBorder) ?? true
+
+        if let x = try c.decodeIfPresent(Double.self, forKey: .positionX),
+           let y = try c.decodeIfPresent(Double.self, forKey: .positionY) {
+            positionX = x
+            positionY = y
+        } else if let legacy = try? decoder.container(keyedBy: LegacyKeys.self),
+                  let raw = (try? legacy.decodeIfPresent(String.self, forKey: .anchor)) ?? nil,
+                  let anchor = StampAnchor(rawValue: raw) {
+            (positionX, positionY) = anchor.position
+        } else {
+            positionX = 1
+            positionY = 1
+        }
+    }
+
+    init(id: UUID = UUID(), name: String, text: String,
+         positionX: Double = 1, positionY: Double = 1, margin: Double = 24,
+         fontFamily: String = "Helvetica", isBold: Bool = true, isItalic: Bool = false,
+         fontSize: Double = 11, colourHex: String = "#000000", hasBorder: Bool = true) {
+        self.id = id
+        self.name = name
+        self.text = text
+        self.positionX = positionX
+        self.positionY = positionY
+        self.margin = margin
+        self.fontFamily = fontFamily
+        self.isBold = isBold
+        self.isItalic = isItalic
+        self.fontSize = fontSize
+        self.colourHex = colourHex
+        self.hasBorder = hasBorder
+    }
+
+    /// Convenience for the presets and for tests.
+    init(name: String, text: String, anchor: StampAnchor, margin: Double = 24,
+         hasBorder: Bool = true) {
+        self.init(name: name, text: text,
+                  positionX: anchor.position.x, positionY: anchor.position.y,
+                  margin: margin, hasBorder: hasBorder)
     }
 }
 
@@ -143,19 +251,17 @@ private func stampFont(_ stamp: Stamp) -> NSFont {
     return NSFont.systemFont(ofSize: size, weight: stamp.isBold ? .bold : .regular)
 }
 
-/// Multi-line stamps align towards their anchor, so a right-anchored two-line stamp
-/// reads as a right-aligned block rather than a ragged one.
-private func stampAlignment(_ anchor: StampAnchor) -> NSTextAlignment {
-    switch anchor {
-    case .topLeft, .middleLeft, .bottomLeft:       return .left
-    case .topCentre, .centre, .bottomCentre:       return .center
-    case .topRight, .middleRight, .bottomRight:    return .right
-    }
+/// Multi-line stamps align towards the side of the page they sit on, so a right-hand
+/// two-line stamp reads as a right-aligned block rather than a ragged one.
+private func stampAlignment(_ stamp: Stamp) -> NSTextAlignment {
+    if stamp.positionX < 1.0 / 3 { return .left }
+    if stamp.positionX > 2.0 / 3 { return .right }
+    return .center
 }
 
 func stampAttributedString(_ stamp: Stamp) -> NSAttributedString {
     let para = NSMutableParagraphStyle()
-    para.alignment = stampAlignment(stamp.anchor)
+    para.alignment = stampAlignment(stamp)
     para.lineBreakMode = .byWordWrapping
     return NSAttributedString(string: stamp.text, attributes: [
         .font: stampFont(stamp),
@@ -179,37 +285,33 @@ func stampTextSize(_ stamp: Stamp, in pageBox: CGRect) -> CGSize {
 
 // MARK: - Placement
 
-/// The full stamp box (text plus border padding) placed against `pageBox` according to
-/// the anchor and margin. `pageBox` is in PDF user space — y increases upwards, so the
-/// "top" anchors sit at `maxY`.
-func stampRect(for stamp: Stamp, textSize: CGSize, in pageBox: CGRect) -> CGRect {
+/// The size of the full stamp box: the laid-out text plus border padding.
+func stampBoxSize(for stamp: Stamp, textSize: CGSize) -> CGSize {
     let padH = stamp.hasBorder ? stampPaddingH : 0
     let padV = stamp.hasBorder ? stampPaddingV : 0
-    let width  = textSize.width  + padH * 2
-    let height = textSize.height + padV * 2
+    return CGSize(width: textSize.width + padH * 2, height: textSize.height + padV * 2)
+}
+
+/// The travel available to the stamp box inside `pageBox` once the margins and the box's
+/// own size are taken out. Zero on an axis means the box fills that axis — it then simply
+/// sits at the margin. Also the denominator when converting a drag into a position.
+func stampTravel(for stamp: Stamp, boxSize: CGSize, in pageBox: CGRect) -> CGSize {
     let margin = CGFloat(stamp.margin)
+    return CGSize(width:  max(0, pageBox.width  - margin * 2 - boxSize.width),
+                  height: max(0, pageBox.height - margin * 2 - boxSize.height))
+}
 
-    let x: CGFloat
-    switch stamp.anchor {
-    case .topLeft, .middleLeft, .bottomLeft:
-        x = pageBox.minX + margin
-    case .topCentre, .centre, .bottomCentre:
-        x = pageBox.midX - width / 2
-    case .topRight, .middleRight, .bottomRight:
-        x = pageBox.maxX - margin - width
-    }
-
-    let y: CGFloat
-    switch stamp.anchor {
-    case .topLeft, .topCentre, .topRight:
-        y = pageBox.maxY - margin - height
-    case .middleLeft, .centre, .middleRight:
-        y = pageBox.midY - height / 2
-    case .bottomLeft, .bottomCentre, .bottomRight:
-        y = pageBox.minY + margin
-    }
-
-    return CGRect(x: x, y: y, width: width, height: height)
+/// The stamp box placed inside `pageBox` at the stamp's fractional position. `pageBox` is
+/// in PDF user space — y increases upwards, so `positionY == 1` is the top of the page.
+func stampRect(for stamp: Stamp, textSize: CGSize, in pageBox: CGRect) -> CGRect {
+    let size = stampBoxSize(for: stamp, textSize: textSize)
+    let travel = stampTravel(for: stamp, boxSize: size, in: pageBox)
+    let margin = CGFloat(stamp.margin)
+    let fx = min(max(stamp.positionX, 0), 1)
+    let fy = min(max(stamp.positionY, 0), 1)
+    return CGRect(x: pageBox.minX + margin + travel.width  * fx,
+                  y: pageBox.minY + margin + travel.height * fy,
+                  width: size.width, height: size.height)
 }
 
 // MARK: - Drawing
@@ -315,19 +417,21 @@ func applyingStamp(_ job: StampJob?, to doc: PDFDocument, partFirstPages: [Int])
 
 // MARK: - Preview
 
+/// The page box the preview (and the drag maths on top of it) works in: the crop box
+/// normalised to the origin and swapped for 90°/270° rotation, or A4 when there's no page.
+func visualPageBox(for page: PDFPage?) -> CGRect {
+    guard let page else { return CGRect(x: 0, y: 0, width: 595, height: 842) }   // A4
+    var box = page.bounds(for: .cropBox)
+    if box.isEmpty { box = page.bounds(for: .mediaBox) }
+    var w = box.width, h = box.height
+    if page.rotation % 180 != 0 { swap(&w, &h) }
+    return CGRect(x: 0, y: 0, width: w, height: h)
+}
+
 /// Renders `page` (or a blank A4 sheet when nil) with the stamp applied, for the designer's
 /// live preview. Uses the same `drawStamp` as the flattener, so the preview is faithful.
 func stampPreviewImage(_ stamp: Stamp, page: PDFPage?, maxDimension: CGFloat = 460) -> NSImage? {
-    let pageBox: CGRect
-    if let page {
-        var box = page.bounds(for: .cropBox)
-        if box.isEmpty { box = page.bounds(for: .mediaBox) }
-        var w = box.width, h = box.height
-        if page.rotation % 180 != 0 { swap(&w, &h) }
-        pageBox = CGRect(x: 0, y: 0, width: w, height: h)
-    } else {
-        pageBox = CGRect(x: 0, y: 0, width: 595, height: 842)   // A4
-    }
+    let pageBox = visualPageBox(for: page)
     guard pageBox.width > 0, pageBox.height > 0 else { return nil }
 
     let scale = maxDimension / max(pageBox.width, pageBox.height)

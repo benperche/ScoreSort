@@ -103,6 +103,122 @@ struct StampPlacementTests {
     }
 }
 
+// MARK: - Free positioning (drag)
+
+@Suite("Stamp free positioning")
+struct StampFreePositionTests {
+
+    private let pageBox = CGRect(x: 0, y: 0, width: 595, height: 842)
+    private let textSize = CGSize(width: 120, height: 14)
+
+    @Test("a mid-page fraction lands proportionally along the available travel")
+    func fractionMapsToTravel() {
+        var stamp = testStamp(margin: 20)
+        stamp.positionX = 0.25
+        stamp.positionY = 0.75
+        let box = stampBoxSize(for: stamp, textSize: textSize)
+        let travel = stampTravel(for: stamp, boxSize: box, in: pageBox)
+        let rect = stampRect(for: stamp, textSize: textSize, in: pageBox)
+        #expect(abs(rect.minX - (20 + travel.width * 0.25)) < 0.01)
+        #expect(abs(rect.minY - (20 + travel.height * 0.75)) < 0.01)
+    }
+
+    @Test("fractions outside 0…1 are clamped onto the page")
+    func clampsOutOfRangeFractions() {
+        var stamp = testStamp(margin: 20)
+        stamp.positionX = 4
+        stamp.positionY = -2
+        let rect = stampRect(for: stamp, textSize: textSize, in: pageBox)
+        #expect(pageBox.contains(rect))
+        #expect(abs(rect.maxX - (pageBox.maxX - 20)) < 0.01)
+        #expect(abs(rect.minY - (pageBox.minY + 20)) < 0.01)
+    }
+
+    @Test("margin bounds the travel, so it also bounds a drag")
+    func marginBoundsTravel() {
+        let box = stampBoxSize(for: testStamp(), textSize: textSize)
+        let tight = stampTravel(for: testStamp(margin: 100), boxSize: box, in: pageBox)
+        let loose = stampTravel(for: testStamp(margin: 10), boxSize: box, in: pageBox)
+        #expect(tight.width < loose.width)
+        #expect(tight.height < loose.height)
+    }
+
+    @Test("a stamp wider than the page still starts at the margin rather than off-page")
+    func oversizedStampHasNoTravel() {
+        let huge = CGSize(width: 2000, height: 14)
+        let stamp = testStamp(margin: 20)
+        let travel = stampTravel(for: stamp, boxSize: stampBoxSize(for: stamp, textSize: huge), in: pageBox)
+        #expect(travel.width == 0)
+        let rect = stampRect(for: stamp, textSize: huge, in: pageBox)
+        #expect(abs(rect.minX - 20) < 0.01)
+    }
+
+    @Test("presets round-trip through move(to:) and matches(_:)")
+    func presetsRoundTrip() {
+        for anchor in StampAnchor.allCases {
+            var stamp = testStamp()
+            stamp.move(to: anchor)
+            #expect(stamp.matches(anchor))
+            // Only that one preset should report a match (each has a distinct position).
+            let others = StampAnchor.allCases.filter { $0 != anchor && stamp.matches($0) }
+            #expect(others.isEmpty)
+        }
+    }
+
+    @Test("a dragged stamp matches no preset")
+    func draggedStampMatchesNoPreset() {
+        var stamp = testStamp()
+        stamp.positionX = 0.42
+        stamp.positionY = 0.17
+        #expect(StampAnchor.allCases.allSatisfy { !stamp.matches($0) })
+    }
+}
+
+// MARK: - Persistence
+
+@Suite("Stamp coding")
+struct StampCodingTests {
+
+    @Test("a stamp survives an encode / decode round trip")
+    func roundTrip() throws {
+        var stamp = testStamp(margin: 18)
+        stamp.positionX = 0.3
+        stamp.positionY = 0.6
+        stamp.text = "Two\nLines"
+        stamp.colourHex = "#123456"
+        stamp.fontSize = 16
+
+        let data = try JSONEncoder().encode(stamp)
+        let decoded = try JSONDecoder().decode(Stamp.self, from: data)
+        #expect(decoded == stamp)
+    }
+
+    @Test("a pre-drag stamp with an anchor migrates to the matching position")
+    func migratesLegacyAnchor() throws {
+        // Shape written by the first stamping build: an `anchor` string, no positions,
+        // and a `scope` field that has since moved to StampJob.
+        let json = """
+        {"id":"\(UUID().uuidString)","name":"Old","text":"Example School Band",
+         "anchor":"bottomLeft","margin":30,"fontFamily":"Helvetica","isBold":true,
+         "isItalic":false,"fontSize":12,"colourHex":"#000000","hasBorder":true,
+         "scope":"everyPage"}
+        """
+        let decoded = try JSONDecoder().decode(Stamp.self, from: Data(json.utf8))
+        #expect(decoded.matches(.bottomLeft))
+        #expect(decoded.margin == 30)
+        #expect(decoded.name == "Old")
+    }
+
+    @Test("missing fields fall back to defaults rather than failing to decode")
+    func toleratesMissingFields() throws {
+        let decoded = try JSONDecoder().decode(Stamp.self, from: Data(#"{"text":"Hi"}"#.utf8))
+        #expect(decoded.text == "Hi")
+        #expect(decoded.margin == 24)
+        #expect(decoded.fontFamily == "Helvetica")
+        #expect(decoded.matches(.topRight))   // default position
+    }
+}
+
 // MARK: - Scope
 
 @Suite("Stamp scope")

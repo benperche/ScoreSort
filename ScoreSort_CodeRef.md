@@ -659,15 +659,17 @@ A reusable **text stamp** ("Example School Band", "Property of XYZ") burned onto
 
 | Symbol | Purpose |
 |--------|---------|
-| `Stamp` | `Codable` design: `name`, `text` (newlines honoured), `anchor`, `margin`, `fontFamily`/`isBold`/`isItalic`/`fontSize`, `colourHex`, `hasBorder`. `isDrawable` is false for all-whitespace text. Add new appearance fields **with defaults** — `stamps.json` decodes without migration. **Scope is deliberately not here** (see `StampJob`). |
+| `Stamp` | `Codable` design: `name`, `text` (newlines honoured), `positionX`/`positionY`, `margin`, `fontFamily`/`isBold`/`isItalic`/`fontSize`, `colourHex`, `hasBorder`. `isDrawable` is false for all-whitespace text. **Scope is deliberately not here** (see `StampJob`). `init(from:)` is hand-written: every key is `decodeIfPresent` + default, so fields can be added later without invalidating `stamps.json`, and a pre-drag `anchor` string is migrated to the equivalent position. |
 | `StampJob` | `stamp` + `scope` — one stamping request. Keeps every export API to a single optional parameter (`nil` = don't stamp). `pageIndices(pageCount:partFirstPages:)` resolves the scope to a page set. |
-| `StampAnchor` | 3×3 grid of positions; `StampAnchor.grid` is the row-major layout the picker draws. |
+| `StampAnchor` | The nine **presets** only — not stored on a stamp. `position` gives the fractions, `grid` is the row-major picker layout, `Stamp.move(to:)`/`matches(_:)` apply and detect one (so the grid shows nothing selected after a free drag). |
 | `StampScope` | `.everyPage` or `.firstPageOfEachPart` — a **per-job** choice, stored per tool in `@AppStorage` (`combineStampScope`, `splitStampScope`, `stampTabScope`), never on the design. |
-| `stampRect(for:textSize:in:)` | Anchor + margin placement. **PDF user space is y-up**, so "top" anchors sit at `maxY`. Adds `stampPaddingH/V` only when `hasBorder`. |
+| `stampRect(for:textSize:in:)` | Places the box at `positionX`/`positionY` — fractions of the **travel** available inside the margins, so 1 means flush against the margin, not off-page. **PDF user space is y-up**, so `positionY == 1` is the top. Fractions are clamped. |
+| `stampBoxSize(for:textSize:)` / `stampTravel(for:boxSize:in:)` | Box size (text + `stampPaddingH/V` when `hasBorder`) and the room it has to move. `stampTravel` is also the **denominator when converting a drag into a position** — a zero axis means the box fills that axis and simply sits at the margin. |
 | `drawStamp(_:in:pageBox:)` | The single drawing routine — CoreText frame + optional rounded border. Used by **both** the flattener and the preview, so they can't diverge. |
 | `stampedDocument(_:stamp:pageIndices:)` | The flattener (below). Returns nil for an empty doc or a blank stamp. |
 | `applyingStamp(_:to:partFirstPages:)` | The call-site helper: applies a `StampJob?` inline, returning the document **unchanged** when there's nothing to stamp or the flatten fails. This is what every export path calls. |
 | `stampPreviewImage(_:page:maxDimension:)` | Bitmap preview of page 1 (or a blank A4 sheet) with the stamp applied. |
+| `visualPageBox(for page: PDFPage?)` | The origin-normalised, rotation-swapped crop box (A4 when nil) — shared by the preview and the drag maths so both agree with the flattener. |
 | `nsColor(fromHex:)` / `hexString(from:)` | `#RRGGBB` round trip for storage and the `ColorPicker` binding. |
 
 **How flattening works** — `doc.dataRepresentation()` → `CGPDFDocument` → redraw every page into one multi-page `CGPDFContext`, stamping the listed pages. Going via CGPDF (not `PDFPage.pageRef`) is deliberate: Combine's image pages (`PDFPage(image:)`) and blank pages (bare `PDFPage()`) have no `pageRef`. Each output page uses `visualPageBox` — the **crop box**, w/h swapped when `rotationAngle % 180 != 0` — and `getDrawingTransform`, which absorbs the page's `/Rotate`, so the stamp is placed in *visual* coordinates. Two consequences: **source annotations/links are dropped**, and **outlines don't survive** (so Combine stamps *before* building its `PDFOutline`; page indices are unchanged).
@@ -675,7 +677,9 @@ A reusable **text stamp** ("Example School Band", "Property of XYZ") burned onto
 ### Store & UI — `Stamp/`
 
 - **`StampStore: ObservableObject`** → `stamps.json` in `~/Library/Application Support/ScoreSort/` — the **third** independent store (see `EnsemblePresetStore`, `InstrumentOrders`). Same shape as `EnsemblePresetStore`; seeds one starter stamp so the picker is never empty. `updateStamp` early-returns when nothing changed, so typing doesn't thrash the disk.
-- **`StampView`** (tab 4) — left column is the designer (stamp picker, name, text, font/size/colour/border, 3×3 anchor grid, margin) driving a `draft: Stamp?` pushed back to the store `.onChange`; right column is the live preview plus the **batch path**: dropped/chosen PDFs → scope picker → output folder → `writeStampedFiles`, which suffixes " (stamped)" when the destination is the source folder so originals are never overwritten. A standalone file is one "part", so first-page scope means its page 1. Publishes a `TabSlice` (Add Files ⌘O / Stamp Files ⌘S / Clear ⌘⌫ + New/Duplicate/Delete Stamp actions) guarded on `selectedTab == 4`.
+- **`StampView`** (tab 4) — left column is the designer (stamp picker, name, text, font/size/colour/border, the nine position presets, margin) driving a `draft: Stamp?` pushed back to the store `.onChange`; right column is the draggable preview plus the batch path. Publishes a `TabSlice` (Add Files ⌘O / Stamp Files ⌘S / Clear ⌘⌫ + New/Duplicate/Delete Stamp actions) guarded on `selectedTab == 4`.
+- **`StampPreviewCanvas`** (private, in `StampTab.swift`) — the preview image with a transparent drag handle sitting exactly over the drawn stamp (dashed highlight on hover). The drag converts view points → page points → a fraction of `stampTravel`, from the position captured at gesture start, and clamps to 0…1. Flipping sign on y is required: the view is y-down, PDF space is y-up.
+- **Batch output** — `items: [StampFileItem]` (url + editable `outputName`) and `StampOutputMode`: **`replaceOriginal` is the default** (writes over the file in place, behind one `confirmNSAlert`, names not editable — the file keeps its own), or `saveAsNew` (folder picker, per-file names validated by `pdfFilenameError` plus empty/duplicate checks via `nameProblem`, and a single confirm listing any destinations that already exist). One `write(_:job:)` does both. A standalone file is one "part", so first-page scope means its page 1.
 - **`StampMenuButton`** — the pull-down in Combine's and Split Step 1's top toolbars: on/off toggle, which saved stamp, which pages, and "Edit Stamps…" (switches to tab 4 — tabs stay mounted, so no work is lost). Label reads "Stamp" or "Stamp: ⟨name⟩"; icon is `seal`/`seal.fill`.
 
 ### Where it applies
@@ -753,7 +757,9 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `FilenameValidationTests` | `pdfFilenameError(for:)` — valid names, illegal chars (`/` `:` `\` null) |
 | `InstrumentDetectionTests` | `detectInstrument(in:)` — case insensitivity, leftmost match, length-sort, nil on no match, order index |
 | `ManualOverrideTests` | `setManualOverride(for:number:)` — assign, replace, conflict shift, chain shift |
-| `StampPlacementTests` | `stampRect` — all nine anchors stay on the page, margins per edge, border padding, non-zero page origin (`StampLogicTests.swift`) |
+| `StampPlacementTests` | `stampRect` — all nine presets stay on the page, margins per edge, border padding, non-zero page origin (`StampLogicTests.swift`) |
+| `StampFreePositionTests` | Free positioning/drag maths — fractions map onto `stampTravel`, out-of-range clamped, margin bounds travel, an oversized stamp has no travel, preset round trip, a dragged stamp matches no preset |
+| `StampCodingTests` | `Stamp` encode/decode round trip, migration of a pre-drag `anchor` (and a stale `scope`), and defaults for missing fields |
 | `StampScopeTests` | `StampJob.pageIndices` — every-page vs first-page-of-each-part, out-of-range part pages dropped, blank-job detection |
 | `ApplyingStampTests` | `applyingStamp` — nil and blank jobs pass the document through by identity; a drawable job returns a new document with the same page count |
 | `StampFlatteningTests` | `stampedDocument` — page count preserved, partial stamping, blank stamp/empty doc rejected, write-reload round trip, 90°-rotated page comes out landscape, A3 crop box wins over media box |

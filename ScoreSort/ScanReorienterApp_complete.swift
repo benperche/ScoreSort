@@ -1734,6 +1734,19 @@ func showNSAlert(title: String, message: String, isError: Bool) {
     alert.runModal()
 }
 
+/// Two-button confirmation for an irreversible action. Returns true if the user confirms.
+/// The confirm button is marked destructive so it reads red, and Escape cancels.
+func confirmNSAlert(title: String, message: String, confirmTitle: String) -> Bool {
+    let alert = NSAlert()
+    alert.messageText = title
+    alert.informativeText = message
+    alert.alertStyle = .warning
+    let confirmButton = alert.addButton(withTitle: confirmTitle)
+    confirmButton.hasDestructiveAction = true
+    alert.addButton(withTitle: "Cancel")
+    return alert.runModal() == .alertFirstButtonReturn
+}
+
 enum RotationMode {
     case odd
     case even
