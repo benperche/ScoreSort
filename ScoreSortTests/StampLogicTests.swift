@@ -385,3 +385,64 @@ struct StampColourTests {
         #expect(hexString(from: nsColor(fromHex: "#12345")) == "#000000")
     }
 }
+
+// MARK: - Folder expansion (shared with the Combine tab's drop handling)
+
+@Suite("File expansion")
+struct ExpandToFilesTests {
+
+    /// Builds a temp tree:  root/a.pdf, root/b.PDF, root/notes.txt, root/sub/c.pdf
+    private func makeTree() throws -> URL {
+        let fm = FileManager.default
+        let root = fm.temporaryDirectory.appendingPathComponent("stamp-expand-\(UUID().uuidString)")
+        let sub = root.appendingPathComponent("sub")
+        try fm.createDirectory(at: sub, withIntermediateDirectories: true)
+        for name in ["a.pdf", "b.PDF", "notes.txt"] {
+            try Data("x".utf8).write(to: root.appendingPathComponent(name))
+        }
+        try Data("x".utf8).write(to: sub.appendingPathComponent("c.pdf"))
+        return root
+    }
+
+    @Test("a folder expands recursively to its PDFs, name-sorted")
+    func expandsFolderRecursively() throws {
+        let root = try makeTree()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let found = expandToFiles([root], extensions: ["pdf"])
+        #expect(found.map { $0.lastPathComponent } == ["a.pdf", "b.PDF", "c.pdf"])
+    }
+
+    @Test("the extension match is case-insensitive and filters everything else out")
+    func filtersByExtension() throws {
+        let root = try makeTree()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let pdfs = expandToFiles([root], extensions: ["pdf"])
+        #expect(pdfs.allSatisfy { $0.pathExtension.lowercased() == "pdf" })
+        #expect(expandToFiles([root], extensions: ["txt"]).count == 1)
+    }
+
+    @Test("plain files pass through and missing paths are ignored")
+    func handlesFilesAndMissingPaths() throws {
+        let root = try makeTree()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let file = root.appendingPathComponent("a.pdf")
+        let missing = root.appendingPathComponent("nope.pdf")
+        #expect(expandToFiles([file], extensions: ["pdf"]) == [file])
+        #expect(expandToFiles([missing], extensions: ["pdf"]).isEmpty)
+        #expect(expandToFiles([], extensions: ["pdf"]).isEmpty)
+    }
+
+    @Test("a mixed drop of a file and a folder is combined and sorted")
+    func mixesFilesAndFolders() throws {
+        let root = try makeTree()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        let found = expandToFiles([root.appendingPathComponent("sub"),
+                                   root.appendingPathComponent("a.pdf")],
+                                  extensions: ["pdf"])
+        #expect(found.map { $0.lastPathComponent } == ["a.pdf", "c.pdf"])
+    }
+}

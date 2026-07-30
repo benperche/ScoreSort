@@ -20,6 +20,31 @@ func outputDirectory(forSourceFile url: URL?) -> URL? {
     url?.deletingLastPathComponent()
 }
 
+/// Expands a mixed list of file and folder URLs into a flat, name-sorted list of files whose
+/// extension is in `extensions` (lowercase, no dot). Folders are enumerated **recursively**;
+/// anything else is ignored. Shared by every drop/open path that accepts folders — the
+/// Combine tab (PDFs + images) and the Stamp tab (PDFs only) — so dropping a folder behaves
+/// the same everywhere.
+func expandToFiles(_ urls: [URL], extensions: Set<String>) -> [URL] {
+    var result: [URL] = []
+    let fm = FileManager.default
+    for url in urls {
+        var isDir: ObjCBool = false
+        guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else { continue }
+        if isDir.boolValue {
+            guard let enumerator = fm.enumerator(at: url,
+                                                 includingPropertiesForKeys: [.isRegularFileKey]) else { continue }
+            for case let fileURL as URL in enumerator
+            where extensions.contains(fileURL.pathExtension.lowercased()) {
+                result.append(fileURL)
+            }
+        } else if extensions.contains(url.pathExtension.lowercased()) {
+            result.append(url)
+        }
+    }
+    return result.sorted { $0.lastPathComponent < $1.lastPathComponent }
+}
+
 func pdfFilenameError(for text: String) -> String? {
     guard !text.isEmpty else { return nil }
     let illegal = CharacterSet(charactersIn: "/:\\\0")

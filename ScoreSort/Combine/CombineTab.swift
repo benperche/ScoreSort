@@ -594,26 +594,10 @@ struct CombineView: View {
 
     static let supportedExtensions: Set<String> = ["pdf", "jpg", "jpeg", "png", "tif", "tiff", "heic", "bmp", "gif"]
 
-    /// Expands a mixed list of file and folder URLs into a flat, sorted list of supported file URLs.
-    /// Folders are enumerated recursively; unsupported files are ignored.
+    /// Expands a mixed list of file and folder URLs into a flat, sorted list of supported file
+    /// URLs. Folders are enumerated recursively; unsupported files are ignored.
     static func expandToSupportedFiles(_ urls: [URL]) -> [URL] {
-        var result: [URL] = []
-        let fm = FileManager.default
-        for url in urls {
-            var isDir: ObjCBool = false
-            guard fm.fileExists(atPath: url.path, isDirectory: &isDir) else { continue }
-            if isDir.boolValue {
-                guard let enumerator = fm.enumerator(at: url,
-                                                     includingPropertiesForKeys: [.isRegularFileKey]) else { continue }
-                for case let fileURL as URL in enumerator
-                where supportedExtensions.contains(fileURL.pathExtension.lowercased()) {
-                    result.append(fileURL)
-                }
-            } else if supportedExtensions.contains(url.pathExtension.lowercased()) {
-                result.append(url)
-            }
-        }
-        return result.sorted { $0.lastPathComponent < $1.lastPathComponent }
+        expandToFiles(urls, extensions: supportedExtensions)
     }
     
     /// A click on the row body. Standard macOS list behaviour:

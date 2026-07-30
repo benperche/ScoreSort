@@ -93,6 +93,8 @@ struct StampView: View {
                     .frame(minWidth: 340)
             }
         }
+        // Drop anywhere in the tab, not just on the drop zone.
+        .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in handleDrop(providers) }
         .onAppear {
             draft = stampStore.selectedStamp
             DispatchQueue.main.async { syncTabCommands() }
@@ -112,7 +114,7 @@ struct StampView: View {
 
     private var designerColumn: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 12) {
                 stampPickerSection
 
                 if draft != nil {
@@ -124,7 +126,8 @@ struct StampView: View {
                     placementSection
                 }
             }
-            .padding(16)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
         }
     }
 
@@ -161,7 +164,7 @@ struct StampView: View {
                     .textFieldStyle(.roundedBorder)
             }
 
-            Text("Saved stamps are shared: switch stamping on from the **Stamp** button in the Combine and Split tabs to apply one as those tools write their files.")
+            Text("Shared with Combine and Split — switch stamping on from their **Stamp** button.")
                 .font(.caption)
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -177,9 +180,7 @@ struct StampView: View {
                 TextField("e.g. Example School Band", text: binding.text, axis: .vertical)
                     .textFieldStyle(.roundedBorder)
                     .lineLimit(1...3)
-                Text("Press ⌥⏎ for a second line.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                    .help("Press ⌥⏎ for a second line.")
             }
         }
     }
@@ -187,7 +188,7 @@ struct StampView: View {
     @ViewBuilder
     private var appearanceSection: some View {
         if let binding = draftBinding, let stamp = draft {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Appearance")
                     .font(.headline)
 
@@ -220,7 +221,7 @@ struct StampView: View {
     @ViewBuilder
     private var placementSection: some View {
         if let binding = draftBinding, let stamp = draft {
-            VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 8) {
                 Text("Position")
                     .font(.headline)
 
@@ -249,10 +250,6 @@ struct StampView: View {
                         .strokeBorder(Color.secondary.opacity(0.35))
                 )
 
-                Text("Or drag the stamp around on the preview.")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-
                 HStack {
                     Text("Margin")
                     Stepper(value: binding.margin, in: 0...144, step: 2) {
@@ -260,10 +257,9 @@ struct StampView: View {
                             .monospacedDigit()
                     }
                 }
-                Text("The smallest gap allowed between the stamp and the page edge — it also limits how far the stamp can be dragged.")
+                Text("Minimum gap from the page edge; also limits dragging.")
                     .font(.caption)
                     .foregroundColor(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
             }
         }
     }
@@ -328,11 +324,8 @@ struct StampView: View {
                     .strokeBorder(isTargeted ? Color.accentColor : Color.gray.opacity(0.35),
                                   style: StrokeStyle(lineWidth: 2, dash: [6]))
                     .frame(height: 44)
-                    .overlay(Text("Drop PDFs here").font(.callout).foregroundColor(.secondary))
-                    .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
-                        loadDroppedFiles(providers)
-                        return true
-                    }
+                    .overlay(Text("Drop PDFs or a folder here")
+                        .font(.callout).foregroundColor(.secondary))
             } else {
                 fileList
             }
@@ -366,6 +359,10 @@ struct StampView: View {
                     stampFiles()
                 }
                 .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                // Without fixedSize the Spacers take all the slack and squeeze the button
+                // down to a sliver.
+                .fixedSize()
                 .disabled(!canStamp)
             }
 
@@ -426,10 +423,6 @@ struct StampView: View {
             RoundedRectangle(cornerRadius: 6)
                 .fill(Color(NSColor.controlBackgroundColor))
         )
-        .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
-            loadDroppedFiles(providers)
-            return true
-        }
     }
 
     // MARK: - Bindings & helpers
@@ -544,30 +537,44 @@ struct StampView: View {
 
     // MARK: - Batch stamping
 
-    private func addFiles(_ urls: [URL]) {
-        for url in urls where !items.contains(where: { $0.url == url }) {
+    /// Queues PDFs, expanding any dropped/chosen folders (recursively, name-sorted) the same
+    /// way the Combine tab and the Renamer do. Duplicates are ignored, so re-dropping a
+    /// folder doesn't double the queue.
+    private func addInput(_ urls: [URL]) {
+        let pdfs = expandToFiles(urls, extensions: ["pdf"])
+        guard !pdfs.isEmpty else {
+            showNSAlert(title: "No PDFs Found",
+                        message: urls.contains(where: urlIsDirectory)
+                            ? "That folder doesn’t contain any PDFs."
+                            : "The Stamp tab works on PDFs. The dropped item(s) weren’t PDFs.",
+                        isError: true)
+            return
+        }
+        for url in pdfs where !items.contains(where: { $0.url == url }) {
             items.append(StampFileItem(url: url))
         }
     }
 
-    private func loadDroppedFiles(_ providers: [NSItemProvider]) {
-        for provider in providers {
-            _ = provider.loadObject(ofClass: URL.self) { url, _ in
-                guard let url, url.pathExtension.lowercased() == "pdf" else { return }
-                DispatchQueue.main.async { addFiles([url]) }
-            }
+    /// Accepts a drop anywhere in the tab, not just on the drop zone.
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        collectDroppedFileURLs(from: providers) { urls in
+            guard !urls.isEmpty else { return }
+            addInput(urls)
         }
+        return true
     }
 
     private func chooseFiles() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.pdf]
         panel.allowsMultipleSelection = true
-        panel.title = "Select PDFs to Stamp"
+        // Folders are allowed here too, matching the drop behaviour.
+        panel.canChooseDirectories = true
+        panel.title = "Select PDFs or a Folder to Stamp"
         panel.begin { response in
             guard response == .OK else { return }
             let urls = panel.urls
-            DispatchQueue.main.async { addFiles(urls) }
+            DispatchQueue.main.async { addInput(urls) }
         }
     }
 
