@@ -205,7 +205,6 @@ struct SplitNamingStageView: View {
     /// Shared by key with SplitView. When on, the original file is moved to the Trash
     /// after the split files are written (handled back in SplitView's save paths).
     @AppStorage("deleteSourceAfterSplit") private var deleteSourceAfterSplit: Bool = false
-    @AppStorage("splitStampEnabled") private var stampEnabled: Bool = false
 
     /// Set to true once we've auto-inferred the ensemble from a high-confidence signal.
     /// Prevents re-inference (and fighting the user) on subsequent edits this session.
@@ -423,8 +422,6 @@ struct SplitNamingStageView: View {
                         .toggleStyle(.checkbox)
                         .help("When the split files are saved, the original PDF is moved to the Trash (recoverable). Off by default.")
                 }
-
-                StampOptionRow(isEnabled: $stampEnabled)
 
                 HStack {
                     Button(action: onBack) {

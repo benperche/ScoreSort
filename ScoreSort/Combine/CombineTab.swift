@@ -23,6 +23,7 @@ struct CombineView: View {
     @StateObject private var combineManager = CombineManager()
     @State private var addBlankPages = false
     @AppStorage("combineStampEnabled") private var stampEnabled = false
+    @AppStorage("combineStampScope") private var stampScope: StampScope = .firstPageOfEachPart
     @State private var isTargeted = false
     @State private var selectedFiles: Set<UUID> = []
     @State private var removalNoticeVisible = false
@@ -38,6 +39,8 @@ struct CombineView: View {
     /// Drag-to-reorder: the collate group whose body is hovered (drop = add to group).
     @State private var mergeTargetGroupId: UUID?
     @FocusState private var listFocused: Bool
+    /// Local key monitor for delete/backspace (see .onAppear).
+    @State private var combineKeyMonitor: Any?
     @Environment(\.undoManager) var undoManager
     
     var body: some View {
@@ -55,7 +58,14 @@ struct CombineView: View {
             handleDrop(providers: providers)
             return true
         }
-        .onAppear { DispatchQueue.main.async { syncMenuClosures(); syncMenuFlags(); syncTabCommands() } }
+        .onAppear {
+            DispatchQueue.main.async { syncMenuClosures(); syncMenuFlags(); syncTabCommands() }
+            installKeyMonitor()
+        }
+        .onDisappear {
+            if let m = combineKeyMonitor { NSEvent.removeMonitor(m) }
+            combineKeyMonitor = nil
+        }
         .onChange(of: selectedFiles)          { DispatchQueue.main.async { syncMenuFlags(); syncTabCommands() } }
         .onChange(of: combineManager.files)   { DispatchQueue.main.async { syncMenuFlags(); syncTabCommands() } }
         // Re-publish the moment Combine becomes (or stops being) the active tab.
@@ -71,6 +81,8 @@ struct CombineView: View {
                     .fontWeight(.semibold)
 
                 Spacer()
+
+                StampMenuButton(isEnabled: $stampEnabled, scope: $stampScope)
 
                 Button {
                     withAnimation { showPresetSidebar.toggle() }
@@ -341,8 +353,6 @@ struct CombineView: View {
 
                         Toggle("For double-sided printing: add blank page after files with an odd number of pages", isOn: $addBlankPages)
                             .toggleStyle(.checkbox)
-
-                        StampOptionRow(isEnabled: $stampEnabled)
 
                         HStack {
                             Text("\(combineManager.totalFiles) file(s) • \(combineManager.totalPages) total page(s)")
@@ -748,7 +758,7 @@ struct CombineView: View {
         panel.beginSheetModal(for: window) { response in
             menuState.isPanelOpen = false
             if response == .OK, let url = panel.url {
-                combineManager.createCombinedPDF(to: url, addBlankPages: addBlankPages, stamp: activeStamp) { title, message, isError in
+                combineManager.createCombinedPDF(to: url, addBlankPages: addBlankPages, stampJob: activeStampJob) { title, message, isError in
                     if isError {
                         showNSAlert(title: title, message: message, isError: true)
                     } else {
@@ -768,14 +778,15 @@ struct CombineView: View {
     }
     
     private func openInPreview() {
-        combineManager.openInPreview(addBlankPages: addBlankPages, stamp: activeStamp) { title, message, isError in
+        combineManager.openInPreview(addBlankPages: addBlankPages, stampJob: activeStampJob) { title, message, isError in
             showNSAlert(title: title, message: message, isError: isError)
         }
     }
 
-    /// The stamp to apply to output, or nil when stamping is switched off.
-    private var activeStamp: Stamp? {
-        stampEnabled ? stampStore.selectedStamp : nil
+    /// The stamp job to apply to output, or nil when stamping is switched off.
+    private var activeStampJob: StampJob? {
+        guard stampEnabled, let stamp = stampStore.selectedStamp else { return nil }
+        return StampJob(stamp: stamp, scope: stampScope)
     }
 
     // MARK: - Menu state sync
@@ -791,6 +802,33 @@ struct CombineView: View {
         menuState.selectNextExtending     = { navigateSelection(direction:  1, extending: true)  }
         menuState.togglePresetSidebar     = { withAnimation { showPresetSidebar.toggle() } }
         syncMenuFlags()
+    }
+
+    /// ⌫ / ⌦ — remove the selected files.
+    ///
+    /// Deliberately *not* a menu `.keyboardShortcut(.delete)`: a CommandMenu key
+    /// equivalent fires app-wide even when the item is `.disabled()`, which would steal
+    /// backspace from every text field (preset names, the copies field, stamp designer).
+    /// SwiftUI's `onKeyPress` doesn't reliably see delete on macOS either, so — as in the
+    /// Rename and Split tabs — a local NSEvent monitor catches it at the app level.
+    private func installKeyMonitor() {
+        guard combineKeyMonitor == nil else { return }
+        combineKeyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            // This monitor is app-global and stays installed while Combine is mounted
+            // (TabView keeps hidden tabs mounted), so gate it the same way the tab's
+            // onKeyPress is gated.
+            guard appState.selectedTab == 0 else { return event }
+            guard !menuState.isPanelOpen else { return event }
+            guard event.keyCode == 51 || event.keyCode == 117 else { return event }
+            // Never steal the key from text editing, or from a sheet on top of us
+            // (New Preset, stamp designer) where ⌫ must not touch the file list.
+            if NSApp.keyWindow?.firstResponder is NSTextView { return event }
+            if NSApp.keyWindow?.isSheet == true { return event }
+            // Nothing selected — let the system have it rather than silently swallowing.
+            guard !selectedFiles.isEmpty else { return event }
+            DispatchQueue.main.async { self.removeSelected() }
+            return nil  // consume — prevents the system bonk
+        }
     }
 
     private func syncMenuFlags() {
@@ -2044,7 +2082,7 @@ class CombineManager: ObservableObject {
     /// two can never drift apart. Returns the document, its page count, and the bookmark
     /// labels with the page index each part starts at — those indices double as "first page
     /// of each part" for stamping.
-    private func buildDocument(addBlankPages: Bool, stamp: Stamp?)
+    private func buildDocument(addBlankPages: Bool, stampJob: StampJob?)
         -> (doc: PDFDocument, pageCount: Int, bookmarks: [(label: String, pageIndex: Int)]) {
         var doc = PDFDocument()
         var idx = 0
@@ -2089,13 +2127,7 @@ class CombineManager: ObservableObject {
         // Stamp *before* the outline is built — flattening rebuilds the pages and drops any
         // existing outline, but leaves page indices untouched, so the bookmark loop below
         // still lines up.
-        if let stamp, stamp.isDrawable {
-            let indices = stampPageIndices(for: stamp, pageCount: pageCount,
-                                           partFirstPages: bookmarks.map { $0.pageIndex })
-            if let stamped = stampedDocument(doc, stamp: stamp, pageIndices: indices) {
-                doc = stamped
-            }
-        }
+        doc = applyingStamp(stampJob, to: doc, partFirstPages: bookmarks.map { $0.pageIndex })
 
         let root = PDFOutline()
         for (label, pageIndex) in bookmarks {
@@ -2111,8 +2143,8 @@ class CombineManager: ObservableObject {
         return (doc, pageCount, bookmarks)
     }
 
-    func createCombinedPDF(to url: URL, addBlankPages: Bool, stamp: Stamp? = nil, completion: PDFAlertHandler) {
-        let built = buildDocument(addBlankPages: addBlankPages, stamp: stamp)
+    func createCombinedPDF(to url: URL, addBlankPages: Bool, stampJob: StampJob? = nil, completion: PDFAlertHandler) {
+        let built = buildDocument(addBlankPages: addBlankPages, stampJob: stampJob)
         if built.doc.write(to: url) {
             completion("PDF Created Successfully",
                        "Combined PDF with \(built.pageCount) pages saved to:\n\(url.path)", false)
@@ -2121,8 +2153,8 @@ class CombineManager: ObservableObject {
         }
     }
 
-    func openInPreview(addBlankPages: Bool, stamp: Stamp? = nil, onError: PDFAlertHandler) {
-        let built = buildDocument(addBlankPages: addBlankPages, stamp: stamp)
+    func openInPreview(addBlankPages: Bool, stampJob: StampJob? = nil, onError: PDFAlertHandler) {
+        let built = buildDocument(addBlankPages: addBlankPages, stampJob: stampJob)
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedForPrint.pdf")
         guard built.doc.write(to: tempURL) else { onError("Error", "Failed to create temporary PDF", true); return }
         NSWorkspace.shared.open(tempURL)

@@ -54,9 +54,9 @@ struct ViewSmokeTests {
         render(RotateView())
     }
 
-    @Test("stamp designer renders")
-    func stampDesigner() {
-        render(StampDesignerView())
+    @Test("Stamp tab renders")
+    func stampTab() {
+        render(StampView())
     }
 
     @Test("full ContentView renders")

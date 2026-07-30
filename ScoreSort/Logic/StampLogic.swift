@@ -34,7 +34,9 @@ enum StampAnchor: String, Codable, CaseIterable, Identifiable {
     ]
 }
 
-/// Which pages of a document get stamped.
+/// Which pages of a document get stamped. Chosen **per job**, not saved on the stamp — the
+/// same design is often wanted on every page of one document and only the first page of
+/// the next.
 enum StampScope: String, Codable, CaseIterable, Identifiable {
     /// Every page of the output.
     case everyPage
@@ -69,11 +71,31 @@ struct Stamp: Identifiable, Codable, Equatable {
     var fontSize: Double = 11
     var colourHex: String = "#000000"
     var hasBorder: Bool = true
-    var scope: StampScope = .firstPageOfEachPart
 
     /// Nothing to draw for an all-whitespace stamp.
     var isDrawable: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+}
+
+/// One stamping request: a design plus the pages it should land on. Bundling the two keeps
+/// the export APIs to a single optional parameter — nil means "don't stamp".
+struct StampJob {
+    let stamp: Stamp
+    let scope: StampScope
+
+    /// A job is worth running only if there's actually something to draw.
+    var isDrawable: Bool { stamp.isDrawable }
+
+    /// The pages to stamp in a document of `pageCount` pages. `partFirstPages` is the page
+    /// index each part starts at — ignored for `.everyPage`.
+    func pageIndices(pageCount: Int, partFirstPages: [Int]) -> Set<Int> {
+        switch scope {
+        case .everyPage:
+            return Set(0..<pageCount)
+        case .firstPageOfEachPart:
+            return Set(partFirstPages.filter { $0 >= 0 && $0 < pageCount })
+        }
     }
 }
 
@@ -283,15 +305,12 @@ func stampedDocument(_ doc: PDFDocument, stamp: Stamp, pageIndices: Set<Int>) ->
     return PDFDocument(data: output as Data)
 }
 
-/// The set of pages to stamp in a document of `pageCount` pages, given the stamp's scope
-/// and the first-page index of each part. `partFirstPages` is ignored for `.everyPage`.
-func stampPageIndices(for stamp: Stamp, pageCount: Int, partFirstPages: [Int]) -> Set<Int> {
-    switch stamp.scope {
-    case .everyPage:
-        return Set(0..<pageCount)
-    case .firstPageOfEachPart:
-        return Set(partFirstPages.filter { $0 >= 0 && $0 < pageCount })
-    }
+/// Applies `job` to `doc`, or returns `doc` unchanged when there's nothing to stamp or the
+/// flatten fails — so callers can use it inline without losing the document.
+func applyingStamp(_ job: StampJob?, to doc: PDFDocument, partFirstPages: [Int]) -> PDFDocument {
+    guard let job, job.isDrawable else { return doc }
+    let indices = job.pageIndices(pageCount: doc.pageCount, partFirstPages: partFirstPages)
+    return stampedDocument(doc, stamp: job.stamp, pageIndices: indices) ?? doc
 }
 
 // MARK: - Preview

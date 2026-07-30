@@ -19,8 +19,6 @@ class AppState: ObservableObject {
     @Published var selectedTab = 0
     @Published var showingKeyboardHelp = false
     @Published var showingWelcomeTour = false
-    /// Non-nil while the stamp designer sheet is up (`.sheet(item:)`, not isPresented:).
-    @Published var stampSheet: StampSheetToken?
     let combineMenuState = CombineMenuState()
     /// Bridges the *active* tab's actions to the File/Edit/View/⟨tab⟩ menus.
     let tabCommands = TabCommands()
@@ -125,13 +123,6 @@ struct FileCommands: Commands {
 
             Divider()
 
-            // Global, not per-tab: the stamp designer edits saved stamps that every
-            // tool shares, so it belongs in File rather than the Actions menu.
-            Button("Stamp\u{2026}") { appState.stampSheet = StampSheetToken() }
-                .keyboardShortcut("s", modifiers: [.command, .option])
-
-            Divider()
-
             Button(commands.slice.clearTitle) { commands.slice.clear?() }
                 .keyboardShortcut(.delete, modifiers: .command)
                 .disabled(commands.slice.clear == nil)
@@ -153,6 +144,8 @@ struct ViewCommands: Commands {
                 .keyboardShortcut("3", modifiers: .command)
             Button("Rotate Pages") { appState.selectedTab = 3 }
                 .keyboardShortcut("4", modifiers: .command)
+            Button("Stamp") { appState.selectedTab = 4 }
+                .keyboardShortcut("5", modifiers: .command)
 
             Divider()
 
@@ -368,6 +361,12 @@ struct ContentView: View {
                         Label("Rotate Pages", systemImage: "rotate.right")
                     }
                     .tag(3)
+
+                StampView()
+                    .tabItem {
+                        Label("Stamp", systemImage: "seal")
+                    }
+                    .tag(4)
             }
             .frame(minWidth: 900, minHeight: 700)
             .onAppear {
@@ -417,9 +416,6 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.15), value: appState.showingKeyboardHelp)
         .animation(.easeInOut(duration: 0.2), value: appState.showingWelcomeTour)
-        .sheet(item: $appState.stampSheet) { _ in
-            StampDesignerView()
-        }
     }
 }
 
@@ -435,12 +431,11 @@ struct ShortcutsHelpView: View {
                     .fontWeight(.semibold)
 
                 shortcutSection("Global (View & File menus)") {
-                    shortcutRow("⌘1 – ⌘4", "Switch tab (Combine / Rename / Split / Rotate)")
+                    shortcutRow("⌘1 – ⌘5", "Switch tab (Combine / Rename / Split / Rotate / Stamp)")
                     shortcutRow("⌘O", "Open — add files / choose a PDF or folder")
                     shortcutRow("⌘S", "Primary action — Create PDF / Save / Rename (per tab)")
                     shortcutRow("⇧⌘F", "Show in Finder (the folder we’re working from)")
                     shortcutRow("⌘⌫", "Clear / Start Over")
-                    shortcutRow("⌥⌘S", "Design stamps / stamp existing files")
                     shortcutRow("⌘,", "Preferences")
                     shortcutRow("⌘/", "Welcome tour")
                     shortcutRow("⌘`", "This shortcuts panel")
@@ -481,6 +476,12 @@ struct ShortcutsHelpView: View {
                     shortcutRow("← / →", "Previous / next page")
                     shortcutRow("⌘← / ⌘→", "First / last page")
                     shortcutRow(", / .", "Rotate current page left / right")
+                }
+
+                shortcutSection("Stamp") {
+                    shortcutRow("⌘O", "Add PDFs to stamp")
+                    shortcutRow("⌘S", "Stamp the added files")
+                    shortcutRow("⌘⌫", "Clear the file list")
                 }
 
 
@@ -1654,7 +1655,7 @@ class PDFManager: ObservableObject {
         }
     }
     
-    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], skippedPages: Set<Int> = [], separator: String = "_", stamp: Stamp? = nil, completion: PDFAlertHandler) {
+    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], skippedPages: Set<Int> = [], separator: String = "_", stampJob: StampJob? = nil, completion: PDFAlertHandler) {
         guard let document = pdfDocument else { return }
 
         let numberOfFiles = (pageToFileMapping.values.max() ?? 0) + 1
@@ -1682,16 +1683,11 @@ class PDFManager: ObservableObject {
         var errors: [String] = []
 
         for fileIndex in 0..<numberOfFiles {
-            guard var doc = fileDocuments[fileIndex],
-                  doc.pageCount > 0 else { continue }
+            guard let assembled = fileDocuments[fileIndex],
+                  assembled.pageCount > 0 else { continue }
 
             // Each output file is one "part", so first-page scope means its page 1.
-            if let stamp, stamp.isDrawable {
-                let indices = stampPageIndices(for: stamp, pageCount: doc.pageCount, partFirstPages: [0])
-                if let stamped = stampedDocument(doc, stamp: stamp, pageIndices: indices) {
-                    doc = stamped
-                }
-            }
+            let doc = applyingStamp(stampJob, to: assembled, partFirstPages: [0])
 
             let fileName: String
             if let customSuffix = customFileNames[fileIndex], !customSuffix.isEmpty {

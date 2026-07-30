@@ -105,6 +105,7 @@ struct SplitView: View {
     /// (Trash, not permanent delete) and the summary screen confirms when it happened.
     @AppStorage("deleteSourceAfterSplit") private var deleteSourceAfterSplit: Bool = false
     @AppStorage("splitStampEnabled") private var stampEnabled: Bool = false
+    @AppStorage("splitStampScope") private var stampScope: StampScope = .firstPageOfEachPart
     /// Set true after a successful save when the source file was actually trashed, so the
     /// summary screen can confirm it. Reset whenever a new save round begins.
     @State private var sourceWasTrashed = false
@@ -384,6 +385,8 @@ struct SplitView: View {
                 Spacer()
                 
                 if pdfManager.pdfDocument != nil {
+                    StampMenuButton(isEnabled: $stampEnabled, scope: $stampScope)
+
                     Button { showingA3Detection = true } label: {
                         Label("Split as A3…", systemImage: "rectangle.split.2x1")
                     }
@@ -999,9 +1002,10 @@ struct SplitView: View {
         return true
     }
 
-    /// The stamp to burn into each output file, or nil when stamping is switched off.
-    private var activeStamp: Stamp? {
-        stampEnabled ? stampStore.selectedStamp : nil
+    /// The stamp job to burn into each output file, or nil when stamping is switched off.
+    private var activeStampJob: StampJob? {
+        guard stampEnabled, let stamp = stampStore.selectedStamp else { return nil }
+        return StampJob(stamp: stamp, scope: stampScope)
     }
 
     func saveSplitPDF() {
@@ -1053,7 +1057,7 @@ struct SplitView: View {
                     pageToFileMapping: pageToFileMapping,
                     skippedPages: skippedPages,
                     separator: filenameSeparator,
-                    stamp: activeStamp
+                    stampJob: activeStampJob
                 ) { title, message, isError in
                     if isError {
                         showNSAlert(title: title, message: message, isError: true)
@@ -1317,7 +1321,7 @@ struct SplitView: View {
             pageToFileMapping: pageToFileMapping,
             skippedPages: omittedPages,
             separator: "",
-            stamp: activeStamp
+            stampJob: activeStampJob
         ) { _, _, isError in
             if isError {
                 showNSAlert(title: "Save Failed",

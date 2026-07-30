@@ -31,10 +31,13 @@ private func document(pages: [PDFPage]) -> PDFDocument {
 
 private func testStamp(anchor: StampAnchor = .topRight,
                        margin: Double = 24,
-                       border: Bool = true,
-                       scope: StampScope = .everyPage) -> Stamp {
+                       border: Bool = true) -> Stamp {
     Stamp(name: "Test", text: "Example School Band",
-          anchor: anchor, margin: margin, hasBorder: border, scope: scope)
+          anchor: anchor, margin: margin, hasBorder: border)
+}
+
+private func testJob(_ scope: StampScope) -> StampJob {
+    StampJob(stamp: testStamp(), scope: scope)
 }
 
 // MARK: - Placement
@@ -107,23 +110,59 @@ struct StampScopeTests {
 
     @Test("every-page scope covers the whole document")
     func everyPage() {
-        let indices = stampPageIndices(for: testStamp(scope: .everyPage),
-                                      pageCount: 5, partFirstPages: [0, 2])
+        let indices = testJob(.everyPage).pageIndices(pageCount: 5, partFirstPages: [0, 2])
         #expect(indices == Set(0..<5))
     }
 
     @Test("first-page scope uses the part start pages")
     func firstPageOfEachPart() {
-        let indices = stampPageIndices(for: testStamp(scope: .firstPageOfEachPart),
-                                      pageCount: 6, partFirstPages: [0, 2, 4])
+        let indices = testJob(.firstPageOfEachPart).pageIndices(pageCount: 6, partFirstPages: [0, 2, 4])
         #expect(indices == Set([0, 2, 4]))
     }
 
     @Test("out-of-range part pages are ignored")
     func dropsOutOfRangePages() {
-        let indices = stampPageIndices(for: testStamp(scope: .firstPageOfEachPart),
-                                      pageCount: 3, partFirstPages: [0, 5, -1])
+        let indices = testJob(.firstPageOfEachPart).pageIndices(pageCount: 3, partFirstPages: [0, 5, -1])
         #expect(indices == Set([0]))
+    }
+
+    @Test("a blank stamp is not a drawable job")
+    func blankJobIsNotDrawable() {
+        var stamp = testStamp()
+        stamp.text = " "
+        #expect(StampJob(stamp: stamp, scope: .everyPage).isDrawable == false)
+        #expect(testJob(.everyPage).isDrawable)
+    }
+}
+
+// MARK: - applyingStamp (the call-site helper)
+
+@Suite("applyingStamp")
+struct ApplyingStampTests {
+
+    @Test("a nil job returns the same document untouched")
+    func nilJobIsPassThrough() {
+        let doc = document(pages: [a4Page(), a4Page()])
+        let result = applyingStamp(nil, to: doc, partFirstPages: [0])
+        #expect(result === doc)
+    }
+
+    @Test("a blank stamp returns the same document untouched")
+    func blankJobIsPassThrough() {
+        let doc = document(pages: [a4Page()])
+        var stamp = testStamp()
+        stamp.text = ""
+        let result = applyingStamp(StampJob(stamp: stamp, scope: .everyPage),
+                                   to: doc, partFirstPages: [0])
+        #expect(result === doc)
+    }
+
+    @Test("a drawable job returns a new document with the same page count")
+    func drawableJobStamps() {
+        let doc = document(pages: [a4Page(), a4Page(), a4Page()])
+        let result = applyingStamp(testJob(.firstPageOfEachPart), to: doc, partFirstPages: [0, 2])
+        #expect(result !== doc)
+        #expect(result.pageCount == 3)
     }
 }
 

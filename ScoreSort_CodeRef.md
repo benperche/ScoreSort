@@ -214,7 +214,9 @@ The `ForEach(combineManager.files)` body uses a `@ViewBuilder` to optionally emi
 #### Navigation
 **`navigateSelection(direction:extending:)`** — navigates the flat `combineManager.files` array (group headers are virtual and not part of navigation). Selecting a grouped file and pressing ⌘↑/↓ triggers `moveUp/Down` via `expandForGroups`, moving the whole group.
 
-**Keyboard shortcuts (in-view `.onKeyPress`):** ↑/↓ (navigate), ⇧↑/⇧↓ (extend), ⌘A (select all), `c` (group — only `.handled` if `canGroup`). The whole handler is skipped unless `selectedTab == 0` and no file panel is open (`menuState.isPanelOpen`). ⌘↑/⌘↓ (Move Up/Down) and Remove Selected come from the Actions menu via `syncTabCommands()`.
+**Keyboard shortcuts (in-view `.onKeyPress`):** ↑/↓ (navigate), ⇧↑/⇧↓ (extend), ⌘A (select all), `c` (group — only `.handled` if `canGroup`). The whole handler is skipped unless `selectedTab == 0` and no file panel is open (`menuState.isPanelOpen`). ⌘↑/⌘↓ (Move Up/Down) come from the Actions menu via `syncTabCommands()`.
+
+**⌫ / ⌦ (remove selected)** is an `NSEvent` local monitor — `installKeyMonitor()`, installed in `.onAppear` and torn down in `.onDisappear` (`combineKeyMonitor`). Same gates as the `onKeyPress` (`selectedTab == 0`, `!isPanelOpen`) plus: passes the event through when the first responder is an `NSTextView`, when a sheet is key (`NSApp.keyWindow?.isSheet`), or when nothing is selected. Not a menu `.keyboardShortcut(.delete)` — the disabled-shortcut interception bug would steal backspace from every text field. (The 1.8.0 menu redesign dropped `CombinerCommands`, which had held this binding as a bare-key menu item, and left ⌫ unbound until this monitor was added.)
 
 #### Removal notice
 `showRemovalNotice(count:undoManager:)` — auto-dismisses after 5 s; Undo button invokes `undoManager.undo()`.
