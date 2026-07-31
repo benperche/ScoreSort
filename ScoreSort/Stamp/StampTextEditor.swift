@@ -238,8 +238,13 @@ struct StampTextEditor: NSViewRepresentable {
             write(from: textView)
         }
 
+        /// Deferred, always. Replacing the contents in `load()` resets the selection, so this
+        /// fires from inside `updateNSView` — i.e. during a SwiftUI view update, where
+        /// publishing `isBold`/`isItalic` is illegal. (That was two warnings per stamp
+        /// switch: one per property that actually changed.) A run loop's delay in the
+        /// button state is imperceptible.
         func textViewDidChangeSelection(_ notification: Notification) {
-            parent.formatter.refreshState()
+            parent.formatter.refreshStateSoon()
         }
 
         /// Mirrors the view's contents onto the stamp: plain text for labels and drawability,
