@@ -64,3 +64,35 @@ struct ViewSmokeTests {
         render(ContentView())
     }
 }
+
+@MainActor
+@Suite("Stamp tab interactions")
+struct StampSwitchSmokeTests {
+
+    /// Switching the selected stamp reloads the rich-text editor from the store. This covers
+    /// the construct-and-switch path; it can't observe SwiftUI's "publishing from within view
+    /// updates" warning, which only appears in a running app.
+    @Test("switching stamps re-renders without crashing")
+    func switchingStamps() {
+        let store = StampStore()
+        store.stamps = [Stamp(name: "One", text: "First stamp"),
+                        Stamp(name: "Two", text: "Second stamp")]
+        store.selectedStampId = store.stamps[0].id
+
+        let host = NSHostingView(
+            rootView: StampView()
+                .environmentObject(AppState())
+                .environmentObject(RenamerManager())
+                .environmentObject(EnsemblePresetStore())
+                .environmentObject(store)
+        )
+        host.frame = NSRect(x: 0, y: 0, width: 1100, height: 800)
+        host.layoutSubtreeIfNeeded()
+
+        store.selectedStampId = store.stamps[1].id
+        host.layoutSubtreeIfNeeded()
+        _ = host.fittingSize
+
+        #expect(store.selectedStamp?.name == "Two")
+    }
+}

@@ -144,7 +144,12 @@ struct StampView: View {
         .onChange(of: pageIndex) { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: stampStore.selectedStampId) { _, _ in draft = stampStore.selectedStamp }
         .onChange(of: draft) { _, newValue in
-            if let newValue { stampStore.updateStamp(newValue) }
+            guard let newValue else { return }
+            // Deferred so the store's @Published write can never land inside a SwiftUI view
+            // update — the editor writes back to `draft` from AppKit callbacks, and those
+            // can fire mid-update. updateStamp finds its target by id, so a late write still
+            // reaches the right stamp after switching.
+            DispatchQueue.main.async { stampStore.updateStamp(newValue) }
         }
     }
 

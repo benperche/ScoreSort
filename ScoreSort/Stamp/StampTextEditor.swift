@@ -208,6 +208,11 @@ struct StampTextEditor: NSViewRepresentable {
     final class Coordinator: NSObject, NSTextViewDelegate {
         private let parent: StampTextEditor
         private(set) var loadedStampId: UUID?
+        /// True while `load` is replacing the contents. Loading happens from `updateNSView`,
+        /// i.e. *during* a SwiftUI view update — if a change notification slipped through and
+        /// wrote back to the stamp there, it would publish mid-update ("Publishing changes
+        /// from within view updates"). Nothing the loader does should count as an edit.
+        private var isLoading = false
 
         init(_ parent: StampTextEditor) {
             self.parent = parent
@@ -216,6 +221,9 @@ struct StampTextEditor: NSViewRepresentable {
         /// Puts the stamp's text into the view: its rich text if it has any, otherwise the
         /// plain text in the stamp's base attributes.
         func load(_ stamp: Stamp, into textView: NSTextView) {
+            isLoading = true
+            defer { isLoading = false }
+
             loadedStampId = stamp.id
             let content = stampRichText(stamp)
                 ?? NSAttributedString(string: stamp.text, attributes: stampBaseAttributes(stamp))
@@ -226,7 +234,7 @@ struct StampTextEditor: NSViewRepresentable {
         }
 
         func textDidChange(_ notification: Notification) {
-            guard let textView = notification.object as? NSTextView else { return }
+            guard !isLoading, let textView = notification.object as? NSTextView else { return }
             write(from: textView)
         }
 
