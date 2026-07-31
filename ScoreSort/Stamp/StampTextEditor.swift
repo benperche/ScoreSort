@@ -133,14 +133,25 @@ final class StampTextFormatter: ObservableObject {
     }
 
     /// Recomputes the button states from the current selection.
+    ///
+    /// Every assignment is guarded: writing the *same* value to an `@Published` property
+    /// still fires `objectWillChange`, which is both a wasted re-render and — when this runs
+    /// while SwiftUI is updating views — the "Publishing changes from within view updates"
+    /// warning. Callers inside a view update must use `refreshStateSoon()`.
     func refreshState() {
-        isAvailable = textView != nil
-        guard textView != nil else {
-            isBold = false; isItalic = false
-            return
-        }
-        isBold = selectionHasTrait(.boldFontMask)
-        isItalic = selectionHasTrait(.italicFontMask)
+        let available = textView != nil
+        if isAvailable != available { isAvailable = available }
+
+        let bold = available && selectionHasTrait(.boldFontMask)
+        let italic = available && selectionHasTrait(.italicFontMask)
+        if isBold != bold { isBold = bold }
+        if isItalic != italic { isItalic = italic }
+    }
+
+    /// `refreshState()` deferred to the next run loop — for calls made from `makeNSView` /
+    /// `updateNSView`, which run *during* a SwiftUI view update where publishing is illegal.
+    func refreshStateSoon() {
+        DispatchQueue.main.async { [weak self] in self?.refreshState() }
     }
 }
 
@@ -174,7 +185,7 @@ struct StampTextEditor: NSViewRepresentable {
 
         context.coordinator.load(stamp, into: textView)
         formatter.textView = textView
-        formatter.refreshState()
+        formatter.refreshStateSoon()
 
         return scrollView
     }
@@ -186,7 +197,7 @@ struct StampTextEditor: NSViewRepresentable {
         // the model on every update would fight the user's typing and lose the selection.
         if context.coordinator.loadedStampId != stamp.id {
             context.coordinator.load(stamp, into: textView)
-            formatter.refreshState()
+            formatter.refreshStateSoon()
         }
     }
 

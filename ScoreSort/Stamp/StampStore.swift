@@ -38,7 +38,36 @@ final class StampStore: ObservableObject {
 
     // MARK: - Persistence
 
+    /// Pending debounced write, if any.
+    private var pendingSave: DispatchWorkItem?
+
     func save() {
+        pendingSave?.cancel()
+        pendingSave = nil
+        writeToDisk()
+    }
+
+    /// Coalesces the writes that come from typing. Encoding the whole store and writing it
+    /// atomically on **every keystroke** was a large part of why the text fields felt laggy;
+    /// the in-memory model still updates immediately, so nothing on screen waits for this.
+    func scheduleSave() {
+        pendingSave?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.pendingSave = nil
+            self?.writeToDisk()
+        }
+        pendingSave = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4, execute: work)
+    }
+
+    /// Writes any pending change out now — called when leaving the tab, so a stamp edited
+    /// and immediately abandoned still lands on disk.
+    func flushPendingSave() {
+        guard pendingSave != nil else { return }
+        save()
+    }
+
+    private func writeToDisk() {
         guard let url = storeURL else { return }
         let encoder = JSONEncoder()
         encoder.outputFormatting = .prettyPrinted
@@ -70,7 +99,7 @@ final class StampStore: ObservableObject {
         guard let idx = stamps.firstIndex(where: { $0.id == stamp.id }) else { return }
         guard stamps[idx] != stamp else { return }   // avoid pointless writes while typing
         stamps[idx] = stamp
-        save()
+        scheduleSave()
     }
 
     func deleteStamp(_ id: UUID) {

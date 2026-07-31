@@ -65,7 +65,6 @@ struct StampView: View {
     @AppStorage("stampTabScope") private var scope: StampScope = .everyPage
 
     /// Computed once — enumerating font families on every redraw is noticeably slow.
-    private static let fontFamilies: [String] = NSFontManager.shared.availableFontFamilies.sorted()
 
     var body: some View {
         VStack(spacing: 0) {
@@ -132,7 +131,11 @@ struct StampView: View {
             isViewFocused = true
             DispatchQueue.main.async { syncTabCommands() }
         }
-        .onChange(of: appState.selectedTab) { DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: appState.selectedTab) {
+            // Leaving the tab: write out any edit still sitting in the debounce window.
+            if appState.selectedTab != 4 { stampStore.flushPendingSave() }
+            DispatchQueue.main.async { syncTabCommands() }
+        }
         .onChange(of: items) {
             clampPreviewPosition()
             DispatchQueue.main.async { syncTabCommands() }
@@ -226,17 +229,11 @@ struct StampView: View {
                 Text("Appearance")
                     .font(.headline)
 
-                Picker("Font", selection: Binding(
-                    get: { stamp.fontFamily },
-                    set: { newValue in
-                        draft?.fontFamily = newValue
-                        appState.stampFormatter.apply(fontFamily: newValue)
-                    }
-                )) {
-                    ForEach(fontFamilyOptions(current: stamp.fontFamily), id: \.self) { family in
-                        Text(family).tag(family)
-                    }
+                FontFamilyPicker(family: stamp.fontFamily) { newValue in
+                    draft?.fontFamily = newValue
+                    appState.stampFormatter.apply(fontFamily: newValue)
                 }
+                .equatable()
 
                 // Toggle buttons rather than checkboxes — this is text formatting, and it
                 // acts on the selection (or the whole stamp when nothing is selected).
@@ -700,11 +697,6 @@ struct StampView: View {
         refreshPreviewPage()
     }
 
-    /// Keeps the saved family in the list even if it isn't installed on this Mac, so the
-    /// picker never appears blank.
-    private func fontFamilyOptions(current: String) -> [String] {
-        Self.fontFamilies.contains(current) ? Self.fontFamilies : [current] + Self.fontFamilies
-    }
 
     private func anchorHelp(_ anchor: StampAnchor) -> String {
         switch anchor {
@@ -895,6 +887,39 @@ struct StampView: View {
                         message: "Stamped \(written.count) file(s); \(failed.count) failed:\n\(failed.joined(separator: ", "))",
                         isError: true)
         }
+    }
+}
+
+// MARK: - Font family picker
+
+/// The font popup, extracted and `Equatable` so SwiftUI can skip it.
+///
+/// It holds ~300 rows, and rebuilding them on every keystroke elsewhere in the tab was the
+/// main reason typing felt sluggish. Gated on the family alone, it's rebuilt only when the
+/// font actually changes.
+private struct FontFamilyPicker: View, Equatable {
+    let family: String
+    let onChange: (String) -> Void
+
+    /// Enumerated once per launch — `availableFontFamilies` is not cheap.
+    private static let families: [String] = NSFontManager.shared.availableFontFamilies.sorted()
+
+    static func == (lhs: FontFamilyPicker, rhs: FontFamilyPicker) -> Bool {
+        lhs.family == rhs.family
+    }
+
+    var body: some View {
+        Picker("Font", selection: Binding(get: { family }, set: onChange)) {
+            ForEach(options, id: \.self) { family in
+                Text(family).tag(family)
+            }
+        }
+    }
+
+    /// Keeps the saved family in the list even if it isn't installed on this Mac, so the
+    /// picker never appears blank.
+    private var options: [String] {
+        Self.families.contains(family) ? Self.families : [family] + Self.families
     }
 }
 
