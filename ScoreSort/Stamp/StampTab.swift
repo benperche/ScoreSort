@@ -1112,14 +1112,38 @@ struct StampMenuButton: View {
             Button("Edit Stamps\u{2026}") { appState.selectedTab = 4 }
         } label: {
             Label(label, systemImage: isEnabled ? "seal.fill" : "seal")
+                .lineLimit(1)
         }
-        .help(isEnabled
-              ? "This tool's output will be stamped. Click to change the stamp or which pages it lands on."
-              : "Add a text stamp to this tool's output")
+        // Sized to its (already trimmed) label, so the toolbar around it stays put instead of
+        // the title wrapping to make room.
+        .fixedSize()
+        .help(helpText)
     }
 
     private var label: String {
-        guard isEnabled, let stamp = stampStore.selectedStamp else { return "Stamp" }
-        return "Stamp: \(stamp.name.isEmpty ? "Untitled" : stamp.name)"
+        guard isEnabled, let name = activeStampName else { return "Stamp" }
+        return "Stamp: \(shortenedStampName(name))"
     }
+
+    private var activeStampName: String? {
+        guard let stamp = stampStore.selectedStamp else { return nil }
+        return stamp.name.isEmpty ? "Untitled" : stamp.name
+    }
+
+    private var helpText: String {
+        guard isEnabled, let name = activeStampName else {
+            return "Add a text stamp to this tool's output"
+        }
+        // The full name lives here, since the button itself may have trimmed it.
+        return "This tool's output will be stamped with “\(name)”. Click to change the stamp or which pages it lands on."
+    }
+}
+
+/// Trims a stamp name for the toolbar button. Ensemble names get long ("Hornsby North Public
+/// School Concert Band"), and at full length the button pushed the rest of the toolbar
+/// around and squeezed the other labels. The full name stays in the tooltip and the menu.
+func shortenedStampName(_ name: String, limit: Int = 18) -> String {
+    guard name.count > limit else { return name }
+    let cut = name.prefix(limit - 1).trimmingCharacters(in: .whitespaces)
+    return "\(cut)…"
 }

@@ -596,3 +596,35 @@ struct StampAlignmentTests {
         #expect(coded.alignment == .left)
     }
 }
+
+// MARK: - Toolbar label
+
+@Suite("Stamp button label")
+struct ShortenedStampNameTests {
+
+    @Test("a short name is left alone")
+    func shortNameUnchanged() {
+        #expect(shortenedStampName("School Band") == "School Band")
+        #expect(shortenedStampName("") == "")
+    }
+
+    @Test("a long name is trimmed to the limit with an ellipsis")
+    func longNameTruncated() {
+        let result = shortenedStampName("Hornsby North Public School Concert Band", limit: 18)
+        #expect(result.hasSuffix("…"))
+        #expect(result.count <= 18)
+    }
+
+    @Test("no stranded space before the ellipsis")
+    func trimsTrailingSpace() {
+        // The cut lands mid-gap: "Hornsby North Publ" → cut at 17 = "Hornsby North Pub".
+        #expect(shortenedStampName("Hornsby North Pub School", limit: 15) == "Hornsby North…")
+    }
+
+    @Test("a name exactly at the limit isn't touched")
+    func boundaryIsInclusive() {
+        let name = String(repeating: "a", count: 18)
+        #expect(shortenedStampName(name, limit: 18) == name)
+        #expect(shortenedStampName(name + "b", limit: 18).hasSuffix("…"))
+    }
+}
