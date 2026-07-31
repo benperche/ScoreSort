@@ -509,7 +509,7 @@ struct StampRichTextTests {
     func alignmentPreservesRuns() throws {
         let data = try #require(stampRTFData(from: mixedAttributedString()))
         var stamp = Stamp(name: "Mixed", text: "Plain BoldItalic", richTextData: data)
-        stamp.positionX = 1   // right-hand side → right-aligned block
+        stamp.alignment = .right
 
         let drawn = stampAttributedString(stamp)
         #expect(fontRuns(drawn).count == 3)
@@ -552,5 +552,47 @@ struct StampRichTextTests {
         let coded = try JSONDecoder().decode(Stamp.self, from: try JSONEncoder().encode(stamp))
         #expect(coded.richTextData == data)
         #expect(fontRuns(try #require(stampRichText(coded))).count == 3)
+    }
+}
+
+// MARK: - Text alignment
+
+@Suite("Stamp text alignment")
+struct StampAlignmentTests {
+
+    @Test("the stored alignment is what gets drawn, whatever the position")
+    func alignmentIsStoredNotDerived() {
+        for alignment in StampTextAlignment.allCases {
+            var stamp = testStamp()
+            stamp.alignment = alignment
+            // Move the stamp across the page: alignment must not follow it.
+            for x in [0.0, 0.5, 1.0] {
+                stamp.positionX = x
+                let para = stampAttributedString(stamp)
+                    .attribute(.paragraphStyle, at: 0, effectiveRange: nil) as? NSParagraphStyle
+                #expect(para?.alignment == alignment.nsAlignment)
+            }
+        }
+    }
+
+    @Test("a stamp saved before the control existed keeps the look it had")
+    func migratesFromPosition() throws {
+        // Old shape: no `alignment` key. Alignment used to be inferred from positionX.
+        func decode(positionX: Double) throws -> Stamp {
+            let json = #"{"name":"Old","text":"Two\nLines","positionX":\#(positionX),"positionY":0.5}"#
+            return try JSONDecoder().decode(Stamp.self, from: Data(json.utf8))
+        }
+        #expect(try decode(positionX: 0).alignment == .left)
+        #expect(try decode(positionX: 0.5).alignment == .centre)
+        #expect(try decode(positionX: 1).alignment == .right)
+    }
+
+    @Test("an explicit alignment survives coding")
+    func survivesCoding() throws {
+        var stamp = testStamp()
+        stamp.alignment = .left
+        stamp.positionX = 1      // a position that would once have forced .right
+        let coded = try JSONDecoder().decode(Stamp.self, from: try JSONEncoder().encode(stamp))
+        #expect(coded.alignment == .left)
     }
 }

@@ -261,6 +261,23 @@ struct StampView: View {
                     }
                     .toggleStyle(.button)
                     .help("Italic (⌘I) — applies to the selected text")
+
+                    Divider()
+                        .frame(height: 16)
+
+                    // Alignment of the stamp's own lines. Explicit rather than inferred from
+                    // where the stamp sits, so dragging it doesn't re-flow the text.
+                    Picker("", selection: binding.alignment) {
+                        ForEach(StampTextAlignment.allCases) { option in
+                            Image(systemName: option.symbolName)
+                                .help(option.label)
+                                .tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                    .labelsHidden()
+                    .fixedSize()
+                    .help("How the stamp’s lines line up with each other")
                 }
 
                 HStack {

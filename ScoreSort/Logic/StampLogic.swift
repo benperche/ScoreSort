@@ -65,6 +65,47 @@ enum StampAnchor: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+/// How the stamp's lines line up with each other inside its box. Only visible on a
+/// multi-line stamp, and deliberately a stored choice rather than something derived from the
+/// stamp's position — dragging a stamp around shouldn't re-flow its text.
+enum StampTextAlignment: String, Codable, CaseIterable, Identifiable {
+    case left, centre, right
+
+    var id: String { rawValue }
+
+    var nsAlignment: NSTextAlignment {
+        switch self {
+        case .left:   return .left
+        case .centre: return .center
+        case .right:  return .right
+        }
+    }
+
+    var symbolName: String {
+        switch self {
+        case .left:   return "text.alignleft"
+        case .centre: return "text.aligncenter"
+        case .right:  return "text.alignright"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .left:   return "Align left"
+        case .centre: return "Align centre"
+        case .right:  return "Align right"
+        }
+    }
+
+    /// What the alignment used to be inferred from, kept for migrating stamps saved before
+    /// this became an explicit control.
+    static func derived(fromPositionX x: Double) -> StampTextAlignment {
+        if x < 1.0 / 3 { return .left }
+        if x > 2.0 / 3 { return .right }
+        return .centre
+    }
+}
+
 /// Which pages of a document get stamped. Chosen **per job**, not saved on the stamp — the
 /// same design is often wanted on every page of one document and only the first page of
 /// the next.
@@ -117,6 +158,8 @@ struct Stamp: Identifiable, Codable, Equatable {
     var fontSize: Double = 11
     var colourHex: String = "#000000"
     var hasBorder: Bool = true
+    /// How multi-line text lines up inside the stamp's box.
+    var alignment: StampTextAlignment = .centre
 
     /// Nothing to draw for an all-whitespace stamp.
     var isDrawable: Bool {
@@ -167,12 +210,18 @@ struct Stamp: Identifiable, Codable, Equatable {
             positionX = 1
             positionY = 1
         }
+
+        // Stamps saved before alignment was a control inferred it from the position; keep
+        // them looking the way they did.
+        alignment = try c.decodeIfPresent(StampTextAlignment.self, forKey: .alignment)
+            ?? .derived(fromPositionX: positionX)
     }
 
     init(id: UUID = UUID(), name: String, text: String, richTextData: Data? = nil,
          positionX: Double = 1, positionY: Double = 1, margin: Double = 24,
          fontFamily: String = "Helvetica", isBold: Bool = true, isItalic: Bool = false,
-         fontSize: Double = 11, colourHex: String = "#000000", hasBorder: Bool = true) {
+         fontSize: Double = 11, colourHex: String = "#000000", hasBorder: Bool = true,
+         alignment: StampTextAlignment = .centre) {
         self.id = id
         self.name = name
         self.text = text
@@ -186,6 +235,7 @@ struct Stamp: Identifiable, Codable, Equatable {
         self.fontSize = fontSize
         self.colourHex = colourHex
         self.hasBorder = hasBorder
+        self.alignment = alignment
     }
 
     /// Convenience for the presets and for tests.
@@ -262,13 +312,6 @@ func stampFont(_ stamp: Stamp) -> NSFont {
     return NSFont.systemFont(ofSize: size, weight: stamp.isBold ? .bold : .regular)
 }
 
-/// Multi-line stamps align towards the side of the page they sit on, so a right-hand
-/// two-line stamp reads as a right-aligned block rather than a ragged one.
-private func stampAlignment(_ stamp: Stamp) -> NSTextAlignment {
-    if stamp.positionX < 1.0 / 3 { return .left }
-    if stamp.positionX > 2.0 / 3 { return .right }
-    return .center
-}
 
 /// The attributes newly typed (or unformatted) stamp text takes: the stamp's base font,
 /// traits and colour.
@@ -287,15 +330,15 @@ func stampRichText(_ stamp: Stamp) -> NSAttributedString? {
 /// The string that actually gets drawn — the rich text when there is any, otherwise the
 /// plain text in the stamp's base attributes.
 ///
-/// Alignment is applied here rather than stored, because it follows the stamp's position on
-/// the page (a right-hand stamp reads as a right-aligned block). It's added over the whole
-/// range *without* touching the per-run font and colour attributes.
+/// The stamp's alignment is applied over the whole range here — *without* touching the
+/// per-run font and colour attributes — rather than being carried in the RTF, so the control
+/// stays authoritative whatever the editor happens to have stored.
 func stampAttributedString(_ stamp: Stamp) -> NSAttributedString {
     let base = stampRichText(stamp)
         ?? NSAttributedString(string: stamp.text, attributes: stampBaseAttributes(stamp))
 
     let para = NSMutableParagraphStyle()
-    para.alignment = stampAlignment(stamp)
+    para.alignment = stamp.alignment.nsAlignment
     para.lineBreakMode = .byWordWrapping
 
     let result = NSMutableAttributedString(attributedString: base)
