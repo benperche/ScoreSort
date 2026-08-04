@@ -378,30 +378,36 @@ struct SplitView: View {
         VStack(spacing: 0) {
             // Top toolbar
             HStack {
-                Text(pdfManager.pdfDocument != nil ? "Split PDF — Step 1: Set Split Points" : "Split PDF")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                
+                // Title on one line with the step beneath it — as one string it wrapped to
+                // two lines and squeezed the buttons.
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Split PDF")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    if pdfManager.pdfDocument != nil {
+                        Text("Step 1 — set split points")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                }
+                .fixedSize()
+
                 Spacer()
-                
+
                 if pdfManager.pdfDocument != nil {
                     StampMenuButton(isEnabled: $stampEnabled, scope: $stampScope)
 
-                    Button { showingA3Detection = true } label: {
-                        Label("Split as A3…", systemImage: "rectangle.split.2x1")
+                    // Both of these correct how a scan came in, and both are occasional, so
+                    // they share one pull-down instead of two permanent buttons.
+                    Menu {
+                        Button("Split as A3\u{2026}") { showingA3Detection = true }
+                        Button("Fix Booklet Order") { requestBookletFix() }
+                            .disabled(!canFixBookletOrder)
+                    } label: {
+                        Label("Fix Scan", systemImage: "wrench.and.screwdriver")
                     }
-                    .help("Manually trigger A3 splitting — use this if auto-detection didn't fire (e.g. scanner saved landscape pages with a rotation flag)")
-
-                    Button(action: requestBookletFix) {
-                        Label("Fix Booklet Order", systemImage: "rectangle.stack")
-                    }
-                    .disabled(!canFixBookletOrder)
-                    .help("Reorder pages in the current file segment to correct booklet scanning order. Set split markers first to define file boundaries.")
-
-                    Button(action: clearAllMarkers) {
-                        Label("Clear All Splits", systemImage: "trash")
-                    }
-                    .disabled(splitMarkers.isEmpty)
+                    .fixedSize()
+                    .help("Split A3 spreads into pages, or correct booklet scanning order")
 
                     Button(action: { pdfManager.clearPDF() }) {
                         Label("Clear File", systemImage: "xmark.circle.fill")
@@ -555,6 +561,18 @@ struct SplitView: View {
                                     }
                                     .buttonStyle(.bordered)
                                     .help("Re-apply stride from scratch, clearing any manual adjustments")
+
+                                    Spacer()
+
+                                    // Lives here rather than the toolbar: it belongs with
+                                    // Apply, which is the other thing that sets every split
+                                    // marker at once.
+                                    Button(action: clearAllMarkers) {
+                                        Label("Clear All", systemImage: "trash")
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(splitMarkers.isEmpty)
+                                    .help("Remove every split marker and start the pattern again")
                                 }
 
                                 VStack(alignment: .leading, spacing: 4) {
