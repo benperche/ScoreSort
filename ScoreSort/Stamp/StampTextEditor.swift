@@ -208,6 +208,9 @@ struct StampTextEditor: NSViewRepresentable {
         if context.coordinator.loadedStampId != stamp.id {
             context.coordinator.load(stamp, into: textView)
             formatter.refreshStateSoon()
+        } else if context.coordinator.appliedAlignment != stamp.alignment {
+            // Show the alignment here too, so the field looks like the stamp will.
+            context.coordinator.applyAlignment(stamp.alignment, to: textView)
         }
     }
 
@@ -223,6 +226,8 @@ struct StampTextEditor: NSViewRepresentable {
         /// wrote back to the stamp there, it would publish mid-update ("Publishing changes
         /// from within view updates"). Nothing the loader does should count as an edit.
         private var isLoading = false
+        /// The alignment currently shown in the text view, so it's only re-applied on change.
+        private(set) var appliedAlignment: StampTextAlignment?
 
         init(_ parent: StampTextEditor) {
             self.parent = parent
@@ -239,8 +244,35 @@ struct StampTextEditor: NSViewRepresentable {
                 ?? NSAttributedString(string: stamp.text, attributes: stampBaseAttributes(stamp))
             textView.textStorage?.setAttributedString(content)
             textView.typingAttributes = stampBaseAttributes(stamp)
+            setAlignment(stamp.alignment, in: textView)
             // A fresh load isn't an edit, so don't write back — that would stamp RTF onto a
             // stamp the user hasn't touched.
+        }
+
+        /// Re-aligns the text view when the alignment control changes.
+        func applyAlignment(_ alignment: StampTextAlignment, to textView: NSTextView) {
+            isLoading = true
+            defer { isLoading = false }
+            setAlignment(alignment, in: textView)
+        }
+
+        /// Alignment is a *stamp* property applied over the whole string at draw time, so
+        /// what's written here is only for the editor to look right. `didChangeText()` is
+        /// deliberately not called: this isn't the user's edit, and calling it would write
+        /// back to the stamp from inside a SwiftUI view update.
+        private func setAlignment(_ alignment: StampTextAlignment, in textView: NSTextView) {
+            appliedAlignment = alignment
+            let para = NSMutableParagraphStyle()
+            para.alignment = alignment.nsAlignment
+            para.lineBreakMode = .byWordWrapping
+
+            if let storage = textView.textStorage, storage.length > 0 {
+                storage.addAttribute(.paragraphStyle, value: para,
+                                     range: NSRange(location: 0, length: storage.length))
+            }
+            var typing = textView.typingAttributes
+            typing[.paragraphStyle] = para
+            textView.typingAttributes = typing
         }
 
         func textDidChange(_ notification: Notification) {
