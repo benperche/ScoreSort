@@ -16,6 +16,12 @@ _Draft for the next release after 1.8.0. Keep adding to this as more changes lan
 
 ## ✂️ Split PDF
 
-- New **Stamp** button in the Step 1 toolbar, next to "Split as A3": every split file gets stamped as it's written, on every page or just its first page.
+- New **Stamp** button in the Step 1 toolbar: every split file gets stamped as it's written, on every page or just its first page — and Step 1's preview shows the stamp on the pages that will get one.
+- **More instruments in the naming suggestions**: alto and bass flute, oboe d'amore, cor anglais, clarinet in B♭ and A, drum kit, vibraphone, mallet percussion, and a combined "Trombone Baritone Bassoon" part for early-grade band music. Spelling variants (drums / drum set / drum kit, vibes / vibraphone, cor anglais / english horn) now count as the same instrument, so the suggestions move on to the next part instead of cycling through variants — while B♭ vs A clarinet and baritone B.C. vs T.C. stay separately selectable, since those genuinely change which part you print.
+- The Step 1 toolbar is tidier: "Split as A3" and "Fix Booklet Order" share one **Fix Scan** menu, and "Clear All Splits" has moved next to **Apply** in the Split Pattern box, where it belongs. All three are still in the Actions menu too.
+- Steps 1, 2 and 3 now share a consistent heading, so the title doesn't jump around as you move between them.
 
 ## 🐞 Fixed
+
+- **Combine: clicking a file works the way it should.** Clicking anywhere on a file now selects just that file, ⌘-click (or the tick box) adds to the selection, and clicking blank space below the list clears it. Previously every click behaved as though ⌘ was held down.
+- **Combine: ⌫ removes the selected files again.** The menu-bar redesign in 1.8.0 dropped the delete key without replacing it, so it silently stopped working even though the shortcuts panel still listed it.
