@@ -1094,14 +1094,12 @@ struct StampMenuButton: View {
 
     var body: some View {
         Menu {
-            Toggle("Stamp this output", isOn: $isEnabled)
-
-            Divider()
-
-            Picker("Stamp", selection: Binding(
-                get: { stampStore.selectedStampId ?? stampStore.stamps.first?.id },
-                set: { stampStore.selectedStampId = $0 }
-            )) {
+            // On/off is the first entry in the stamp list rather than a separate toggle.
+            // A checkmark on a Toggle and a checkmark on a Picker row look identical in a
+            // macOS menu, so the old layout showed three checkmarks meaning two different
+            // things; "Don't stamp" makes every checkmark here mean "this is the one in use".
+            Picker("Stamp", selection: stampSelection) {
+                Text("Don't stamp").tag(UUID?.none)
                 ForEach(stampStore.stamps) { stamp in
                     Text(stamp.name.isEmpty ? "Untitled" : stamp.name).tag(Optional(stamp.id))
                 }
@@ -1116,6 +1114,7 @@ struct StampMenuButton: View {
                 }
             }
             .pickerStyle(.inline)
+            .disabled(!isEnabled)   // nothing to place when nothing is being stamped
 
             Divider()
 
@@ -1128,6 +1127,23 @@ struct StampMenuButton: View {
         // the title wrapping to make room.
         .fixedSize()
         .help(helpText)
+    }
+
+    /// Which stamp this tool will use, with `nil` meaning "don't stamp". Picking a stamp
+    /// switches stamping on in one step; picking "Don't stamp" leaves the chosen stamp alone
+    /// (it's shared with the other tabs) and just turns this tool's stamping off.
+    private var stampSelection: Binding<UUID?> {
+        Binding(
+            get: { isEnabled ? (stampStore.selectedStampId ?? stampStore.stamps.first?.id) : nil },
+            set: { newValue in
+                if let newValue {
+                    stampStore.selectedStampId = newValue
+                    isEnabled = true
+                } else {
+                    isEnabled = false
+                }
+            }
+        )
     }
 
     private var label: String {
