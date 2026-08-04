@@ -38,7 +38,7 @@ enum StampOutputMode: String, CaseIterable, Identifiable {
 
     var label: String {
         switch self {
-        case .replaceOriginal: return "Replace the original files"
+        case .replaceOriginal: return "Replace original files"
         case .saveAsNew:       return "Save as new files\u{2026}"
         }
     }
@@ -240,27 +240,10 @@ struct StampView: View {
                 }
                 .equatable()
 
-                // Toggle buttons rather than checkboxes — this is text formatting, and it
-                // acts on the selection (or the whole stamp when nothing is selected).
                 HStack(spacing: 8) {
                     Text("Style")
-                    Toggle(isOn: Binding(
-                        get: { appState.stampFormatter.isBold },
-                        set: { _ in appState.stampFormatter.toggleBold() }
-                    )) {
-                        Image(systemName: "bold")
-                    }
-                    .toggleStyle(.button)
-                    .help("Bold (⌘B) — applies to the selected text")
 
-                    Toggle(isOn: Binding(
-                        get: { appState.stampFormatter.isItalic },
-                        set: { _ in appState.stampFormatter.toggleItalic() }
-                    )) {
-                        Image(systemName: "italic")
-                    }
-                    .toggleStyle(.button)
-                    .help("Italic (⌘I) — applies to the selected text")
+                    StampStyleButtons(formatter: appState.stampFormatter)
 
                     Divider()
                         .frame(height: 16)
@@ -526,25 +509,17 @@ struct StampView: View {
                 fileList
             }
 
-            // Side by side when there's room, stacked when there isn't — the window can be
-            // narrower than the two radio groups plus the button.
-            ViewThatFits(in: .horizontal) {
-                HStack(alignment: .top, spacing: 16) {
-                    scopePicker
-                    Spacer(minLength: 12)
-                    outputPicker
-                    Spacer(minLength: 12)
-                    stampButton
-                }
-
-                HStack(alignment: .bottom, spacing: 16) {
-                    VStack(alignment: .leading, spacing: 6) {
-                        scopePicker
-                        outputPicker
-                    }
-                    Spacer(minLength: 8)
-                    stampButton
-                }
+            // Always one row: "Stamp on" and "Output" side by side with the action trailing.
+            // No ViewThatFits — its fallback layout moved the groups onto separate lines, and
+            // at this width the smallest change (even one character in the button's label)
+            // could tip it over. The labels are short enough to fit at the minimum window
+            // width; if they ever don't, the row compresses rather than re-flowing.
+            HStack(alignment: .top, spacing: 12) {
+                scopePicker
+                Spacer(minLength: 8)
+                outputPicker
+                Spacer(minLength: 8)
+                stampButton
             }
 
             if let problem = nameProblem {
@@ -912,6 +887,37 @@ struct StampView: View {
             showNSAlert(title: written.isEmpty ? "Error" : "Partial Success",
                         message: "Stamped \(written.count) file(s); \(failed.count) failed:\n\(failed.joined(separator: ", "))",
                         isError: true)
+        }
+    }
+}
+
+// MARK: - Style buttons
+
+/// Bold and italic, as toggle buttons that follow the cursor.
+///
+/// Extracted for one specific reason: they read their state from `AppState.stampFormatter`,
+/// and a nested `ObservableObject` does **not** notify views observing its owner. Read
+/// through `appState` from the tab's body, the buttons only refreshed when something *else*
+/// happened to redraw the tab — so they sat on a stale value instead of tracking the
+/// selection. Observing the formatter directly here is what makes them live.
+private struct StampStyleButtons: View {
+    @ObservedObject var formatter: StampTextFormatter
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Toggle(isOn: Binding(get: { formatter.isBold },
+                                 set: { _ in formatter.toggleBold() })) {
+                Image(systemName: "bold")
+            }
+            .toggleStyle(.button)
+            .help("Bold (⌘B) — the selected text, or all of it when nothing is selected")
+
+            Toggle(isOn: Binding(get: { formatter.isItalic },
+                                 set: { _ in formatter.toggleItalic() })) {
+                Image(systemName: "italic")
+            }
+            .toggleStyle(.button)
+            .help("Italic (⌘I) — the selected text, or all of it when nothing is selected")
         }
     }
 }
