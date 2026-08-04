@@ -752,3 +752,89 @@ struct ImageWithStampTests {
         #expect(imageWithStamp(image, stamp: stamp) === image)
     }
 }
+
+// MARK: - Images as pages
+
+@Suite("Image paging")
+struct ImagePagesTests {
+
+    /// Writes a solid-colour PNG (optionally landscape) to a temp file.
+    private func writePNG(width: Int, height: Int) throws -> URL {
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.lockFocus()
+        NSColor.systemBlue.setFill()
+        NSRect(x: 0, y: 0, width: width, height: height).fill()
+        image.unlockFocus()
+
+        // Kept as separate statements: #require can't be nested inside another #require.
+        let tiff = try #require(image.tiffRepresentation)
+        let rep = try #require(NSBitmapImageRep(data: tiff))
+        let data = try #require(rep.representation(using: .png, properties: [:]))
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("stamp-image-\(UUID().uuidString).png")
+        try data.write(to: url)
+        return url
+    }
+
+    @Test("an image becomes a single A4 page")
+    func imageBecomesA4Page() throws {
+        let url = try writePNG(width: 800, height: 600)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let doc = try #require(pdfDocument(forFileAt: url))
+        #expect(doc.pageCount == 1)
+        let bounds = try #require(doc.page(at: 0)?.bounds(for: .mediaBox))
+        #expect(abs(bounds.width - 595) < 1)
+        #expect(abs(bounds.height - 842) < 1)
+    }
+
+    @Test("image pages carry a pageRef, so previews and the flattener can draw them")
+    func imagePagesHaveAPageRef() throws {
+        let url = try writePNG(width: 400, height: 400)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        // Worth pinning down: the preview renderer and the flattener both go through Core
+        // Graphics and draw a blank sheet for a page without one.
+        #expect(pdfPages(fromImageAt: url).first?.pageRef != nil)
+        let doc = try #require(pdfDocument(forFileAt: url))
+        #expect(doc.page(at: 0)?.pageRef != nil)
+    }
+
+    @Test("an image document stamps like any other")
+    func imageDocumentCanBeStamped() throws {
+        let url = try writePNG(width: 600, height: 800)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        let doc = try #require(pdfDocument(forFileAt: url))
+        let stamped = try #require(stampedDocument(doc, stamp: testStamp(), pageIndices: [0]))
+        #expect(stamped.pageCount == 1)
+    }
+
+    @Test("a PDF still loads as itself")
+    func pdfLoadsDirectly() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("stamp-pdf-\(UUID().uuidString).pdf")
+        writePDF(pages: 3, to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        #expect(pdfDocument(forFileAt: url)?.pageCount == 3)
+    }
+
+    @Test("unsupported files load as nothing")
+    func unsupportedFileIsNil() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("stamp-junk-\(UUID().uuidString).txt")
+        try Data("not an image".utf8).write(to: url)
+        defer { try? FileManager.default.removeItem(at: url) }
+
+        #expect(pdfDocument(forFileAt: url) == nil)
+    }
+
+    @Test("the pageable set is the PDF plus every supported image")
+    func extensionSets() {
+        #expect(pageableFileExtensions.contains("pdf"))
+        #expect(supportedImageExtensions.isSubset(of: pageableFileExtensions))
+        #expect(supportedImageExtensions.contains("heic"))
+        #expect(pageableFileExtensions.count == supportedImageExtensions.count + 1)
+    }
+}

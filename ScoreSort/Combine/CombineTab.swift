@@ -592,7 +592,8 @@ struct CombineView: View {
         }
     }
 
-    static let supportedExtensions: Set<String> = ["pdf", "jpg", "jpeg", "png", "tif", "tiff", "heic", "bmp", "gif"]
+    /// PDFs plus every image ScoreSort can page — shared with the Stamp tab.
+    static let supportedExtensions: Set<String> = pageableFileExtensions
 
     /// Expands a mixed list of file and folder URLs into a flat, sorted list of supported file
     /// URLs. Folders are enumerated recursively; unsupported files are ignored.
@@ -2151,44 +2152,4 @@ class CombineManager: ObservableObject {
         return blankPage
     }
 
-    /// Renders one frame of an image file as an A4 PDF page, scaled to fit with white background.
-    private func makeA4Page(from cgImage: CGImage) -> PDFPage? {
-        let a4 = CGSize(width: 595, height: 842)
-        let imgW = CGFloat(cgImage.width)
-        let imgH = CGFloat(cgImage.height)
-        let scale = min(a4.width / imgW, a4.height / imgH)
-        let drawW = imgW * scale
-        let drawH = imgH * scale
-        let drawRect = CGRect(x: (a4.width - drawW) / 2,
-                              y: (a4.height - drawH) / 2,
-                              width: drawW, height: drawH)
-
-        let colorSpace = CGColorSpaceCreateDeviceRGB()
-        guard let ctx = CGContext(data: nil,
-                                  width: Int(a4.width), height: Int(a4.height),
-                                  bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: colorSpace,
-                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
-        ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-        ctx.fill(CGRect(origin: .zero, size: a4))
-        ctx.draw(cgImage, in: drawRect)
-
-        guard let rendered = ctx.makeImage() else { return nil }
-        let nsImage = NSImage(cgImage: rendered, size: a4)
-        guard let page = PDFPage(image: nsImage) else { return nil }
-        page.setBounds(CGRect(origin: .zero, size: a4), for: .mediaBox)
-        return page
-    }
-
-    /// Returns all frames of an image file as A4 PDF pages.
-    private func pdfPages(fromImageAt url: URL) -> [PDFPage] {
-        guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { return [] }
-        var pages: [PDFPage] = []
-        for i in 0..<CGImageSourceGetCount(src) {
-            guard let cgImage = CGImageSourceCreateImageAtIndex(src, i, nil),
-                  let page = makeA4Page(from: cgImage) else { continue }
-            pages.append(page)
-        }
-        return pages
-    }
 }

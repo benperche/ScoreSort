@@ -57,6 +57,8 @@ struct StampView: View {
     /// The page being previewed, held so the preview doesn't reload it per redraw.
     @State private var previewPage: PDFPage?
     @State private var previewDocument: PDFDocument?
+    /// Tracked separately because an image-derived document has no `documentURL`.
+    @State private var loadedPreviewURL: URL?
     /// Which queued file, and which of its pages, the preview is showing.
     @State private var fileIndex = 0
     @State private var pageIndex = 0
@@ -503,7 +505,7 @@ struct StampView: View {
                     .strokeBorder(isTargeted ? Color.accentColor : Color.gray.opacity(0.35),
                                   style: StrokeStyle(lineWidth: 2, dash: [6]))
                     .frame(height: 44)
-                    .overlay(Text("Drop PDFs or a folder here")
+                    .overlay(Text("Drop PDFs, images or a folder here")
                         .font(.callout).foregroundColor(.secondary))
             } else {
                 fileList
@@ -522,7 +524,7 @@ struct StampView: View {
                 stampButton
             }
 
-            if let problem = nameProblem {
+            if let problem = outputProblem {
                 Label(problem, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundColor(.orange)
@@ -619,7 +621,21 @@ struct StampView: View {
     // MARK: - Bindings & helpers
 
     private var canStamp: Bool {
-        !items.isEmpty && (draft?.isDrawable ?? false) && nameProblem == nil
+        !items.isEmpty && (draft?.isDrawable ?? false) && outputProblem == nil
+    }
+
+    /// True when anything queued isn't already a PDF. Images are *converted* to PDF pages,
+    /// so the output can't take the original's place on disk.
+    private var hasImageInput: Bool {
+        items.contains { $0.url.pathExtension.lowercased() != "pdf" }
+    }
+
+    /// Whatever currently stops the batch from running, or nil when it's good to go.
+    private var outputProblem: String? {
+        if outputMode == .replaceOriginal, hasImageInput {
+            return "Images are converted to PDFs, so they can’t replace the original file — choose “Save as new files”."
+        }
+        return nameProblem
     }
 
     /// The first thing wrong with the output names, or nil when they're all usable.
@@ -665,8 +681,9 @@ struct StampView: View {
             return
         }
         let url = items[fileIndex].url
-        guard url != previewDocument?.documentURL else { return }
-        previewDocument = PDFDocument(url: url)
+        guard url != loadedPreviewURL else { return }
+        loadedPreviewURL = url
+        previewDocument = pdfDocument(forFileAt: url)
     }
 
     /// Points `previewPage` at the current file/page. Cached rather than computed per redraw —
@@ -766,16 +783,16 @@ struct StampView: View {
     /// way the Combine tab and the Renamer do. Duplicates are ignored, so re-dropping a
     /// folder doesn't double the queue.
     private func addInput(_ urls: [URL]) {
-        let pdfs = expandToFiles(urls, extensions: ["pdf"])
-        guard !pdfs.isEmpty else {
-            showNSAlert(title: "No PDFs Found",
+        let found = expandToFiles(urls, extensions: pageableFileExtensions)
+        guard !found.isEmpty else {
+            showNSAlert(title: "Nothing to Stamp",
                         message: urls.contains(where: urlIsDirectory)
-                            ? "That folder doesn’t contain any PDFs."
-                            : "The Stamp tab works on PDFs. The dropped item(s) weren’t PDFs.",
+                            ? "That folder doesn’t contain any PDFs or images."
+                            : "The Stamp tab works on PDFs and images (JPEG, PNG, TIFF, HEIC, BMP, GIF). The dropped item(s) weren’t either.",
                         isError: true)
             return
         }
-        for url in pdfs where !items.contains(where: { $0.url == url }) {
+        for url in found where !items.contains(where: { $0.url == url }) {
             items.append(StampFileItem(url: url))
         }
         // Take focus so the arrow keys page through straight away — unless the user is
@@ -796,11 +813,11 @@ struct StampView: View {
 
     private func chooseFiles() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.pdf]
+        panel.allowedContentTypes = [.pdf, .image]
         panel.allowsMultipleSelection = true
         // Folders are allowed here too, matching the drop behaviour.
         panel.canChooseDirectories = true
-        panel.title = "Select PDFs or a Folder to Stamp"
+        panel.title = "Select PDFs, Images or a Folder to Stamp"
         panel.begin { response in
             guard response == .OK else { return }
             let urls = panel.urls
@@ -809,7 +826,7 @@ struct StampView: View {
     }
 
     private func stampFiles() {
-        guard let stamp = draft, stamp.isDrawable, !items.isEmpty, nameProblem == nil else { return }
+        guard let stamp = draft, stamp.isDrawable, !items.isEmpty, outputProblem == nil else { return }
         let job = StampJob(stamp: stamp, scope: scope)
 
         switch outputMode {
@@ -864,7 +881,7 @@ struct StampView: View {
         var failed: [String] = []
 
         for (item, destination) in destinations {
-            guard let doc = PDFDocument(url: item.url) else {
+            guard let doc = pdfDocument(forFileAt: item.url) else {
                 failed.append(item.url.lastPathComponent); continue
             }
             // A standalone file is one "part", so first-page scope means page 1 only.
