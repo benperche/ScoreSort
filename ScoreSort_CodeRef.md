@@ -672,6 +672,7 @@ A reusable **text stamp** ("Example School Band", "Property of XYZ") burned onto
 | `stampedDocument(_:stamp:pageIndices:)` | The flattener (below). Returns nil for an empty doc or a blank stamp. |
 | `applyingStamp(_:to:partFirstPages:)` | The call-site helper: applies a `StampJob?` inline, returning the document **unchanged** when there's nothing to stamp or the flatten fails. This is what every export path calls. |
 | `stampPagePreviewImage(page:maxDimension:)` | Bitmap of page 1 (or a blank A4 sheet) **without** any stamp — the preview's cached background layer. |
+| `imageWithStamp(_:stamp:)` | Composites the stamp into an already-rendered page image, for **static** previews. `PDFPageView` uses it so the Split tab can show its stamp; compositing rather than overlaying a view means it lines up however `PDFView` scales and centres the page. A focused `NSImage` context is y-up, so no flip is needed. |
 | `visualPageBox(for page: PDFPage?)` | The origin-normalised, rotation-swapped crop box (A4 when nil) — shared by the preview and the drag maths so both agree with the flattener. |
 | `nsColor(fromHex:)` / `hexString(from:)` | `#RRGGBB` round trip for storage and the `ColorPicker` binding. |
 
@@ -691,6 +692,10 @@ A reusable **text stamp** ("Example School Band", "Property of XYZ") burned onto
 - **Input** — a drop anywhere in the tab is accepted (`.onDrop` on the tab's outer container, not on the drop zone), routed through the shared `collectDroppedFileURLs` and `expandToFiles(_:extensions:)`, so **folders expand recursively** to their PDFs, name-sorted, exactly as the Combine tab and Renamer behave. The first file becomes the preview page. "Add Files…" allows folders too.
 - **Batch output** — `items: [StampFileItem]` (url + editable `outputName`) and `StampOutputMode`: **`replaceOriginal` is the default** (writes over the file in place, behind one `confirmNSAlert`, names not editable — the file keeps its own), or `saveAsNew` (folder picker, per-file names validated by `pdfFilenameError` plus empty/duplicate checks via `nameProblem`, and a single confirm listing any destinations that already exist). One `write(_:job:)` does both. A standalone file is one "part", so first-page scope means its page 1.
 - **`StampMenuButton`** — the pull-down in Combine's and Split Step 1's top toolbars: which stamp (with **"Don't stamp"** as the first row — on/off is folded into the list rather than being a separate `Toggle`, because a toggle's checkmark and a picker row's checkmark are indistinguishable in a macOS menu and the old layout showed three checkmarks meaning two different things), which pages (disabled while off), and "Edit Stamps…" (switches to tab 4 — tabs stay mounted, so no work is lost). Picking "Don't stamp" leaves `StampStore.selectedStampId` alone, since that selection is shared with the other tabs. Label reads "Stamp" or "Stamp: ⟨name⟩"; icon is `seal`/`seal.fill`.
+
+### Preview in the Split tab
+
+`PDFPageView` takes an optional `stamp`; when set it composites it into the page image it already renders. `SplitView.previewStamp` supplies it **only for pages that will really be stamped** — every page in `.everyPage` scope, otherwise just page 0 and the pages at `splitMarkers` (each starts an output file) — and never for a skipped page, which isn't written at all. Cheap by construction: the stamp is static there, so there's no live `Canvas` layer as in the Stamp tab, and the page image was being rendered anyway.
 
 ### Where it applies
 

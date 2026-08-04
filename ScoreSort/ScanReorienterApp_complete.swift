@@ -1567,7 +1567,11 @@ struct DropZoneView: View {
 struct PDFPageView: NSViewRepresentable {
     let page: PDFPage?
     let rotation: Int
-    
+    /// Drawn into the preview image when set, so the Split tab can show what its output will
+    /// look like. Nil elsewhere. It's composited into the page image rather than overlaid as
+    /// a view because PDFView scales and centres its page itself.
+    var stamp: Stamp? = nil
+
     func makeNSView(context: Context) -> PDFView {
         let pdfView = PDFView()
         pdfView.autoScales = true
@@ -1584,7 +1588,13 @@ struct PDFPageView: NSViewRepresentable {
         }
         
         let document = PDFDocument()
-        if let image = renderFullImage(from: page), let clonedPage = PDFPage(image: image) {
+        if var image = renderFullImage(from: page) {
+            if let stamp { image = imageWithStamp(image, stamp: stamp) }
+            guard let clonedPage = PDFPage(image: image) else {
+                document.insert(page, at: 0)
+                pdfView.document = document
+                return
+            }
             clonedPage.rotation = rotation
             document.insert(clonedPage, at: 0)
         } else {

@@ -511,6 +511,27 @@ func visualPageBox(for page: PDFPage?) -> CGRect {
     return CGRect(x: 0, y: 0, width: w, height: h)
 }
 
+/// Returns a copy of `image` with the stamp drawn on top, treating the image as a page whose
+/// size in points equals the image's size.
+///
+/// For **static** previews — the Split tab, where the stamp isn't being dragged and so needs
+/// no live layer. Compositing it into the page image (rather than overlaying a view) means it
+/// lines up exactly however the preview is scaled or centred afterwards.
+func imageWithStamp(_ image: NSImage, stamp: Stamp) -> NSImage {
+    guard stamp.isDrawable, image.size.width > 0, image.size.height > 0 else { return image }
+
+    let result = NSImage(size: image.size)
+    result.lockFocus()
+    defer { result.unlockFocus() }
+
+    image.draw(in: CGRect(origin: .zero, size: image.size))
+    if let ctx = NSGraphicsContext.current?.cgContext {
+        // A focused NSImage context is y-up, the same as PDF user space, so no flip needed.
+        drawStamp(stamp, in: ctx, pageBox: CGRect(origin: .zero, size: image.size))
+    }
+    return result
+}
+
 /// Renders `page` (or a blank A4 sheet when nil) as a bitmap, **without** any stamp.
 ///
 /// The designer draws the stamp as a separate live layer on top of this (see

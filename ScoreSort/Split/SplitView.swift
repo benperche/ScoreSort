@@ -520,7 +520,8 @@ struct SplitView: View {
                             // Preview
                             PDFPageView(
                                 page: document.page(at: currentPage),
-                                rotation: 0
+                                rotation: 0,
+                                stamp: previewStamp
                             )
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .padding(.horizontal)
@@ -1006,6 +1007,21 @@ struct SplitView: View {
     private var activeStampJob: StampJob? {
         guard stampEnabled, let stamp = stampStore.selectedStamp else { return nil }
         return StampJob(stamp: stamp, scope: stampScope)
+    }
+
+    /// The stamp to show on the Step 1 preview — only when the page on screen is one that
+    /// will actually be stamped, so the preview doesn't promise a stamp that never arrives.
+    /// A page that's being skipped isn't written at all, so it gets nothing either.
+    private var previewStamp: Stamp? {
+        guard let job = activeStampJob, !skippedPages.contains(currentPage) else { return nil }
+        switch job.scope {
+        case .everyPage:
+            return job.stamp
+        case .firstPageOfEachPart:
+            // Page 0 starts the first file; every split marker starts another.
+            let startsAPart = currentPage == 0 || splitMarkers.contains(currentPage)
+            return startsAPart ? job.stamp : nil
+        }
     }
 
     func saveSplitPDF() {

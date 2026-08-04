@@ -685,3 +685,70 @@ struct StampFormatterStateTests {
         #expect(formatter.isBold == false)
     }
 }
+
+// MARK: - Static preview compositing (Split tab)
+
+@Suite("Stamp image compositing")
+struct ImageWithStampTests {
+
+    private func whiteImage(width: Int = 200, height: Int = 300) -> NSImage {
+        let image = NSImage(size: NSSize(width: width, height: height))
+        image.lockFocus()
+        NSColor.white.setFill()
+        NSRect(x: 0, y: 0, width: width, height: height).fill()
+        image.unlockFocus()
+        return image
+    }
+
+    /// Samples a pixel at a *point* coordinate. Two things to know: `NSBitmapImageRep` is
+    /// top-left origin (y grows downwards), and a `lockFocus`-backed image is 2× on a Retina
+    /// display — so points have to be scaled to pixels or you sample the wrong quarter.
+    private func pixel(_ image: NSImage, x: Int, y: Int) -> NSColor? {
+        guard let tiff = image.tiffRepresentation,
+              let rep = NSBitmapImageRep(data: tiff),
+              image.size.width > 0, image.size.height > 0 else { return nil }
+        let scaleX = Double(rep.pixelsWide) / Double(image.size.width)
+        let scaleY = Double(rep.pixelsHigh) / Double(image.size.height)
+        return rep.colorAt(x: Int(Double(x) * scaleX), y: Int(Double(y) * scaleY))?
+            .usingColorSpace(.deviceRGB)
+    }
+
+    @Test("the stamped copy keeps the original's size")
+    func preservesSize() {
+        let image = whiteImage()
+        let stamped = imageWithStamp(image, stamp: testStamp())
+        #expect(stamped.size == image.size)
+    }
+
+    @Test("the stamp is drawn in the corner it was placed in, and nowhere else")
+    func drawsInTheRightCorner() throws {
+        var stamp = testStamp(margin: 10)
+        stamp.text = "Test"
+        stamp.move(to: .topRight)
+
+        let stamped = imageWithStamp(whiteImage(), stamp: stamp)
+        // Top-right region: something was drawn (the border box at least).
+        var foundInk = false
+        for x in 120..<195 where !foundInk {
+            for y in 5..<45 {
+                if let colour = pixel(stamped, x: x, y: y), colour.brightnessComponent < 0.5 {
+                    foundInk = true
+                    break
+                }
+            }
+        }
+        #expect(foundInk, "nothing was drawn in the top-right corner")
+
+        // Bottom-left stays untouched.
+        let bottomLeft = try #require(pixel(stamped, x: 20, y: 280))
+        #expect(bottomLeft.brightnessComponent > 0.9)
+    }
+
+    @Test("a blank stamp leaves the image alone")
+    func blankStampIsAPassThrough() {
+        var stamp = testStamp()
+        stamp.text = "  "
+        let image = whiteImage()
+        #expect(imageWithStamp(image, stamp: stamp) === image)
+    }
+}
