@@ -36,10 +36,10 @@ final class StampTextFormatter: ObservableObject {
     func toggleBold()   { toggleTrait(.boldFontMask) }
     func toggleItalic() { toggleTrait(.italicFontMask) }
 
-    /// Adds the trait if the selection doesn't already have it throughout, removes it if it
-    /// does — the standard "toggle" behaviour of a formatting button.
+    /// Adds the trait if the current state says it's off, removes it if on — so the lit
+    /// button always predicts what clicking it will do.
     private func toggleTrait(_ trait: NSFontTraitMask) {
-        let turnOn = !selectionHasTrait(trait)
+        let turnOn = !hasTrait(trait)
         transformFonts { font in
             let manager = NSFontManager.shared
             return turnOn ? manager.convert(font, toHaveTrait: trait)
@@ -47,17 +47,27 @@ final class StampTextFormatter: ObservableObject {
         }
     }
 
-    /// True only when *every* font in the selection carries the trait, so a mixed selection
-    /// turns the trait on rather than off.
-    private func selectionHasTrait(_ trait: NSFontTraitMask) -> Bool {
+    /// The state the buttons show, and what a toggle acts on.
+    ///
+    /// With text selected: true only when *every* font in it carries the trait, so a mixed
+    /// selection goes bold rather than clearing. With just a caret: the trait of the text
+    /// about to be typed there — which is how every Mac text editor behaves, and what makes
+    /// the buttons track the cursor as it moves between a bold run and a plain one.
+    ///
+    /// Note this is deliberately *not* `effectiveRange`: that widens an empty selection to
+    /// the whole string (right for applying a change, wrong for reporting state — it made
+    /// the buttons describe the document rather than the cursor).
+    private func hasTrait(_ trait: NSFontTraitMask) -> Bool {
         guard let textView, let storage = textView.textStorage else { return false }
-        let range = effectiveRange(in: textView)
-        if range.length == 0 {
+        let selection = textView.selectedRange()
+
+        guard selection.length > 0 else {
             let font = (textView.typingAttributes[.font] as? NSFont) ?? NSFont.systemFont(ofSize: 11)
             return NSFontManager.shared.traits(of: font).contains(trait)
         }
+
         var allHave = true
-        storage.enumerateAttribute(.font, in: range) { value, _, stop in
+        storage.enumerateAttribute(.font, in: selection) { value, _, stop in
             let font = (value as? NSFont) ?? NSFont.systemFont(ofSize: 11)
             if !NSFontManager.shared.traits(of: font).contains(trait) {
                 allHave = false
@@ -142,8 +152,8 @@ final class StampTextFormatter: ObservableObject {
         let available = textView != nil
         if isAvailable != available { isAvailable = available }
 
-        let bold = available && selectionHasTrait(.boldFontMask)
-        let italic = available && selectionHasTrait(.italicFontMask)
+        let bold = available && hasTrait(.boldFontMask)
+        let italic = available && hasTrait(.italicFontMask)
         if isBold != bold { isBold = bold }
         if isItalic != italic { isItalic = italic }
     }

@@ -577,7 +577,11 @@ struct StampView: View {
     }
 
     private var stampButton: some View {
-        Button(outputMode == .replaceOriginal ? "Stamp Files" : "Stamp Files\u{2026}") {
+        // One fixed label for both modes. It used to lose the ellipsis when replacing, and
+        // those few points were enough to tip ViewThatFits over to its stacked layout — so
+        // changing the Output radio moved the radios themselves. Both modes do open a dialog
+        // (a confirmation or the folder picker), so the ellipsis is right either way.
+        Button("Stamp Files\u{2026}") {
             stampFiles()
         }
         .buttonStyle(.borderedProminent)

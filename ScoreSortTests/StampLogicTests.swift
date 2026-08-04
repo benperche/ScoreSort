@@ -628,3 +628,60 @@ struct ShortenedStampNameTests {
         #expect(shortenedStampName(name + "b", limit: 18).hasSuffix("…"))
     }
 }
+
+// MARK: - Formatter button state
+
+@MainActor
+@Suite("Stamp formatter state")
+struct StampFormatterStateTests {
+
+    /// "Plain " + bold "Bold" in a live rich text view, wired to a formatter.
+    private func makeEditor() -> (NSTextView, StampTextFormatter) {
+        let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: 300, height: 60))
+        textView.isRichText = true
+        let content = NSMutableAttributedString(string: "Plain ", attributes: [
+            .font: NSFont(name: "Helvetica", size: 12)!])
+        content.append(NSAttributedString(string: "Bold", attributes: [
+            .font: NSFont(name: "Helvetica-Bold", size: 12)!]))
+        textView.textStorage?.setAttributedString(content)
+
+        let formatter = StampTextFormatter()
+        formatter.textView = textView
+        return (textView, formatter)
+    }
+
+    @Test("a selection of only bold text lights the button")
+    func boldSelectionIsLit() {
+        let (textView, formatter) = makeEditor()
+        textView.setSelectedRange(NSRange(location: 6, length: 4))   // "Bold"
+        formatter.refreshState()
+        #expect(formatter.isBold)
+    }
+
+    @Test("a selection of only plain text doesn't")
+    func plainSelectionIsUnlit() {
+        let (textView, formatter) = makeEditor()
+        textView.setSelectedRange(NSRange(location: 0, length: 5))   // "Plain"
+        formatter.refreshState()
+        #expect(formatter.isBold == false)
+    }
+
+    @Test("a mixed selection reads as off, so clicking bolds all of it")
+    func mixedSelectionIsUnlit() {
+        let (textView, formatter) = makeEditor()
+        textView.setSelectedRange(NSRange(location: 0, length: 10))  // the lot
+        formatter.refreshState()
+        #expect(formatter.isBold == false)
+
+        formatter.toggleBold()
+        #expect(formatter.isBold)
+    }
+
+    @Test("no editor means no state, so the Format menu disables itself")
+    func unavailableWithoutEditor() {
+        let formatter = StampTextFormatter()
+        formatter.refreshState()
+        #expect(formatter.isAvailable == false)
+        #expect(formatter.isBold == false)
+    }
+}
