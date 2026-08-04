@@ -1101,6 +1101,7 @@ struct BulkRenameView: View {
             .onDrop(of: [.fileURL], isTargeted: nil) { providers in handleRestartDrop(providers) }
         case .prefix:
             PrefixOrderStepView(
+                toolTitle: "Bulk Part Rename",
                 stepLabel: "Step 2",
                 initialItems: prefixItems,
                 ensembleType: $prefixEnsembleType,

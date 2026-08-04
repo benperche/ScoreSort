@@ -192,6 +192,7 @@ struct SplitView: View {
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in handleSummaryPDFDrop(providers) }
             case .prefix:
                 PrefixOrderStepView(
+                    toolTitle: "Split PDF",
                     stepLabel: "Step 3",
                     initialItems: prefixItems,
                     ensembleType: $prefixEnsembleType,

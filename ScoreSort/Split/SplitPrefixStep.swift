@@ -126,6 +126,8 @@ private struct PrefixOrderRow: View {
 /// Full-screen step that lets the user set and reorder prefix numbering.
 /// Used as Step 3 (Splitter) or Step 2 (Bulk Rename).
 struct PrefixOrderStepView: View {
+    /// The tool this step belongs to — shown as the header, with `stepLabel` beneath it.
+    let toolTitle: String           // "Split PDF" or "Bulk Part Rename"
     let stepLabel: String           // "Step 3" or "Step 2"
     let initialItems: [PrefixItem]
     @Binding var ensembleType: EnsembleType
@@ -141,11 +143,13 @@ struct PrefixOrderStepView: View {
     @State private var prefixEditDraft: String = ""
     @AppStorage("prefixSeparator") private var prefixSeparator: String = " - "
 
-    init(stepLabel: String,
+    init(toolTitle: String,
+         stepLabel: String,
          initialItems: [PrefixItem],
          ensembleType: Binding<EnsembleType>,
          onBack: @escaping () -> Void,
          onApply: @escaping ([PrefixItem]) -> Void) {
+        self.toolTitle = toolTitle
         self.stepLabel = stepLabel
         self.initialItems = initialItems
         self._ensembleType = ensembleType
@@ -222,9 +226,17 @@ struct PrefixOrderStepView: View {
         VStack(spacing: 0) {
             // ── Top bar ──────────────────────────────────────────────────
             HStack {
-                Spacer()
-                Text("\(stepLabel): Prefix Files")
-                    .font(.title2).fontWeight(.semibold)
+                // Same header shape as the other steps: the tool, with the step beneath it.
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(toolTitle)
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Text("\(stepLabel) — prefix files")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .fixedSize()
+
                 Spacer()
             }
             .padding()

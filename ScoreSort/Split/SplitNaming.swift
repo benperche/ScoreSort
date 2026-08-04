@@ -273,11 +273,19 @@ struct SplitNamingStageView: View {
         VStack(spacing: 0) {
             // ── Top bar ──────────────────────────────────────────────────
             HStack {
+                // Same header shape as Step 1: the tool, with the step beneath it.
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Split PDF")
+                        .font(.title2)
+                        .fontWeight(.semibold)
+                    Text("Step 2 — name files")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+                .fixedSize()
+
                 Spacer()
-                Text("Step 2: Name Files")
-                    .font(.title2)
-                    .fontWeight(.semibold)
-                Spacer()
+
                 Button(action: onClear) {
                     Label("Clear File", systemImage: "xmark.circle.fill")
                 }
