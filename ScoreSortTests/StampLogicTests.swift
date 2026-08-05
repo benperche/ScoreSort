@@ -838,3 +838,42 @@ struct ImagePagesTests {
         #expect(pageableFileExtensions.count == supportedImageExtensions.count + 1)
     }
 }
+
+// MARK: - Preset ↔ stamp association
+
+@Suite("Preset stamp link")
+struct PresetStampLinkTests {
+
+    @Test("a preset with no stamp round-trips as nil")
+    func noStampRoundTrips() throws {
+        let preset = EnsemblePreset(name: "Concert Band", parts: [PresetPart(name: "Flute", copies: 4)])
+        #expect(preset.stampId == nil)
+        let coded = try JSONDecoder().decode(EnsemblePreset.self,
+                                             from: try JSONEncoder().encode(preset))
+        #expect(coded.stampId == nil)
+    }
+
+    @Test("a linked stamp survives coding")
+    func linkedStampRoundTrips() throws {
+        let stamp = Stamp(name: "Hornsby North", text: "Property of Hornsby North")
+        var preset = EnsemblePreset(name: "Concert Band", parts: [])
+        preset.stampId = stamp.id
+
+        let coded = try JSONDecoder().decode(EnsemblePreset.self,
+                                             from: try JSONEncoder().encode(preset))
+        #expect(coded.stampId == stamp.id)
+    }
+
+    @Test("presets saved before the link existed still decode")
+    func legacyPresetDecodes() throws {
+        // ensemble-presets.json as written by earlier versions: no stampId key at all.
+        let json = """
+        {"id":"\(UUID().uuidString)","name":"Old Band",
+         "parts":[{"id":"\(UUID().uuidString)","name":"Flute","copies":4}]}
+        """
+        let preset = try JSONDecoder().decode(EnsemblePreset.self, from: Data(json.utf8))
+        #expect(preset.name == "Old Band")
+        #expect(preset.stampId == nil)
+        #expect(preset.parts.count == 1)
+    }
+}

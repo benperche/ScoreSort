@@ -859,8 +859,19 @@ struct CombineView: View {
     /// Parts are matched against file names via case-insensitive substring search,
     /// longest part name first so "Bass Clarinet" wins over "Clarinet".
     /// Files that don't match any part are highlighted orange.
+    /// Arms the preset's stamp, if it has one. A preset belongs to a school or ensemble, so
+    /// applying it should set up that organisation's mark — but only ever as a default: the
+    /// Stamp button in the toolbar shows what's armed and switches it off in one click.
+    /// A preset with no stamp leaves the current choice alone rather than turning it off.
+    private func applyPresetStamp(_ stampId: UUID?) {
+        guard let stampId, stampStore.stamps.contains(where: { $0.id == stampId }) else { return }
+        stampStore.selectedStampId = stampId
+        stampEnabled = true
+    }
+
     @discardableResult
-    private func applyPreset(parts: [PresetPart]) -> (matched: Int, unmatched: Int, unmatchedPartNames: Set<String>) {
+    private func applyPreset(parts: [PresetPart], stampId: UUID? = nil) -> (matched: Int, unmatched: Int, unmatchedPartNames: Set<String>) {
+        applyPresetStamp(stampId)
         // Sort longest-name-first so "Bass Clarinet" wins over "Clarinet"
         let sortedParts = parts.sorted { $0.name.count > $1.name.count }
         var newUnmatched: Set<UUID> = []
@@ -1400,7 +1411,7 @@ private struct TemplateCard: View {
 // MARK: - Preset Sidebar View
 struct PresetSidebarView: View {
     @EnvironmentObject var presetStore: EnsemblePresetStore
-    let onApply: (_ parts: [PresetPart]) -> (matched: Int, unmatched: Int, unmatchedPartNames: Set<String>)
+    let onApply: (_ parts: [PresetPart], _ stampId: UUID?) -> (matched: Int, unmatched: Int, unmatchedPartNames: Set<String>)
 
     /// Local draft — changes aren't committed to the preset until "Save to Preset"
     @State private var draftParts: [PresetPart] = []
@@ -1440,7 +1451,22 @@ struct PresetSidebarView: View {
                     .labelsHidden()
                 }
                 .padding(.horizontal, 12)
-                .padding(.vertical, 10)
+                .padding(.top, 10)
+                .padding(.bottom, 6)
+
+                if let preset = selectedPreset {
+                    PresetStampPicker(stampId: Binding(
+                        get: { preset.stampId },
+                        set: { newValue in
+                            var updated = preset
+                            updated.stampId = newValue
+                            presetStore.updatePreset(updated)
+                        }
+                    ))
+                    .controlSize(.small)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 10)
+                }
 
                 Divider()
             }
@@ -1510,7 +1536,7 @@ struct PresetSidebarView: View {
                     }
 
                     Button {
-                        applyResult = onApply(draftParts)
+                        applyResult = onApply(draftParts, selectedPreset?.stampId)
                     } label: {
                         Label("Apply to Files", systemImage: "arrow.left.to.line")
                             .frame(maxWidth: .infinity)
@@ -1594,6 +1620,10 @@ struct EnsemblePreset: Identifiable, Codable, Equatable {
     var id = UUID()
     var name: String
     var parts: [PresetPart]
+    /// A saved stamp this ensemble belongs to — a school or organisation's mark. Applying
+    /// the preset arms that stamp for the output. Optional, and an optional property decodes
+    /// as nil when absent, so presets saved before this keep working.
+    var stampId: UUID?
 }
 
 class EnsemblePresetStore: ObservableObject {

@@ -908,6 +908,28 @@ struct StampView: View {
     }
 }
 
+// MARK: - Preset stamp picker
+
+/// Chooses which saved stamp an ensemble preset belongs to — used in both places a preset
+/// can be edited (the Combine sidebar and the Combiner preferences pane).
+///
+/// It only records the association; applying the preset is what arms the stamp, and the
+/// toolbar's Stamp button remains the final say on whether output actually gets one.
+struct PresetStampPicker: View {
+    @Binding var stampId: UUID?
+    @EnvironmentObject private var stampStore: StampStore
+
+    var body: some View {
+        Picker("Stamp:", selection: $stampId) {
+            Text("None").tag(UUID?.none)
+            ForEach(stampStore.stamps) { stamp in
+                Text(stamp.name.isEmpty ? "Untitled" : stamp.name).tag(Optional(stamp.id))
+            }
+        }
+        .help("Applying this preset switches stamping on and selects this stamp. You can still turn it off from the Stamp button.")
+    }
+}
+
 // MARK: - Style buttons
 
 /// Bold and italic, as toggle buttons that follow the cursor.

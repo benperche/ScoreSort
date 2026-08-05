@@ -268,6 +268,8 @@ struct EnsemblePreset: Identifiable, Codable, Equatable {
 }
 ```
 
+**Preset → stamp link** — `EnsemblePreset.stampId` optionally names a saved stamp (a school's or organisation's mark). `CombineView.applyPresetStamp` arms it when the preset is applied: it selects that stamp and switches stamping **on**, but only as a default — the toolbar's Stamp button shows what's armed and turns it off in one click. A preset with no stamp leaves the current choice untouched rather than switching stamping off. Set it with `PresetStampPicker` (in `Stamp/StampTab.swift`), which appears in both preset editors: the Combine sidebar and the Combiner preferences pane. The field is Optional, so presets written before it existed decode as `nil`.
+
 ### EnsemblePresetStore
 
 `ObservableObject` held at app level, injected as `@EnvironmentObject`.

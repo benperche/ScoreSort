@@ -1324,7 +1324,16 @@ struct CombinerPreferencesView: View {
                         ))
                         .textFieldStyle(.roundedBorder)
                     }
-                    .padding(12)
+                    .padding(.horizontal, 12)
+                    .padding(.top, 12)
+                    .padding(.bottom, 6)
+
+                    PresetStampPicker(stampId: Binding(
+                        get: { editingPreset?.stampId },
+                        set: { editingPreset?.stampId = $0; saveEditing() }
+                    ))
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
 
                     Divider()
 
