@@ -877,3 +877,80 @@ struct PresetStampLinkTests {
         #expect(preset.parts.count == 1)
     }
 }
+
+// MARK: - Date placeholders
+
+@Suite("Stamp date tokens")
+struct StampDateTokenTests {
+
+    /// 14 March 2026, so day-first and month-first can't be confused with each other.
+    private let sample = Date(timeIntervalSince1970: 1_773_446_400)
+
+    private func plain(_ text: String) -> NSAttributedString {
+        NSAttributedString(string: text, attributes: [.font: NSFont.systemFont(ofSize: 11)])
+    }
+
+    @Test("day first is the default, and it is not the American order")
+    func australianByDefault() {
+        #expect(StampDateFormat.dayFirst.format(sample) == "14/03/2026")
+        #expect(StampDateFormat.monthFirst.format(sample) == "03/14/2026")
+        #expect(StampDateFormat.dayFirst.format(sample) != StampDateFormat.monthFirst.format(sample))
+    }
+
+    @Test("the other formats read as expected")
+    func otherFormats() {
+        #expect(StampDateFormat.longForm.format(sample) == "14 March 2026")
+        #expect(StampDateFormat.iso.format(sample) == "2026-03-14")
+    }
+
+    @Test("{date} and {year} are replaced")
+    func replacesTokens() {
+        let result = resolvingStampTokens(plain("Copied {date} · © {year}"),
+                                          date: sample, format: .dayFirst)
+        #expect(result.string == "Copied 14/03/2026 · © 2026")
+    }
+
+    @Test("a token repeated in one stamp is replaced everywhere")
+    func replacesEveryOccurrence() {
+        let result = resolvingStampTokens(plain("{date} — {date}"), date: sample, format: .iso)
+        #expect(result.string == "2026-03-14 — 2026-03-14")
+    }
+
+    @Test("the token's formatting carries onto the date")
+    func keepsRunFormatting() throws {
+        let text = NSMutableAttributedString(string: "Copied ", attributes: [
+            .font: NSFont(name: "Helvetica", size: 12)!])
+        text.append(NSAttributedString(string: "{date}", attributes: [
+            .font: NSFont(name: "Helvetica-Bold", size: 12)!]))
+
+        let result = resolvingStampTokens(text, date: sample, format: .dayFirst)
+        #expect(result.string == "Copied 14/03/2026")
+        // The date inherits the bold run the placeholder sat in.
+        let dateFont = try #require(result.attribute(.font, at: result.length - 1,
+                                                     effectiveRange: nil) as? NSFont)
+        #expect(NSFontManager.shared.traits(of: dateFont).contains(.boldFontMask))
+    }
+
+    @Test("text with no tokens is untouched")
+    func noTokensIsAPassThrough() {
+        let result = resolvingStampTokens(plain("Property of the Music Dept"),
+                                          date: sample, format: .dayFirst)
+        #expect(result.string == "Property of the Music Dept")
+    }
+
+    @Test("a stamp resolves its tokens when drawn")
+    func stampAttributedStringResolves() {
+        var stamp = testStamp()
+        stamp.text = "Copied {date}"
+        stamp.richTextData = nil
+        let drawn = stampAttributedString(stamp, date: sample, dateFormat: .dayFirst)
+        #expect(drawn.string == "Copied 14/03/2026")
+    }
+
+    @Test("token detection drives the format control")
+    func detectsTokens() {
+        #expect(stampUsesTokens("Copied {date}"))
+        #expect(stampUsesTokens("© {YEAR}"))          // case-insensitive
+        #expect(stampUsesTokens("Property of XYZ") == false)
+    }
+}

@@ -65,6 +65,8 @@ struct StampView: View {
     @FocusState private var isViewFocused: Bool
     /// Scope for *this* tab's batch job — a per-job choice, not part of the saved design.
     @AppStorage("stampTabScope") private var scope: StampScope = .everyPage
+    /// How `{date}` is written. App-wide rather than per-stamp — it's a house style.
+    @AppStorage("stampDateFormat") private var dateFormat: StampDateFormat = .dayFirst
 
     /// Computed once — enumerating font families on every redraw is noticeably slow.
 
@@ -225,6 +227,21 @@ struct StampView: View {
                 StampTextEditor(stamp: binding, formatter: appState.stampFormatter)
                     .frame(height: 54)
                     .help("Select text and use the style buttons below (or ⌘B / ⌘I) to format part of the stamp. Return starts a new line.")
+
+                Text("Type **{date}** for today's date or **{year}** for the year — filled in when the stamp is applied.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                // Only worth asking about once a date is actually in the stamp.
+                if stampUsesTokens(draft?.text ?? "") {
+                    Picker("Date style:", selection: $dateFormat) {
+                        ForEach(StampDateFormat.allCases) { option in
+                            Text(option.label).tag(option)
+                        }
+                    }
+                    .controlSize(.small)
+                }
             }
         }
     }

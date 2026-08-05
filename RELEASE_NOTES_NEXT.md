@@ -7,10 +7,12 @@ _Draft for the next release after 1.8.0. Keep adding to this as more changes lan
 - **New tool: Stamp** (⌘5). Add a small text overlay — "Example School Band", "Property of the Music Dept" — to your parts, like a rubber stamp. Set the text and style (font, size, bold/italic, colour) and an optional box around it, then put it anywhere on the page: click one of the nine quick positions, or just **drag the stamp around on the preview**. Save as many named stamps as you like.
 - The Stamp tab also stamps files you already have — PDFs and images (JPEG, PNG, TIFF, HEIC), which come out as PDFs. Drag in some files or a folder to do a whole set at once with the same settings. Choose to stamp every page or just the first page of each file, and either **replace the originals** or save copies under names you type.
 - Stamps are burned into the page, so they print everywhere and can't be deleted out of the PDF.
+- **Dates in stamps**: type `{date}` or `{year}` in the stamp text and it's filled in when the stamp is applied — handy for "this copy was made on…" copyright lines. Dates are day-first (14/03/2026) by default, with long, ISO and month-first available.
 
 ## 🔗 Combine PDFs
 
 - New **Stamp** button in the toolbar: stamp the combined PDF as it's created, choosing a stamp you've setup in the stamp tab. You can control whether it goes on every page or just the first page of each part.
+- **Presets can carry a stamp**: give a preset your school or ensemble's stamp, and applying it arms that stamp for the output. You can still switch it off from the Stamp button whenever you don't want it.
 
 ## ✂️ Split PDF
 

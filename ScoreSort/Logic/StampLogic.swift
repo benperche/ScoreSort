@@ -65,6 +65,115 @@ enum StampAnchor: String, Codable, CaseIterable, Identifiable {
     }
 }
 
+// MARK: - Date placeholders
+
+/// How `{date}` is written out. Day-first is the default and deliberately not taken from the
+/// system locale: this is an Australian app, and a US-formatted date on a copyright line is
+/// worse than wrong — 03/04 is a different day depending on who reads it.
+enum StampDateFormat: String, Codable, CaseIterable, Identifiable {
+    case dayFirst      // 14/03/2026
+    case longForm      // 14 March 2026
+    case iso           // 2026-03-14
+    case monthFirst    // 03/14/2026
+
+    var id: String { rawValue }
+
+    var pattern: String {
+        switch self {
+        case .dayFirst:   return "dd/MM/yyyy"
+        case .longForm:   return "d MMMM yyyy"
+        case .iso:        return "yyyy-MM-dd"
+        case .monthFirst: return "MM/dd/yyyy"
+        }
+    }
+
+    /// Shown in the picker as, e.g., "14/03/2026 (day first)".
+    var label: String {
+        let sample = format(Date(timeIntervalSince1970: 1_773_446_400))   // 14 March 2026
+        switch self {
+        case .dayFirst:   return "\(sample) (day first)"
+        case .longForm:   return sample
+        case .iso:        return "\(sample) (ISO)"
+        case .monthFirst: return "\(sample) (month first)"
+        }
+    }
+
+    func format(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        // Fixed locale so month names and separators don't shift with the user's region.
+        formatter.locale = Locale(identifier: "en_AU")
+        formatter.dateFormat = pattern
+        return formatter.string(from: date)
+    }
+
+    /// The user's chosen format, day-first unless they've picked otherwise.
+    static var preferred: StampDateFormat {
+        StampDateFormat(rawValue: UserDefaults.standard.string(forKey: "stampDateFormat") ?? "")
+            ?? .dayFirst
+    }
+}
+
+/// Placeholders a stamp's text can contain, filled in when the stamp is drawn or written.
+/// Deliberately few and lower-case; a stamp is a line or two of text, not a template language.
+enum StampToken: String, CaseIterable {
+    case date = "{date}"
+    case year = "{year}"
+
+    var explanation: String {
+        switch self {
+        case .date: return "today's date"
+        case .year: return "the current year"
+        }
+    }
+
+    func value(on date: Date, format: StampDateFormat) -> String {
+        switch self {
+        case .date:
+            return format.format(date)
+        case .year:
+            let formatter = DateFormatter()
+            formatter.locale = Locale(identifier: "en_AU")
+            formatter.dateFormat = "yyyy"
+            return formatter.string(from: date)
+        }
+    }
+}
+
+/// True when the text uses any placeholder — drives whether the date-format control is shown.
+func stampUsesTokens(_ text: String) -> Bool {
+    StampToken.allCases.contains { text.localizedCaseInsensitiveContains($0.rawValue) }
+}
+
+/// Replaces every placeholder in `attributed`, keeping the formatting of the text it replaces
+/// — a bold `{date}` produces a bold date.
+///
+/// Replacements run back to front so the ranges found earlier stay valid.
+func resolvingStampTokens(_ attributed: NSAttributedString,
+                          date: Date = Date(),
+                          format: StampDateFormat = .preferred) -> NSAttributedString {
+    let result = NSMutableAttributedString(attributedString: attributed)
+
+    for token in StampToken.allCases {
+        let replacement = token.value(on: date, format: format)
+        var ranges: [NSRange] = []
+        var searchStart = 0
+        while searchStart < result.length {
+            let searchRange = NSRange(location: searchStart, length: result.length - searchStart)
+            let found = (result.string as NSString).range(of: token.rawValue,
+                                                          options: .caseInsensitive,
+                                                          range: searchRange)
+            guard found.location != NSNotFound else { break }
+            ranges.append(found)
+            searchStart = found.location + found.length
+        }
+        for range in ranges.reversed() {
+            result.replaceCharacters(in: range, with: replacement)
+        }
+    }
+
+    return result
+}
+
 /// How the stamp's lines line up with each other inside its box. Only visible on a
 /// multi-line stamp, and deliberately a stored choice rather than something derived from the
 /// stamp's position — dragging a stamp around shouldn't re-flow its text.
@@ -333,9 +442,14 @@ func stampRichText(_ stamp: Stamp) -> NSAttributedString? {
 /// The stamp's alignment is applied over the whole range here — *without* touching the
 /// per-run font and colour attributes — rather than being carried in the RTF, so the control
 /// stays authoritative whatever the editor happens to have stored.
-func stampAttributedString(_ stamp: Stamp) -> NSAttributedString {
-    let base = stampRichText(stamp)
+func stampAttributedString(_ stamp: Stamp,
+                           date: Date = Date(),
+                           dateFormat: StampDateFormat = .preferred) -> NSAttributedString {
+    let raw = stampRichText(stamp)
         ?? NSAttributedString(string: stamp.text, attributes: stampBaseAttributes(stamp))
+    // Placeholders are filled in here, so the preview and the written PDF resolve them the
+    // same way and both show the date as of when the stamp is applied.
+    let base = resolvingStampTokens(raw, date: date, format: dateFormat)
 
     let para = NSMutableParagraphStyle()
     para.alignment = stamp.alignment.nsAlignment
