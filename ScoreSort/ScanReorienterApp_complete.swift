@@ -155,6 +155,23 @@ struct ViewCommands: Commands {
             Button("Show/Hide Presets") { appState.tabCommands.slice.togglePresets?() }
                 .keyboardShortcut("p", modifiers: [.command, .option])
                 .disabled(appState.tabCommands.slice.togglePresets == nil)
+
+            #if DEBUG
+            Divider()
+
+            // Screenshot helper: the tour and README images are 2560 × 1600, i.e. a
+            // 1280 × 800 window on a Retina display. `.defaultSize` can't do this — it
+            // only applies before macOS has a remembered frame — so this sets it outright.
+            // Debug-only: it's a maintainer tool, not something users need.
+            Button("Set Window to 1280 × 800 (screenshots)") {
+                guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
+                var frame = window.frame
+                // Keep the top edge put so the window doesn't wander up the screen.
+                frame.origin.y += frame.height - 800
+                frame.size = NSSize(width: 1280, height: 800)
+                window.setFrame(frame, display: true)
+            }
+            #endif
         }
     }
 }
