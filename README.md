@@ -93,6 +93,9 @@ Mark parts as your ensemble's — "Property of Example School Band" — the way 
 ![Rotate Pages](screenshots/rotator.png)
 *Rotate pages with before/after preview*
 
+![Stamp](screenshots/stamp.png)
+*Design a stamp and apply it to parts*
+
 ## Installation
 
 ### Requirements

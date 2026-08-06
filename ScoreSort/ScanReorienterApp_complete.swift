@@ -691,7 +691,10 @@ struct WelcomeTourPage {
                 "Type **{date}** or **{year}** in the text for a copy date. Stamps are burned into the page, so they print everywhere and can't be deleted out of the PDF."
             ],
             tipText: "A Combine preset can carry its ensemble's stamp, so applying the preset arms the right one",
-            imageName: nil
+            // The image slot is live but the asset doesn't exist yet: the view guards with
+            // `if let nsImage = NSImage(named:)`, so this reads as a text page until
+            // Scripts/capture-screenshots.py adds tour-stamp.
+            imageName: "tour-stamp"
         ),
     ]
 }

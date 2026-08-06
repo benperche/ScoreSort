@@ -74,7 +74,7 @@ struct StampView: View {
         VStack(spacing: 0) {
             // Top toolbar
             HStack {
-                Text("Stamp PDFs")
+                Text("Stamp Files")
                     .font(.title2)
                     .fontWeight(.semibold)
 
@@ -937,13 +937,28 @@ struct PresetStampPicker: View {
     @EnvironmentObject private var stampStore: StampStore
 
     var body: some View {
-        Picker("Stamp:", selection: $stampId) {
+        Picker("Stamp:", selection: resolvedSelection) {
             Text("None").tag(UUID?.none)
             ForEach(stampStore.stamps) { stamp in
                 Text(stamp.name.isEmpty ? "Untitled" : stamp.name).tag(Optional(stamp.id))
             }
         }
         .help("Applying this preset switches stamping on and selects this stamp. You can still turn it off from the Stamp button.")
+    }
+
+    /// Shows "None" when the linked stamp no longer exists — a deleted stamp leaves the id
+    /// behind, and a selection matching no row renders as a blank popup. Applying such a
+    /// preset is already safe (the link is checked before it's armed); this is just so the
+    /// control says so.
+    private var resolvedSelection: Binding<UUID?> {
+        Binding(
+            get: {
+                guard let id = stampId,
+                      stampStore.stamps.contains(where: { $0.id == id }) else { return nil }
+                return id
+            },
+            set: { stampId = $0 }
+        )
     }
 }
 
