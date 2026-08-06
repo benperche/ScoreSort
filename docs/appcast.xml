@@ -7,6 +7,43 @@
         <language>en</language>
 
         <item>
+            <title>Version 1.9.0</title>
+            <sparkle:version>13</sparkle:version>
+            <sparkle:shortVersionString>1.9.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <pubDate>Thu, 06 Aug 2026 11:42:30 +1000</pubDate>
+            <description><![CDATA[
+                <h2>ScoreSort 1.9.0</h2>
+                <p><b>✨ New: the Stamp tool</b></p>
+                <ul>
+                    <li>Add a small text overlay to your parts — "Example School Band", "Property of the Music Dept" — the way you'd use a rubber stamp. Design and save any number of stamps (⌘5), one per school or ensemble.</li>
+                    <li>Set the text and style — font, size, colour, and <b>bold or italic on just the words you choose</b> — plus an optional box around it.</li>
+                    <li>Put it anywhere on the page: click one of nine quick positions, or <b>drag the stamp around on a live preview</b> of your own part.</li>
+                    <li>Type <code>{date}</code> or <code>{year}</code> for a copy date, filled in when the stamp is applied — day-first by default.</li>
+                    <li>Stamp files you already have (PDFs <i>and</i> images), a folder at a time, replacing the originals or saving copies under names you type.</li>
+                    <li>Stamps are burned into the page, so they print everywhere and can't be deleted out of the PDF.</li>
+                </ul>
+                <p><b>🔗 Combine</b></p>
+                <ul>
+                    <li>New <b>Stamp</b> button in the toolbar — stamp the combined PDF as it's created, on every page or just the first page of each part.</li>
+                    <li>Presets can carry a stamp: applying your ensemble's preset arms its stamp.</li>
+                    <li>Fixed: clicking a file now selects just that file (it used to behave as though ⌘ was held), and ⌫ removes selected files again.</li>
+                </ul>
+                <p><b>✂️ Split</b></p>
+                <ul>
+                    <li>New <b>Stamp</b> button in Step 1, with the stamp shown on the preview of pages that will get one.</li>
+                    <li>More instruments in the naming suggestions (alto/bass flute, oboe d'amore, cor anglais, clarinet in B♭ and A, drum kit, vibraphone, mallet percussion, and a combined "Trombone Baritone Bassoon" part), with spelling variants treated as one instrument.</li>
+                    <li>A tidier Step 1 toolbar and consistent headings across all three steps.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/benperche/ScoreSort/releases/download/v1.9.0/ScoreSort.dmg"
+                sparkle:edSignature="XAMKbte2tfF1HSuq2zlpHBmmUI6q/ayUXyqZNPR7HU1guHAdrtAo2NYfFdeAa2AfYgjqiBo1YOusI8YbJ1qGAA=="
+                length="8240303"
+                type="application/octet-stream"/>
+        </item>
+
+        <item>
             <title>Version 1.8.0</title>
             <sparkle:version>12</sparkle:version>
             <sparkle:shortVersionString>1.8.0</sparkle:shortVersionString>
