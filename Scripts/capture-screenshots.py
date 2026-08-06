@@ -64,7 +64,8 @@ TARGETS = {
          "screenshots/combiner.png"],
     ),
     "renamer": (
-        "Rename tab (⌘2) with a demo folder scanned and instruments detected",
+        "Rename tab (⌘2) showing Bulk Part Rename — base name set, a part preview open "
+        "and the instrument suggestions showing (this is what the tour page describes)",
         ["ScoreSort/Assets.xcassets/tour-renamer.imageset/tour-renamer.png",
          "screenshots/renamer.png"],
     ),

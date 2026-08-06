@@ -9,7 +9,7 @@ _Draft for the next release after 1.8.0. Keep adding to this as more changes lan
 - Stamps are burned into the page, so they print everywhere and can't be deleted out of the PDF.
 - **Dates in stamps**: type `{date}` or `{year}` in the stamp text and it's filled in when the stamp is applied — handy for "this copy was made on…" copyright lines. Dates are day-first (14/03/2026) by default, with long, ISO and month-first available.
 
-> 💬 **Stamping is brand new, and feedback is very welcome** — whether it fits how you actually mark up parts, anything that feels awkward, or something you expected it to do and it doesn't. Open an issue on GitHub and I'll take a look.
+> 💬 **Stamping is brand new, and feedback is very welcome** — whether it fits how you actually mark up parts, anything that feels awkward, or something you expected it to do and it doesn't. Open an issue on GitHub or send me an email at benperche2@gmail.com.
 
 ## 🔗 Combine PDFs
 
