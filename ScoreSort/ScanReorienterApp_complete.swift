@@ -675,6 +675,24 @@ struct WelcomeTourPage {
             tipText: "← → navigates pages · rotating odd/even pages is useful for two-sided landscape scans",
             imageName: "tour-rotator"
         ),
+
+        // ── Page 7: Stamp ─────────────────────────────────────────────────
+        // No screenshot yet — imageName is optional, so this reads as a text page until
+        // "tour-stamp" is added to the asset catalog.
+        WelcomeTourPage(
+            icon: "seal",
+            iconColor: .pink,
+            tabShortcut: "⌘5",
+            title: "Stamp",
+            useCase: "Your parts need marking as your ensemble's — \"Property of Example School Band\" — the way you'd use a rubber stamp.",
+            bodyParagraphs: [
+                "Design a stamp: set the text, font, size and colour, bold or italic **just the words you choose**, and put it anywhere on the page by clicking one of the nine positions or dragging it on the preview. Save as many as you need — one per school or ensemble.",
+                "Add PDFs or images here to stamp files you already have, or switch stamping on from the **Stamp** button in the Combine and Split tabs to mark their output as it's written.",
+                "Type **{date}** or **{year}** in the text for a copy date. Stamps are burned into the page, so they print everywhere and can't be deleted out of the PDF."
+            ],
+            tipText: "A Combine preset can carry its ensemble's stamp, so applying the preset arms the right one",
+            imageName: nil
+        ),
     ]
 }
 

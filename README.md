@@ -1,6 +1,6 @@
 # ScoreSort
 
-A powerful macOS application for managing music PDFs with four tools for musicians and music librarians: PDF combining with smart copy management, automatic file renaming and bulk part renaming, PDF splitting with smart instrument naming, and page rotation.
+A powerful macOS application for managing music PDFs with five tools for musicians and music librarians: PDF combining with smart copy management, automatic file renaming and bulk part renaming, PDF splitting with smart instrument naming, page rotation, and stamping parts with your ensemble's mark.
 
 ## Features
 
@@ -67,6 +67,17 @@ Rotate PDF pages with flexible options for whole-document and per-page correctio
 - **Individual page rotation** — rotate just the current page left or right without affecting others
 - **Before/after preview** for each page
 - **Perfect for fixing scanned documents** with mixed or incorrect orientations
+
+### 🔖 Stamp
+Mark parts as your ensemble's — "Property of Example School Band" — the way you'd use a rubber stamp.
+
+- **Design and save any number of stamps**, one per school or ensemble
+- **Rich text**: set the font, size and colour, and bold or italic just the words you choose
+- **Place it anywhere** — nine quick positions, or drag the stamp around on a live preview of your own page
+- **`{date}` and `{year}` placeholders** filled in when the stamp is applied, for "this copy made on…" copyright lines (day-first dates by default)
+- **Stamp files you already have** — PDFs and images, a folder at a time, replacing the originals or saving copies under names you choose
+- **Or stamp as you go** from the Combine and Split tabs, on every page or just the first page of each part
+- **Burned into the page**, so it prints everywhere and can't be deleted out of the PDF
 
 ## Screenshots
 
@@ -277,6 +288,25 @@ After:
 | `⌘←` / `⌘→` | Jump to first / last page |
 | `,` | Rotate current page 90° left |
 | `.` | Rotate current page 90° right |
+
+### Stamp
+
+1. **Design a stamp** — type the text, then set the font, size, colour and an optional box around it. Select part of the text and use the **B** / *I* buttons (or `⌘B` / `⌘I`) to style just those words.
+2. **Position it** by clicking one of the nine positions, or by dragging the stamp on the preview
+3. **Add a date if you want one** — type `{date}` or `{year}` in the text and pick a date style
+4. **To stamp existing files**, add PDFs or images (or drop a folder), choose every page or just the first page of each, and either replace the originals or save copies under names you type
+5. **To stamp as you work**, use the **Stamp** button in the Combine or Split toolbar and pick a stamp there
+
+A Combine preset can carry its ensemble's stamp, so applying the preset arms the right one.
+
+#### Keyboard Shortcuts (Stamp)
+| Key | Action |
+|-----|--------|
+| `←` / `→` | Previous / next page |
+| `⌘←` / `⌘→` | First / last page of the queue |
+| `↑` / `↓` | Previous / next file |
+| `⌘B` / `⌘I` | Bold / italic the selected text |
+| `⌘N` / `⌘D` | New / duplicate stamp |
 
 ---
 
