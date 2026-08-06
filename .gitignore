@@ -13,4 +13,16 @@ ScoreSort.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
 # =========================
 # Screenshots / assets
 # =========================
-screenshots/
+# Ignore stray captures but keep the ones the README shows. Note the directory itself
+# must stay un-ignored (`screenshots/*`, not `screenshots/`) — git can't re-include a
+# file whose parent directory is excluded.
+screenshots/*
+!screenshots/*.png
+!screenshots/appstore/
+screenshots/appstore/*
+!screenshots/appstore/*.png
+
+# =========================
+# Python (screenshot tooling)
+# =========================
+.venv/

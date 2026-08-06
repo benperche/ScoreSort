@@ -23,10 +23,18 @@ Before you start
    Screen Recording); macOS prompts the first time.
 
 Works with nothing but macOS, in which case each capture asks you to click the window.
-Install pyobjc and it finds the window itself — no clicking, and it warns *before* a
-shot if the window is the wrong size:
+With pyobjc it finds the window itself — no clicking, and it warns *before* a shot if
+the window is the wrong size. This repo has a .venv with it already installed:
 
-    python3 -m pip install --user pyobjc-framework-Quartz
+    .venv/bin/python Scripts/capture-screenshots.py
+
+To recreate that venv (it isn't committed):
+
+    python3 -m venv .venv && .venv/bin/pip install pyobjc-framework-Quartz
+
+A venv rather than a plain `pip install` because Homebrew's Python — the `python3` on
+PATH here — refuses installs under PEP 668, and its `--break-system-packages` escape
+hatch is exactly as advertised.
 """
 
 import json
