@@ -1089,8 +1089,8 @@ struct CombineOutputMenuButton: View {
             front and back. If the back comes out upside down, switch Two-sided flip.
 
             The flip is applied only when ScoreSort prints, so Create PDF and Open in Preview \
-            stay the right way up on screen — an ordinary booklet file you can send to whoever \
-            is doing the printing.
+            stay the right way up on screen — an ordinary booklet file you can print later, \
+            on any printer.
             """
         }
     }

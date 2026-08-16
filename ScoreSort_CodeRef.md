@@ -589,13 +589,14 @@ The forward direction, used by the Combine tab: reading order in, printer sheet 
 | Print… | rotated, to survive the duplexer |
 | Print Test Sheet… | rotated (it must match a real run) |
 
-This is deliberate, and the reasoning is worth keeping. Handing the combined PDF to someone else
-to print is a normal workflow — one person assembles the parts, another prints them on a printer
-only *they* understand. A saved file must therefore be an ordinary, sensible booklet: readable on
-screen, with the page order already solved, leaving the recipient to apply their own knowledge of
-their own printer. Pre-rotating it would be the app being clever about a machine it knows nothing
-about, and would look like a bug to everyone who opened it. **Don't extend the compensation to
-Create PDF or Preview**, and don't frame the hand-off as a mistake in user-facing text.
+This is deliberate, and the reasoning is worth keeping. Exporting the booklet to print later is a
+normal workflow — assembled at home in the morning, printed at a school that afternoon, or emailed
+to whoever is doing the printing. In every case the printer is unknown at export time, so a saved
+file must be an ordinary, sensible booklet: readable on screen, page order already solved, leaving
+whoever prints it to apply their own knowledge of their own machine. Pre-rotating it would be the
+app being clever about hardware it knows nothing about, and would look like a bug to anyone who
+opened the file. **Don't extend the compensation to Create PDF or Preview**, and don't frame
+exporting-then-printing as a mistake in user-facing text.
 
 `testSheetDocument(options:stampJob:)` returns the first two faces (one physical sheet, front
 and back) of the first booklet, imposed exactly as a full run would be. It forces

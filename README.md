@@ -181,7 +181,7 @@ document at a time. Each part (and each *copy* of a part) becomes its own foldab
 - **Scale** — published music rarely matches A4 exactly, so this sizes each page within its half
   of the sheet: 100% fits it exactly, higher fills more of it, lower leaves more space around the music
 
-**Printing from ScoreSort — setting up your printer (once).** macOS does not let an app choose
+**Printing from ScoreSort.** Setting up your printer, once. macOS does not let an app choose
 your two-sided setting, so:
 
 1. In the print dialog, set **Double-sided** to *On*
@@ -193,12 +193,12 @@ your two-sided setting, so:
 If your printer has no two-sided mode, print the odd pages, put the stack back in, and print the
 even pages using **Paper Handling** in the print dialog.
 
-**Handing the file to someone else.** That flip depends on the printer, so ScoreSort only applies
-it when *it* is doing the printing. **Create PDF** and **Open in Preview** always give a booklet
-that reads the right way up on screen — an ordinary file you can check, keep, or send to whoever
-is doing the printing. All they need to know is: print it **double-sided**, choose whichever
-two-sided setting brings the backs out the right way up, then fold and staple. The page order is
-already done for them.
+**Exporting a PDF to print later.** The flip depends on the printer, so ScoreSort only applies it
+when *it* is doing the printing. **Create PDF** and **Open in Preview** always give a booklet that
+reads the right way up on screen — an ordinary file you can check, keep, email, or carry to
+whatever printer you end up at. Whoever prints it, wherever, needs only: print it **double-sided**,
+choose whichever two-sided setting brings the backs out the right way up, then fold and staple.
+The page order is already sorted.
 
 #### Keyboard Shortcuts (Combiner)
 | Key | Action |
