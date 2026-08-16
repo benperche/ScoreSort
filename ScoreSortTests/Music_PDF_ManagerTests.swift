@@ -564,7 +564,7 @@ struct CombineManagerTests {
 
         let outURL = tempDir.appendingPathComponent("combined.pdf")
         var resultTitle = ""
-        manager.createCombinedPDF(to: outURL, addBlankPages: false) { title, _, _ in
+        manager.createCombinedPDF(to: outURL, options: CombineOutputOptions()) { title, _, _ in
             resultTitle = title
         }
 
@@ -589,7 +589,7 @@ struct CombineManagerTests {
         manager.addFiles(urls: [urlA, urlB], undoManager: nil)
 
         let outURL = tempDir.appendingPathComponent("combined_blank.pdf")
-        manager.createCombinedPDF(to: outURL, addBlankPages: true) { _, _, _ in }
+        manager.createCombinedPDF(to: outURL, options: CombineOutputOptions(addBlankPages: true)) { _, _, _ in }
 
         // 3 pages + 1 blank + 2 pages = 6
         let result = try #require(PDFDocument(url: outURL))
@@ -610,7 +610,7 @@ struct CombineManagerTests {
         manager.updateCopies(for: manager.files[0].id, copies: 3, undoManager: nil)
 
         let outURL = tempDir.appendingPathComponent("combined_copies.pdf")
-        manager.createCombinedPDF(to: outURL, addBlankPages: false) { _, _, _ in }
+        manager.createCombinedPDF(to: outURL, options: CombineOutputOptions()) { _, _, _ in }
 
         // 4 pages × 3 copies = 12
         let result = try #require(PDFDocument(url: outURL))
@@ -1086,7 +1086,7 @@ struct CombineManagerBookmarkTests {
         manager.addFiles(urls: [urlA, urlB], undoManager: nil)
 
         let outURL = tempDir.appendingPathComponent("combined.pdf")
-        manager.createCombinedPDF(to: outURL, addBlankPages: false) { _, _, _ in }
+        manager.createCombinedPDF(to: outURL, options: CombineOutputOptions()) { _, _, _ in }
 
         let result = try #require(PDFDocument(url: outURL))
         let root = try #require(result.outlineRoot)
@@ -1104,7 +1104,7 @@ struct CombineManagerBookmarkTests {
         manager.updateCopies(for: manager.files[0].id, copies: 3, undoManager: nil)
 
         let outURL = tempDir.appendingPathComponent("copies.pdf")
-        manager.createCombinedPDF(to: outURL, addBlankPages: false) { _, _, _ in }
+        manager.createCombinedPDF(to: outURL, options: CombineOutputOptions()) { _, _, _ in }
 
         let result = try #require(PDFDocument(url: outURL))
         let root = try #require(result.outlineRoot)
@@ -1123,7 +1123,7 @@ struct CombineManagerBookmarkTests {
         manager.addBlankPage(after: [], undoManager: nil)
 
         let outURL = tempDir.appendingPathComponent("with_blank.pdf")
-        manager.createCombinedPDF(to: outURL, addBlankPages: false) { _, _, _ in }
+        manager.createCombinedPDF(to: outURL, options: CombineOutputOptions()) { _, _, _ in }
 
         let result = try #require(PDFDocument(url: outURL))
         #expect(result.pageCount == 3)

@@ -1,7 +1,7 @@
 # ScoreSort — Code Reference
 > Split by feature. Tabs: `Combine/CombineTab.swift`; `Rename/RenameViews.swift` + `Rename/RenamerManager.swift`; `Split/SplitView.swift` + `Split/SplitNaming.swift` + `Split/SplitPrefixStep.swift`; `Rotate/RotateTab.swift`.
 > Tab 4 — Stamp: `Stamp/StampStore.swift` + `Stamp/StampTab.swift` (`StampView` designer/batch tool, plus `StampMenuButton` used by the Combine and Split toolbars).
-> Pure logic in `ScoreSort/Logic/`: `InstrumentNames.swift` (preset matching + split instrument suggestions/detection), `SplitLogic.swift` (split maths, A3, bookmarks, booklet), `RenameLogic.swift` (folder-job helpers + score-order numbering), `FileUtilities.swift` (output dir, filename validation, permissions, page-range formatting), `StampLogic.swift` (stamp model, placement, drawing, flattening), `ImagePages.swift` (images → A4 PDF pages; the supported-extension sets).
+> Pure logic in `ScoreSort/Logic/`: `InstrumentNames.swift` (preset matching + split instrument suggestions/detection), `SplitLogic.swift` (split maths, A3, bookmarks, booklet *de*imposition), `BookletLogic.swift` (booklet *imposition* — sheet order, padding, segments, the imposed document), `RenameLogic.swift` (folder-job helpers + score-order numbering), `FileUtilities.swift` (output dir, filename validation, permissions, page-range formatting), `StampLogic.swift` (stamp model, placement, drawing, flattening), `ImagePages.swift` (images → A4 PDF pages; the supported-extension sets), `PrintLogic.swift` (system print dialog for a `PDFDocument`).
 > Shared scaffolding (app entry, ContentView, AppState, menu commands, Sparkle, Preferences panes, DropZone, PDFManager) stays in `ScanReorienterApp_complete.swift` (~1 700 lines).
 > One module/target — cross-file calls need no imports; filesystem-synchronized project auto-compiles files added under `ScoreSort/`. Tests: `ScoreSortTests` incl. `ViewSmokeTests` (host each tab) + `CombineManagerReorderTests`.
 > Xcode project: "ScoreSort"
@@ -176,17 +176,26 @@ The list is a `ScrollView`/`LazyVStack` (not a `List`), so drag/drop is SwiftUI 
 - **Standalone file:** contributes `file.copies` / `file.pageCount × file.copies`
 - **Group:** contributes `memberCount × group.copies` / `sumOfMemberPages × group.copies`
 
+`totalBookletSheets` mirrors `buildDocument`'s segmentation to count *sheets of paper* for booklet output: every copy of every real file starts a new booklet, blank-page entries join the booklet before them, and each booklet is padded to a multiple of 4 then divided by 4.
+
 #### PDF output
-`createCombinedPDF(to:addBlankPages:completion:)` and `openInPreview(addBlankPages:onError:)` both use a nested `addPages(from:copyIndex:totalCopies:)` helper and a single `while i < files.count` loop that detects groups:
+All three outputs — `createCombinedPDF(to:options:stampJob:completion:)`, `openInPreview(options:stampJob:onError:)` and `printCombined(options:stampJob:in:onError:)` — funnel through the private `buildDocument(options:stampJob:)`, which returns `(doc, pageCount, bookmarks)`. `CombineOutputOptions` carries `layout` (`.singlePages` / `.booklet`), `sheetSize`, `addBlankPages` and `twoSidedShortEdge`; the view assembles it from `@AppStorage` in `outputOptions`.
+
+`buildDocument` uses a nested `addPages(from:copyIndex:totalCopies:)` helper and a single `while i < files.count` loop that detects groups:
 - **Standalone:** `for ci in 0..<file.copies { addPages(from: file, copyIndex: ci, totalCopies: file.copies) }`
 - **Group:** collect all consecutive files with the same `collateGroupId`, then `for ci in 0..<group.copies { for f in groupFiles { addPages(from: f, copyIndex: ci, totalCopies: group.copies) } }`
 
 Inside `addPages(from:copyIndex:totalCopies:)`:
 - **Blank page entries** (`isBlankPage == true`): insert one A4 `PDFPage` via `createBlankPage()` and return.
 - **Image files** (extension ≠ `"pdf"`): call `pdfPages(fromImageAt:)` which uses `CGImageSource` to iterate frames, renders each onto an A4 canvas via `makeA4Page(from:)` (scaled to fit, white background, aspect ratio preserved), and returns the array of `PDFPage`s.
-- **PDF files**: load `PDFDocument(url:)`, copy pages. If `addBlankPages` and page count is odd, append a blank page.
+- **PDF files**: load `PDFDocument(url:)`, copy pages. If `addBlankPages` **and the layout isn't `.booklet`** and page count is odd, append a blank page (booklet padding to a multiple of 4 supersedes padding to 2).
 
-A `bookmarks` array of `(label: String, pageIndex: Int)` is accumulated during the loop. The label is the filename (without extension) for single-copy files, or `"Filename N/Total"` for multi-copy. Blank pages are not bookmarked. After all pages are inserted, a `PDFOutline` tree is built from the bookmarks array and assigned to `doc.outlineRoot`, producing a table of contents visible in Preview's sidebar.
+A `bookmarks` array of `(label: String, pageIndex: Int)` is accumulated during the loop. The label is the filename (without extension) for single-copy files, or `"Filename N/Total"` for multi-copy. Blank pages are not bookmarked.
+
+**Order of operations is stamp → impose → outline**, and it matters:
+1. `applyingStamp(...)` runs first so stamps land on *reading* pages, where the player sees them.
+2. When `layout == .booklet`, `bookletSegments(pageCount:partFirstPages:)` carves the document at the bookmark indices and `imposedBookletDocument(_:segments:sheetSize:)` rebuilds it as sheets. Because there's **one bookmark per part per copy**, seven copies of a part become seven separately foldable booklets rather than one seven-times-long one — no extra segmentation logic needed. Each bookmark's `pageIndex` is then remapped to its booklet's first sheet by finding the segment that *contains* it (not by position — `bookletSegments` can prepend a segment at page 0, and a file that fails to load contributes a label but no pages).
+3. The `PDFOutline` tree is built last and assigned to `doc.outlineRoot`, so it survives both rebuilds.
 
 ### CombineView
 
@@ -554,6 +563,27 @@ When a new PDF loads, `fileSizes` is pre-populated via `splitSizesFromBookmarks`
 | `innerFirstFrontBackOrder(n: Int) -> [Int]` | Inner sheets scanned first (alternative scanning convention). Implemented as a half-rotation of `coverFirstFrontBackOrder`. Returns `[]` if N < 8 or N % 4 ≠ 0. |
 | `bookletCandidates(n: Int) -> [(label: String, description: String, order: [Int])]` | Returns candidate reorderings for an n-page segment: "Standard (cover first)" always; "Inner-first" if n ≥ 8. Each candidate's `order` is a valid permutation. |
 
+### Pure booklet *imposition* functions — `Logic/BookletLogic.swift`
+
+The forward direction, used by the Combine tab: reading order in, printer sheet order out. (`SplitLogic`'s functions above go the other way, scan order → reading order.)
+
+| Signature | Behaviour |
+|---|---|
+| `enum BookletSheetSize` | `.doubleSize` (two pages side by side at full size — A4 → A3) and `.fitA4Landscape` (scaled down onto 842 × 595, giving an A5 booklet). Carries `label` and `shortLabel`. |
+| `bookletImpositionOrder(n: Int) -> [Int]` | `order[sheetSlot] = readingPos`, slots running `[front-left, front-right, back-left, back-right]` per sheet. **Implemented by inverting `coverFirstFrontBackOrder(n:)`** — one source of truth for the geometry. `[]` when n < 4 or n % 4 ≠ 0. N=4 → `[3,0,1,2]`, N=8 → `[7,0,1,6,5,2,3,4]` (1-based: 8,1 · 2,7 · 6,3 · 4,5). |
+| `bookletPaddedCount(_ pages: Int) -> Int` | Rounds up to a whole folded sheet: 5 → 8, 1 → 4, 0 → 0. |
+| `bookletSegments(pageCount:partFirstPages:) -> [Range<Int>]` | One range per booklet. The first always starts at 0 so pages ahead of the first bookmarked part aren't dropped; duplicate, unsorted and out-of-range indices are ignored. |
+| `bookletSheetCount(segments:) -> Int` | Sheets of paper (padded ÷ 4, summed). |
+| `imposedBookletDocument(_:segments:sheetSize:) -> (doc: PDFDocument, sheetStarts: [Int])?` | Rebuilds the document as sheets, one booklet per segment. Same `CGDataConsumer` + `beginPage(mediaBox:)` pipeline as `stampedDocument`, so **annotations, links and outlines are dropped** — build the outline on the result. Sheet size follows the segment's first page via `visualPageBox(_:)` (crop box, rotation-aware), so A5 parts give A4 sheets. `sheetStarts` is index-aligned with `segments`. |
+
+Both halves of a sheet are drawn with `page.getDrawingTransform(.cropBox, rect: half, rotate: 0, preserveAspectRatio: true)` + `drawPDFPage`, which handles placement, scaling **and** the source page's own `/Rotate` in one step — which is why both sheet sizes share the drawing code and mixed page sizes within a part degrade gracefully (each centred and fitted in its half).
+
+### Printing — `Logic/PrintLogic.swift`
+
+`printPDFDocument(_:jobName:twoSidedShortEdge:in:onError:)` (`@MainActor`). Uses `doc.printOperation(for:scalingMode:autoRotate:)` with **`.pageScaleNone` and `autoRotate: false`** (imposed sheets are already positioned; re-fitting would undo it), zero margins and centring off, then `runModal(for:delegate:didRun:contextInfo:)`. Takes a `PDFAlertHandler` and never raises an `NSAlert` itself.
+
+Duplex is set through `info.printSettings["com_apple_print_PrintSettings_PMDuplexing"] = kPMDuplexTumble` — **not** `PMSetDuplex`, which isn't declared in the public SDK (PrintCore exposes only the opaque `PMPrintSettings` typedef). The key is `kPMDuplexingStr` with dots swapped for underscores, the convention `NSPrintInfo.h` documents.
+
 ### `SplitControlsSection` layout (3 rows)
 
 | Row | Contents |
@@ -743,7 +773,8 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 - **Instrument detection is leftmost-match**, not longest-match or order-match, to handle compound names.
 - **`bass clarinet` before `clarinet`** in lists — length-sort in detectInstrument handles this, but the order in the static arrays also matters as a tie-break.
 - **`canCreateDirectories = true`** set on NSOpenPanel for folder selection.
-- **Print automation not possible** — NSPrintOperation / AppleScript all fail reliably; "Open in Preview" + ⌘P is the documented workflow.
+- **Printing works via PDFKit, not a hand-rolled view** — `PDFDocument.printOperation(for:scalingMode:autoRotate:)` is the supported route and backs the Combine tab's Print (⌘P). The earlier failure (commit `d0a5f49`) came from drawing pages into a custom `NSView` subclass with `NSPrintOperation(view:)`; that approach and AppleScript automation both remain unreliable. Open in Preview stays available for eyeballing output.
+- **Booklet is not a macOS feature** — it comes from a printer driver's PPD when it comes at all, and AirPrint queues (the modern default, after Apple deprecated PPD drivers in 10.15) never expose it. Hence the app imposes pages itself and prints an ordinary two-up PDF. Don't build on a driver Booklet option, and note that leaving one enabled would double-impose already-imposed sheets.
 - **App quits on window close** via `NSApplicationDelegateAdaptor(AppDelegate.self)`.
 - **`.clipped()` does not restrict hit testing** — use `.allowsHitTesting(false)` when an image with `.fill` content mode would absorb clicks meant for views below it. (Affected `PageInstrumentPreview` inside `SplitFileNamingRow`.)
 - **`FocusState` must not be duplicated across parent/child** — pass `FocusState<T>.Binding` from parent to child; a local copy intercepts the first click on a TextField.
@@ -800,6 +831,13 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `CoverFirstFrontBackOrderTests` | `coverFirstFrontBackOrder(n:)` — N=4 and N=8 known values, valid permutation for N=12/16, structural properties (first reading page always scan 1, last always scan 0), guard conditions (n<4, n%4≠0) |
 | `InnerFirstFrontBackOrderTests` | `innerFirstFrontBackOrder(n:)` — valid permutation N=8/16, differs from cover-first, empty for N=4/N%4≠0 |
 | `BookletCandidatesTests` | `bookletCandidates(n:)` — correct count (1 for N=4, 2 for N=8), valid permutations for all N, correct N=4 order, non-empty labels/descriptions |
+| `BookletImpositionOrderTests` (`BookletLogicTests.swift`) | `bookletImpositionOrder(n:)` — is the exact inverse of `coverFirstFrontBackOrder(n:)` for N=4…20, hardcoded N=4/N=8 orders, valid permutation for all N, `[]` for 0/3/6/negative |
+| `BookletPaddedCountTests` | Rounding up to whole folded sheets, minimum of one sheet, 0 → 0 |
+| `BookletSegmentsTests` | Splitting at part starts, first segment forced to 0, no-parts case, duplicate/unsorted/out-of-range indices |
+| `BookletSheetCountTests` | Padding per part; two 5-page parts cost 4 sheets, not 3 |
+| `ImposedBookletDocumentTests` | Face counts, padding, per-part separation, `sheetStarts` alignment, `.doubleSize` vs `.fitA4Landscape` sheet dimensions, sheet size following the source page, nil on empty input |
+| `BookletPlacementTests` | **Content placement** — eight solid-grey pages are imposed and every half-sheet is read back by sampling a pixel, so a transposed pair or mirrored sheet fails even when counts and sizes are right. Also asserts a 5-page part's three padding slots come out blank. Pages are matched against *measured* greys, since rendering applies a gamma shift. |
+| `CombineBookletOutputTests` | End-to-end through `CombineManager`: three parts → 10 faces with the TOC pointing at sheets 0/4/8; 3 copies of a 4-page part → three separate booklets; `.singlePages` output unchanged |
 | `A3LandscapeDetectionTests` | `isA3Landscape(_:)` — empty doc, portrait, square, too narrow (≤1000 pt), too wide (≥1400 pt), A3 landscape, multi-page, mixed-size doc |
 | `A3PageSplittingTests` | `splitA3Pages(_:leftFirst:)` — output count doubled, half width, unchanged height, left/right crop origins, mediaBox=cropBox, empty input |
 | `ReadOnlyLocationTests` | `nonWritableParentDirectories` (writable allowed, read-only `chmod 0555` flagged + deduped), `isFilePermissionError` (Cocoa write-no-permission, POSIX EACCES/EROFS, nested underlying POSIX, false for name-collision), `readOnlyLocationMessage` (names folder + mentions Dropbox/Documents, nil fallback) |
@@ -813,7 +851,7 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `PreferredInstrumentNameTests` | `preferredInstrumentDisplayName(_:)` — sax family (any spelling/order) → full "X Saxophone"; baritone/euphonium clef variants → "X B.C."/"X T.C."; bari *sax* stays a saxophone (distinct identity from baritone brass); non-sax names unchanged |
 | `NextSuggestionIndexTests` | `nextSuggestionIndex(after:in:usedKeys:)` — skips same-instrument aliases to next distinct; offers unused bassoon after bass clarinet; nil for unrecognised |
 
-**Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; `applyBookletOrder` state mutations; UI/integration tests.
+**Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; `applyBookletOrder` state mutations; `printPDFDocument` (opens a modal dialog, so it can't be driven headlessly — and whether short-edge duplex actually lands the right way up on a *landscape* sheet can only be confirmed on real paper); UI/integration tests beyond `ViewSmokeTests` and `CombineBookletOutputTests`.
 
 ---
 

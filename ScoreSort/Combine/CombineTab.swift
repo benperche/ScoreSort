@@ -22,6 +22,9 @@ struct CombineView: View {
     @EnvironmentObject var stampStore: StampStore
     @StateObject private var combineManager = CombineManager()
     @State private var addBlankPages = false
+    @AppStorage("combineLayout") private var layout: CombineLayout = .singlePages
+    @AppStorage("combineBookletSheetSize") private var bookletSheetSize: BookletSheetSize = .doubleSize
+    @AppStorage("combineTwoSidedShortEdge") private var twoSidedShortEdge = true
     @AppStorage("combineStampEnabled") private var stampEnabled = false
     @AppStorage("combineStampScope") private var stampScope: StampScope = .firstPageOfEachPart
     @State private var isTargeted = false
@@ -351,22 +354,31 @@ struct CombineView: View {
                             .transition(.opacity.combined(with: .move(edge: .bottom)))
                         }
 
-                        Toggle("For double-sided printing: add blank page after files with an odd number of pages", isOn: $addBlankPages)
-                            .toggleStyle(.checkbox)
-
                         HStack {
-                            Text("\(combineManager.totalFiles) file(s) • \(combineManager.totalPages) total page(s)")
+                            CombineOutputMenuButton(layout: $layout,
+                                                    sheetSize: $bookletSheetSize,
+                                                    twoSidedShortEdge: $twoSidedShortEdge,
+                                                    addBlankPages: $addBlankPages)
+
+                            Text(outputSummary)
                                 .font(.callout)
                                 .foregroundColor(.secondary)
-                            
+
                             Spacer()
-                            
+
                             Button(action: openInPreview) {
                                 Label("Open in Preview", systemImage: "doc.text.magnifyingglass")
                             }
                             .buttonStyle(.bordered)
                             .controlSize(.large)
-                            
+
+                            Button(action: printCombined) {
+                                Label("Print\u{2026}", systemImage: "printer")
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.large)
+                            .disabled(combineManager.files.isEmpty)
+
                             Button(action: createPDF) {
                                 Label("Create PDF", systemImage: "arrow.down.doc")
                             }
@@ -743,7 +755,7 @@ struct CombineView: View {
         panel.beginSheetModal(for: window) { response in
             menuState.isPanelOpen = false
             if response == .OK, let url = panel.url {
-                combineManager.createCombinedPDF(to: url, addBlankPages: addBlankPages, stampJob: activeStampJob) { title, message, isError in
+                combineManager.createCombinedPDF(to: url, options: outputOptions, stampJob: activeStampJob) { title, message, isError in
                     if isError {
                         showNSAlert(title: title, message: message, isError: true)
                     } else {
@@ -763,9 +775,34 @@ struct CombineView: View {
     }
     
     private func openInPreview() {
-        combineManager.openInPreview(addBlankPages: addBlankPages, stampJob: activeStampJob) { title, message, isError in
+        combineManager.openInPreview(options: outputOptions, stampJob: activeStampJob) { title, message, isError in
             showNSAlert(title: title, message: message, isError: isError)
         }
+    }
+
+    private func printCombined() {
+        combineManager.printCombined(options: outputOptions,
+                                     stampJob: activeStampJob,
+                                     in: NSApp.keyWindow ?? NSApp.mainWindow) { title, message, isError in
+            showNSAlert(title: title, message: message, isError: isError)
+        }
+    }
+
+    /// The output shape the buttons will produce, gathered from the menu's bindings.
+    private var outputOptions: CombineOutputOptions {
+        CombineOutputOptions(layout: layout,
+                             sheetSize: bookletSheetSize,
+                             addBlankPages: addBlankPages,
+                             twoSidedShortEdge: twoSidedShortEdge)
+    }
+
+    /// The counts line beside the output menu. Booklet mode adds the paper count, which is
+    /// what actually matters when loading a tray.
+    private var outputSummary: String {
+        let base = "\(combineManager.totalFiles) file(s) \u{2022} \(combineManager.totalPages) total page(s)"
+        guard layout == .booklet else { return base }
+        let sheets = combineManager.totalBookletSheets
+        return base + " \u{2022} \(sheets) sheet(s) of paper"
     }
 
     /// The stamp job to apply to output, or nil when stamping is switched off.
@@ -836,6 +873,7 @@ struct CombineView: View {
         slice.primaryTitle  = "Create PDF\u{2026}"
         slice.primarySave   = hasFiles ? { createPDF() } : nil
         slice.openInPreview = hasFiles ? { openInPreview() } : nil
+        slice.print         = hasFiles ? { printCombined() } : nil
         slice.clearTitle    = "Clear Files"
         slice.clear         = hasFiles ? { combineManager.clearAll(undoManager: undoManager) } : nil
         slice.togglePresets = { withAnimation { showPresetSidebar.toggle() } }
@@ -941,6 +979,69 @@ extension Color {
 }
 
 // MARK: - Combine File Row
+// MARK: - Output Menu Button
+
+/// The single pull-down holding everything about the *shape* of the output, so the bottom
+/// bar's three buttons stay purely about where it goes. Modelled on `StampMenuButton`:
+/// inline pickers, so every checkmark in the menu means "this is the one in use".
+struct CombineOutputMenuButton: View {
+    @Binding var layout: CombineLayout
+    @Binding var sheetSize: BookletSheetSize
+    @Binding var twoSidedShortEdge: Bool
+    @Binding var addBlankPages: Bool
+
+    var body: some View {
+        Menu {
+            Picker("Layout", selection: $layout) {
+                ForEach(CombineLayout.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .pickerStyle(.inline)
+
+            Divider()
+
+            Picker("Sheet size", selection: $sheetSize) {
+                ForEach(BookletSheetSize.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .pickerStyle(.inline)
+            .disabled(layout != .booklet)      // nothing to lay out two-up on single pages
+
+            Divider()
+
+            Toggle("Two-sided, short-edge flip", isOn: $twoSidedShortEdge)
+                .disabled(layout != .booklet)
+
+            Toggle("Blank page after odd-length parts", isOn: $addBlankPages)
+                .disabled(layout == .booklet)  // booklets pad to a whole folded sheet anyway
+        } label: {
+            Label(title, systemImage: layout == .booklet ? "book.closed" : "doc.on.doc")
+                .lineLimit(1)
+        }
+        // Sized to its own label so the row around it stays put instead of the title wrapping.
+        .fixedSize()
+        .help(helpText)
+    }
+
+    private var title: String {
+        layout == .booklet ? "Booklet \u{00B7} \(sheetSize.shortLabel)" : "Single pages"
+    }
+
+    private var helpText: String {
+        switch layout {
+        case .singlePages:
+            return "Output layout: one page per sheet side, in reading order."
+        case .booklet:
+            return """
+            Each part is imposed as its own saddle-stitch booklet, padded to a whole folded \
+            sheet. Print two-sided with a short-edge flip, then fold and staple.
+            """
+        }
+    }
+}
+
 struct CombineFileRow: View {
     let file: CombineFile
     let isSelected: Bool
@@ -1838,6 +1939,35 @@ struct CombineFile: Identifiable, Equatable {
     var isBlankPage: Bool = false
 }
 
+// MARK: - Output options
+
+/// How the combined pages are laid out on the page.
+enum CombineLayout: String, CaseIterable, Identifiable, Codable {
+    /// One reading page per PDF page — what the tool has always done.
+    case singlePages
+    /// Each part imposed as its own saddle-stitch booklet, two pages to a sheet face.
+    case booklet
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .singlePages: return "Single pages"
+        case .booklet:     return "Booklet (fold & staple)"
+        }
+    }
+}
+
+/// Everything about the *shape* of the output, as opposed to which files go into it.
+/// Passed down to `buildDocument` so Create PDF, Open in Preview and Print can't drift.
+struct CombineOutputOptions {
+    var layout: CombineLayout = .singlePages
+    var sheetSize: BookletSheetSize = .doubleSize
+    var addBlankPages = false
+    /// Print only — presets the duplex mode a folded booklet needs.
+    var twoSidedShortEdge = true
+}
+
 // MARK: - Combine Manager
 class CombineManager: ObservableObject {
     @Published var files: [CombineFile] = []
@@ -1874,6 +2004,32 @@ class CombineManager: ObservableObject {
             }
         }
         return count
+    }
+
+    /// Sheets of paper booklet output will consume. Mirrors `buildDocument`'s segmentation:
+    /// every copy of every real file starts its own booklet, and blank-page entries join the
+    /// booklet in front of them (they carry no bookmark, so that's how imposition groups them).
+    var totalBookletSheets: Int {
+        var sheets = 0
+        var current = 0                       // reading pages in the booklet being accumulated
+        func flush() { sheets += bookletPaddedCount(current) / 4; current = 0 }
+        func add(_ f: CombineFile) {
+            if f.isBlankPage { current += 1 } else { flush(); current = f.pageCount }
+        }
+
+        var i = 0
+        while i < files.count {
+            if let gid = files[i].collateGroupId, let g = collateGroups[gid] {
+                var group: [CombineFile] = []
+                while i < files.count && files[i].collateGroupId == gid { group.append(files[i]); i += 1 }
+                for _ in 0..<g.copies { for f in group { add(f) } }
+            } else {
+                let f = files[i]; i += 1
+                for _ in 0..<f.copies { add(f) }
+            }
+        }
+        flush()
+        return sheets
     }
 
     // ── Undo ──────────────────────────────────────────────────────────────────
@@ -2097,7 +2253,7 @@ class CombineManager: ObservableObject {
     /// two can never drift apart. Returns the document, its page count, and the bookmark
     /// labels with the page index each part starts at — those indices double as "first page
     /// of each part" for stamping.
-    private func buildDocument(addBlankPages: Bool, stampJob: StampJob?)
+    private func buildDocument(options: CombineOutputOptions, stampJob: StampJob?)
         -> (doc: PDFDocument, pageCount: Int, bookmarks: [(label: String, pageIndex: Int)]) {
         var doc = PDFDocument()
         var idx = 0
@@ -2119,7 +2275,9 @@ class CombineManager: ObservableObject {
                 for p in 0..<src.pageCount {
                     if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
                 }
-                if addBlankPages && src.pageCount % 2 == 1 {
+                // Booklet output pads each part to a whole folded sheet, which subsumes
+                // padding to an even page count — so this only applies to single-page output.
+                if options.addBlankPages && options.layout != .booklet && src.pageCount % 2 == 1 {
                     if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
                 }
             }
@@ -2137,12 +2295,36 @@ class CombineManager: ObservableObject {
             }
         }
 
-        let pageCount = idx
+        var pageCount = idx
 
         // Stamp *before* the outline is built — flattening rebuilds the pages and drops any
         // existing outline, but leaves page indices untouched, so the bookmark loop below
         // still lines up.
         doc = applyingStamp(stampJob, to: doc, partFirstPages: bookmarks.map { $0.pageIndex })
+
+        // Then impose, still before the outline: imposition rebuilds the pages too, and it
+        // must run on reading pages so stamps land where the reader sees them. Each bookmark
+        // marks the first page of a part — and there's one per *copy*, so seven copies of a
+        // part become seven separately foldable booklets rather than one seven-times-long one.
+        if options.layout == .booklet {
+            let segments = bookletSegments(pageCount: doc.pageCount,
+                                           partFirstPages: bookmarks.map { $0.pageIndex })
+            if let imposed = imposedBookletDocument(doc, segments: segments,
+                                                    sheetSize: options.sheetSize) {
+                doc = imposed.doc
+                pageCount = imposed.doc.pageCount
+                // Re-aim each bookmark at the sheet its booklet starts on. Match by looking
+                // up which segment contains the reading page rather than by position:
+                // bookletSegments can prepend a segment at page 0, and a file that failed to
+                // load contributes a label but no pages, so the two arrays aren't always the
+                // same length. `segments` and `sheetStarts` are index-aligned by construction.
+                for i in bookmarks.indices {
+                    if let s = segments.firstIndex(where: { $0.contains(bookmarks[i].pageIndex) }) {
+                        bookmarks[i].pageIndex = imposed.sheetStarts[s]
+                    }
+                }
+            }
+        }
 
         let root = PDFOutline()
         for (label, pageIndex) in bookmarks {
@@ -2158,21 +2340,36 @@ class CombineManager: ObservableObject {
         return (doc, pageCount, bookmarks)
     }
 
-    func createCombinedPDF(to url: URL, addBlankPages: Bool, stampJob: StampJob? = nil, completion: PDFAlertHandler) {
-        let built = buildDocument(addBlankPages: addBlankPages, stampJob: stampJob)
+    func createCombinedPDF(to url: URL, options: CombineOutputOptions,
+                           stampJob: StampJob? = nil, completion: PDFAlertHandler) {
+        let built = buildDocument(options: options, stampJob: stampJob)
         if built.doc.write(to: url) {
+            let unit = options.layout == .booklet ? "booklet sheet sides" : "pages"
             completion("PDF Created Successfully",
-                       "Combined PDF with \(built.pageCount) pages saved to:\n\(url.path)", false)
+                       "Combined PDF with \(built.pageCount) \(unit) saved to:\n\(url.path)", false)
         } else {
             completion("Error", "Failed to create PDF", true)
         }
     }
 
-    func openInPreview(addBlankPages: Bool, stampJob: StampJob? = nil, onError: PDFAlertHandler) {
-        let built = buildDocument(addBlankPages: addBlankPages, stampJob: stampJob)
+    func openInPreview(options: CombineOutputOptions, stampJob: StampJob? = nil, onError: PDFAlertHandler) {
+        let built = buildDocument(options: options, stampJob: stampJob)
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedForPrint.pdf")
         guard built.doc.write(to: tempURL) else { onError("Error", "Failed to create temporary PDF", true); return }
         NSWorkspace.shared.open(tempURL)
+    }
+
+    /// Builds the document and hands it straight to the system print dialog, so a whole
+    /// folder of booklets is one print job rather than one per part.
+    @MainActor
+    func printCombined(options: CombineOutputOptions, stampJob: StampJob? = nil,
+                       in window: NSWindow?, onError: PDFAlertHandler) {
+        let built = buildDocument(options: options, stampJob: stampJob)
+        printPDFDocument(built.doc,
+                         jobName: "ScoreSort \u{2014} Combined",
+                         twoSidedShortEdge: options.layout == .booklet && options.twoSidedShortEdge,
+                         in: window,
+                         onError: onError)
     }
 
     private func createBlankPage() -> PDFPage? {

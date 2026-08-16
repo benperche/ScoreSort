@@ -56,6 +56,7 @@ struct TabSlice {
     var primaryTitle: String = "Save"             // File ▸ ⌘S (context: Create PDF / Save Split / …)
     var primarySave: (() -> Void)? = nil
     var openInPreview: (() -> Void)? = nil        // File ▸ ⇧⌘P (Combine)
+    var print: (() -> Void)? = nil                // File ▸ ⌘P (Combine)
     var clearTitle: String = "Clear"              // File ▸ ⌘⌫ label (e.g. "Start Over" on done screens)
     var clear: (() -> Void)? = nil                // File ▸ ⌘⌫
     var togglePresets: (() -> Void)? = nil        // View ▸ ⌥⌘P (Combine)
@@ -129,6 +130,14 @@ struct FileCommands: Commands {
             Button(commands.slice.clearTitle) { commands.slice.clear?() }
                 .keyboardShortcut(.delete, modifiers: .command)
                 .disabled(commands.slice.clear == nil)
+        }
+        // ⌘P is free (⇧⌘P is Open in Preview, ⌥⌘P toggles the presets sidebar) and is a
+        // modifier shortcut, so binding it in the menu bar is safe under the rule that only
+        // non-editing shortcuts live here.
+        CommandGroup(replacing: .printItem) {
+            Button("Print\u{2026}") { commands.slice.print?() }
+                .keyboardShortcut("p", modifiers: .command)
+                .disabled(commands.slice.print == nil)
         }
     }
 }
@@ -493,6 +502,7 @@ struct ShortcutsHelpView: View {
                     shortcutRow("⌘Z / ⇧⌘Z", "Undo / Redo")
                     shortcutRow("⌥⌘P", "Show / hide the presets panel (also P)")
                     shortcutRow("⇧⌘P", "Open the combined PDF in Preview")
+                    shortcutRow("⌘P", "Print the combined PDF")
                 }
 
                 shortcutSection("Rename Files") {
@@ -623,7 +633,8 @@ struct WelcomeTourPage {
             bodyParagraphs: [
                 "Drag your files (or a whole folder) into the app, then reorder with **⌘↑ / ⌘↓** or by dragging. You can also drag in **images** (JPEG, PNG, TIFF…) — each becomes an A4 page — and insert a blank sheet anywhere with **Add Blank Page**. Set how many copies of each part you need with the stepper beside it.",
                 "You can save your usual instrument allocations as **Ensemble Presets** in Preferences. These can be viewed in the Presets sidebar to help you remember the normal number of parts required. Use **Apply to Files** to attempt to automatically match your preset allocations to your filenames.",
-                "When ready, click **Create PDF** to save the combined file, or **Open in Preview** to print directly without saving. The combined PDF includes a clickable **table of contents** (one bookmark per file), shown in Preview's sidebar.",
+                "When ready, click **Create PDF** to save the combined file, **Print…** to send it straight to the printer, or **Open in Preview** to check it first. The combined PDF includes a clickable **table of contents** (one bookmark per file), shown in Preview's sidebar.",
+                "**Advanced: Booklets:** Switch the output menu at the bottom left from *Single pages* to **Booklet** and every part is imposed as its own fold-and-staple booklet — two pages to a sheet side, in saddle-stitch order, padded to a whole folded sheet. Choose **double size** (A4 parts onto A3 paper) or **fit A4 landscape** (an A5 booklet that prints anywhere). Print two-sided with a **short-edge flip**, then fold and staple. macOS has no booklet option of its own, so the whole folder goes in one print job instead of one document at a time.",
                 "**Advanced: Collate Sets:** Select a group of parts and press **C** to interleave their pages in the output document. Ideal where you have a number of parts required for multiple players, for example in a percussion section — each player's copies will print together in a ready-to-distribute stack."
             ],
             tipText: "⌫ removes selected files · ⌘Z undoes any change · ⌘↑ / ⌘↓ reorders",
