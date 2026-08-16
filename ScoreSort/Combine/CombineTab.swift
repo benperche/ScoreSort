@@ -1088,8 +1088,9 @@ struct CombineOutputMenuButton: View {
             First time on a new printer, use Print Test Sheet\u{2026} — it prints one sheet, \
             front and back. If the back comes out upside down, switch Two-sided flip.
 
-            The flip is applied only when printing, so Create PDF and Open in Preview always \
-            read upright on screen.
+            The flip is applied only when ScoreSort prints, so Create PDF and Open in Preview \
+            stay the right way up on screen — an ordinary booklet file you can send to whoever \
+            is doing the printing.
             """
         }
     }
