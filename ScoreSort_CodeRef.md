@@ -580,7 +580,12 @@ Both halves of a sheet are drawn with `page.getDrawingTransform(.cropBox, rect: 
 
 ### Printing — `Logic/PrintLogic.swift`
 
-`printPDFDocument(_:jobName:twoSidedShortEdge:in:onError:)` (`@MainActor`). Uses `doc.printOperation(for:scalingMode:autoRotate:)` with **`.pageScaleNone` and `autoRotate: false`** (imposed sheets are already positioned; re-fitting would undo it), zero margins and centring off, then `runModal(for:delegate:didRun:contextInfo:)`. Takes a `PDFAlertHandler` and never raises an `NSAlert` itself.
+`printPDFDocument(_:jobName:twoSidedShortEdge:in:onError:)` (`@MainActor`) builds settings via `printSettings(for:basedOn:twoSidedShortEdge:)`, makes the operation with `printOperation(for:info:)`, then runs `runModal(for:delegate:didRun:contextInfo:)`. Takes a `PDFAlertHandler` and never raises an `NSAlert` itself. The settings are a separate function so they can be unit-tested — the dialog can't be driven headlessly.
+
+Three settings matter, and two are counter-intuitive:
+- **`info.orientation` is set from the first page's `visualPageBox`.** Booklet sheets are landscape; without this they land on portrait paper and get squashed into a corner. Setting `orientation` swaps `paperSize` with it, so an A4 queue becomes 842 × 595 — exactly an A5 booklet's sheet. `autoRotate` stays `false` so PDFKit can't turn individual sheets and break the fold.
+- **Centring is ON.** The fold has to land in the middle of the paper. Centring only *translates* the sheet, so it can't disturb the imposition — the earlier worry that it would shrink the sheet was wrong.
+- **`scalingMode: .pageScaleDownToFit`**, not `.pageScaleNone`. An imposed sheet is exactly full-bleed A4/A3 but printers have an unprintable hardware margin, so 1:1 clips the outer edges of the music. Down-scaling is uniform, so the halves stay symmetrical about the fold, and this mode never scales *up* (which is what would wreck the layout).
 
 Duplex is set through `info.printSettings["com_apple_print_PrintSettings_PMDuplexing"] = kPMDuplexTumble` — **not** `PMSetDuplex`, which isn't declared in the public SDK (PrintCore exposes only the opaque `PMPrintSettings` typedef). The key is `kPMDuplexingStr` with dots swapped for underscores, the convention `NSPrintInfo.h` documents.
 
@@ -838,6 +843,7 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `ImposedBookletDocumentTests` | Face counts, padding, per-part separation, `sheetStarts` alignment, `.doubleSize` vs `.fitA4Landscape` sheet dimensions, sheet size following the source page, nil on empty input |
 | `BookletPlacementTests` | **Content placement** — eight solid-grey pages are imposed and every half-sheet is read back by sampling a pixel, so a transposed pair or mirrored sheet fails even when counts and sizes are right. Also asserts a 5-page part's three padding slots come out blank. Pages are matched against *measured* greys, since rendering applies a gamma shift. |
 | `CombineBookletOutputTests` | End-to-end through `CombineManager`: three parts → 10 faces with the TOC pointing at sheets 0/4/8; 3 copies of a 4-page part → three separate booklets; `.singlePages` output unchanged |
+| `PrintSettingsTests` (`PrintLogicTests.swift`) | `printSettings(for:basedOn:twoSidedShortEdge:)` — landscape sheets turn the paper (both booklet sheet sizes), portrait documents are left alone, centring on with zero margins, duplex requested as tumble/none |
 | `A3LandscapeDetectionTests` | `isA3Landscape(_:)` — empty doc, portrait, square, too narrow (≤1000 pt), too wide (≥1400 pt), A3 landscape, multi-page, mixed-size doc |
 | `A3PageSplittingTests` | `splitA3Pages(_:leftFirst:)` — output count doubled, half width, unchanged height, left/right crop origins, mediaBox=cropBox, empty input |
 | `ReadOnlyLocationTests` | `nonWritableParentDirectories` (writable allowed, read-only `chmod 0555` flagged + deduped), `isFilePermissionError` (Cocoa write-no-permission, POSIX EACCES/EROFS, nested underlying POSIX, false for name-collision), `readOnlyLocationMessage` (names folder + mentions Dropbox/Documents, nil fallback) |
