@@ -16,7 +16,10 @@ Combine multiple PDF files into a single document with flexible copying and page
 - **Smart preset matching** — handles roman-numeral filenames (Violin I/II → matches Violin 1/2 preset parts) and single-file consolidation (one Flute.pdf against Flute 1 + Flute 2 in preset → summed copies)
 - **Smart blank pages** — automatically add blank sheets after odd-page files for double-sided printing
 - **Automatic table of contents** — the combined PDF includes bookmarks for each file, visible in Preview's sidebar; multiple copies are labelled "Filename 1/3", "Filename 2/3", etc.
-- **Open in Preview** — opens combined PDF in Preview for quick printing (⌘P)
+- **Open in Preview** — opens combined PDF in Preview for a quick check (⇧⌘P)
+- **Print** (⌘P) — straight to the system print dialog, no saving first
+- **Booklets** — impose every part as its own fold-and-staple saddle-stitch booklet, on A3 or on
+  A4 landscape, with an adjustable page scale. macOS has no booklet feature of its own
 - **Or save to file** — create a permanent combined PDF document
 - **Selection tools** — Select All, Select None, Remove selected files
 - **Live preview** — see total file and page counts as you build
@@ -155,13 +158,43 @@ git clone https://github.com/benperche/ScoreSort.git
    - Preset parts with no matching file are also highlighted in orange in the sidebar
    - Create and edit presets in **Preferences** (⌘,) → Combiner tab
 
-6. **Configure double-sided printing** (optional)
-   - Check "Add blank sheet to the end of files with an odd number of pages"
-   - Ensures each new file starts on the front of a sheet when printing double-sided
+6. **Choose the output layout** (optional) — the menu at the bottom left
+   - **Single pages** (default): one page per sheet side, in reading order. "Blank page after
+     odd-length parts" ensures each new part starts on the front of a sheet when printing double-sided
+   - **Booklet**: every part is imposed as its own fold-and-staple booklet — two pages to a sheet
+     side in saddle-stitch order, padded to a whole folded sheet. See [Booklets](#booklets) below
 
 7. **Output your combined PDF**
-   - Click "Open in Preview" to create a temporary PDF and open it in Preview (press ⌘P to print)
-   - Or click "Create PDF" to save as a permanent file
+   - Click "Print…" to send it straight to the printer
+   - Or "Open in Preview" to create a temporary PDF and check it first
+   - Or "Create PDF" to save as a permanent file
+
+#### Booklets
+
+macOS has no booklet option of its own — where you see one it comes from a printer driver, and
+AirPrint queues never have it. ScoreSort therefore does the imposition itself and prints an
+ordinary two-up PDF, so a whole band folder goes out in **one** print job rather than one
+document at a time. Each part (and each *copy* of a part) becomes its own foldable booklet.
+
+- **Sheet size** — *Double size* puts A4 parts onto A3 paper at full size; *Fit A4 landscape*
+  scales two pages onto A4, giving an A5 booklet that prints on any printer
+- **Scale** — published music rarely matches A4 exactly, so this sizes each page within its half
+  of the sheet: 100% fits it exactly, higher fills more of it, lower leaves more space around the music
+
+**Setting up your printer (once).** macOS does not let an app choose your two-sided setting, so:
+
+1. In the print dialog, set **Double-sided** to *On*
+2. Printers differ in which edge they turn the paper on, so use **Print Test Sheet…** in the
+   output menu — it prints a single sheet, front and back. Fold it: if both sides read the right
+   way up, you're done
+3. If the back is upside down, switch **Two-sided flip** in the same menu and test once more
+
+If your printer has no two-sided mode, print the odd pages, put the stack back in, and print the
+even pages using **Paper Handling** in the print dialog.
+
+Because the flip depends on your printer, it is applied **only when printing**. Create PDF and
+Open in Preview always give an upright booklet you can read on screen — so print booklets
+directly from ScoreSort with **Print…** rather than saving the file and printing it elsewhere.
 
 #### Keyboard Shortcuts (Combiner)
 | Key | Action |

@@ -361,7 +361,9 @@ struct CombineView: View {
                             CombineOutputMenuButton(layout: $layout,
                                                     sheetSize: $bookletSheetSize,
                                                     duplexFlip: $duplexFlip,
-                                                    addBlankPages: $addBlankPages)
+                                                    addBlankPages: $addBlankPages,
+                                                    hasFiles: !combineManager.files.isEmpty,
+                                                    onPrintTestSheet: printTestSheet)
 
                             // Only meaningful once pages are being placed two-up; in single-page
                             // output the print dialog's own scaling is the right tool.
@@ -790,6 +792,14 @@ struct CombineView: View {
         }
     }
 
+    private func printTestSheet() {
+        combineManager.printTestSheet(options: outputOptions,
+                                      stampJob: activeStampJob,
+                                      in: NSApp.keyWindow ?? NSApp.mainWindow) { title, message, isError in
+            showNSAlert(title: title, message: message, isError: isError)
+        }
+    }
+
     private func printCombined() {
         combineManager.printCombined(options: outputOptions,
                                      stampJob: activeStampJob,
@@ -1012,6 +1022,8 @@ struct CombineOutputMenuButton: View {
     @Binding var sheetSize: BookletSheetSize
     @Binding var duplexFlip: BookletDuplexFlip
     @Binding var addBlankPages: Bool
+    let hasFiles: Bool
+    let onPrintTestSheet: () -> Void
 
     var body: some View {
         Menu {
@@ -1044,6 +1056,13 @@ struct CombineOutputMenuButton: View {
 
             Toggle("Blank page after odd-length parts", isOn: $addBlankPages)
                 .disabled(layout == .booklet)  // booklets pad to a whole folded sheet anyway
+
+            Divider()
+
+            // Lives in here rather than on the main screen: it's a one-off setup step, not part
+            // of the everyday flow.
+            Button("Print Test Sheet\u{2026}", action: onPrintTestSheet)
+                .disabled(layout != .booklet || !hasFiles)
         } label: {
             Label(title, systemImage: layout == .booklet ? "book.closed" : "doc.on.doc")
                 .lineLimit(1)
@@ -1064,8 +1083,13 @@ struct CombineOutputMenuButton: View {
         case .booklet:
             return """
             Each part is imposed as its own saddle-stitch booklet, padded to a whole folded \
-            sheet. Print two-sided, then fold and staple. If the backs come out upside down, \
-            switch the Two-sided flip setting.
+            sheet. Set Double-sided to On in the print dialog, then fold and staple.
+
+            First time on a new printer, use Print Test Sheet\u{2026} — it prints one sheet, \
+            front and back. If the back comes out upside down, switch Two-sided flip.
+
+            The flip is applied only when printing, so Create PDF and Open in Preview always \
+            read upright on screen.
             """
         }
     }
@@ -2338,7 +2362,12 @@ class CombineManager: ObservableObject {
     /// two can never drift apart. Returns the document, its page count, and the bookmark
     /// labels with the page index each part starts at — those indices double as "first page
     /// of each part" for stamping.
-    private func buildDocument(options: CombineOutputOptions, stampJob: StampJob?)
+    /// `rotateBackFaces` is the duplex compensation, and it is **only** applied on the way to a
+    /// printer. Turning it on makes every second sheet face appear upside down, which is right
+    /// on paper but looks broken on screen — so Create PDF and Open in Preview produce upright
+    /// reading spreads and only Print (and the test sheet) carry it.
+    private func buildDocument(options: CombineOutputOptions, stampJob: StampJob?,
+                               rotateBackFaces: Bool = false)
         -> (doc: PDFDocument, pageCount: Int, bookmarks: [(label: String, pageIndex: Int)]) {
         var doc = PDFDocument()
         var idx = 0
@@ -2397,7 +2426,7 @@ class CombineManager: ObservableObject {
             if let imposed = imposedBookletDocument(doc, segments: segments,
                                                     sheetSize: options.sheetSize,
                                                     pageScale: options.bookletPageScale,
-                                                    rotateBackFaces: options.duplexFlip.rotatesBackFaces) {
+                                                    rotateBackFaces: rotateBackFaces) {
                 doc = imposed.doc
                 pageCount = imposed.doc.pageCount
                 // Re-aim each bookmark at the sheet its booklet starts on. Match by looking
@@ -2451,10 +2480,48 @@ class CombineManager: ObservableObject {
     @MainActor
     func printCombined(options: CombineOutputOptions, stampJob: StampJob? = nil,
                        in window: NSWindow?, onError: PDFAlertHandler) {
-        let built = buildDocument(options: options, stampJob: stampJob)
+        let built = buildDocument(options: options, stampJob: stampJob,
+                                  rotateBackFaces: shouldRotateBackFaces(options))
         printPDFDocument(built.doc,
                          jobName: "ScoreSort \u{2014} Combined",
                          wantsTwoSided: options.layout == .booklet,
+                         in: window,
+                         onError: onError)
+    }
+
+    /// Whether output bound for a printer needs the back of each sheet turned over.
+    private func shouldRotateBackFaces(_ options: CombineOutputOptions) -> Bool {
+        options.layout == .booklet && options.duplexFlip.rotatesBackFaces
+    }
+
+    /// One sheet of paper — the front and back of the first booklet's outer sheet — laid out
+    /// exactly as a full run would be. Printing and folding it costs a single page and settles
+    /// whether the two-sided flip is set the right way, which nothing on screen can show.
+    func testSheetDocument(options: CombineOutputOptions, stampJob: StampJob? = nil) -> PDFDocument? {
+        var options = options
+        options.layout = .booklet          // meaningless otherwise; the menu only offers it there
+        let built = buildDocument(options: options, stampJob: stampJob,
+                                  rotateBackFaces: shouldRotateBackFaces(options))
+        guard built.doc.pageCount > 0 else { return nil }
+
+        let sheet = PDFDocument()
+        for i in 0..<min(2, built.doc.pageCount) {
+            guard let page = built.doc.page(at: i)?.copy() as? PDFPage else { continue }
+            sheet.insert(page, at: sheet.pageCount)
+        }
+        return sheet.pageCount > 0 ? sheet : nil
+    }
+
+    @MainActor
+    func printTestSheet(options: CombineOutputOptions, stampJob: StampJob? = nil,
+                        in window: NSWindow?, onError: PDFAlertHandler) {
+        guard let sheet = testSheetDocument(options: options, stampJob: stampJob) else {
+            onError("Nothing to Print", "Add some files first.", true)
+            return
+        }
+        printPDFDocument(sheet,
+                         jobName: "ScoreSort \u{2014} Booklet Test Sheet",
+                         wantsTwoSided: true,
                          in: window,
                          onError: onError)
     }

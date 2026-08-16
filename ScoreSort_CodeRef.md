@@ -575,7 +575,30 @@ The forward direction, used by the Combine tab: reading order in, printer sheet 
 | `bookletSegments(pageCount:partFirstPages:) -> [Range<Int>]` | One range per booklet. The first always starts at 0 so pages ahead of the first bookmarked part aren't dropped; duplicate, unsorted and out-of-range indices are ignored. |
 | `bookletSheetCount(segments:) -> Int` | Sheets of paper (padded ÷ 4, summed). |
 | `bookletPageScaleRange: ClosedRange<Double>` | `0.5...1.5` — the clamp applied to `pageScale`, mirrored by the UI so the field shows what the output uses. |
-| `enum BookletDuplexFlip` | `.longEdge` (default) / `.shortEdge` — which way the printer turns the paper. `rotatesBackFaces` is true for `.longEdge`. **This describes the printer's behaviour rather than requesting it**, because duplex can't be set from code (see the Printing section). A long-edge duplexer turns a *landscape* sheet upside down between sides, so imposition rotates every second face 180° to cancel it — confirmed on real paper, where un-rotated backs printed inverted. |
+| `enum BookletDuplexFlip` | `.longEdge` (default) / `.shortEdge` — which way the printer turns the paper. `rotatesBackFaces` is true for `.longEdge`. **This describes the printer's behaviour rather than requesting it**, because duplex can't be set from code (see the Printing section). A long-edge duplexer turns a *landscape* sheet upside down between sides, so imposition rotates every second face 180° to cancel it — confirmed on real paper, where un-rotated backs printed inverted. **Applied on the print path only** — see below. |
+
+#### Where the duplex compensation applies
+
+`buildDocument(options:stampJob:rotateBackFaces:)` defaults the flag to `false`. Only
+`printCombined` and `testSheetDocument` pass it as true (via `shouldRotateBackFaces`), so:
+
+| Output | Back faces |
+|---|---|
+| Create PDF | upright — a reading spread you can check on screen |
+| Open in Preview | upright |
+| Print… | rotated, to survive the duplexer |
+| Print Test Sheet… | rotated (it must match a real run) |
+
+The trade-off, which the in-app docs and README both state: a *saved* booklet PDF printed from
+somewhere else will have inverted backs, so users are told to print booklets from ScoreSort.
+The alternative — rotating everywhere — made Preview look broken, which is the worse failure
+because it reads as a bug rather than as a setup step.
+
+`testSheetDocument(options:stampJob:)` returns the first two faces (one physical sheet, front
+and back) of the first booklet, imposed exactly as a full run would be. It forces
+`layout = .booklet` so it's meaningful whatever the menu says, and returns nil with no files.
+It exists because which flip a printer needs **cannot be determined in software** — one folded
+sheet settles it, instead of a whole band folder.
 | `imposedBookletDocument(_:segments:sheetSize:pageScale:rotateBackFaces:) -> (doc: PDFDocument, sheetStarts: [Int])?` | Rebuilds the document as sheets, one booklet per segment. Same `CGDataConsumer` + `beginPage(mediaBox:)` pipeline as `stampedDocument`, so **annotations, links and outlines are dropped** — build the outline on the result. Sheet size follows the segment's first page via `visualPageBox(_:)` (crop box, rotation-aware), so A5 parts give A4 sheets. `sheetStarts` is index-aligned with `segments`. |
 
 **`pageScale`** sizes each page *within its half of the sheet*, about the half's centre — 1.0 fits the half exactly, 1.03 draws the music 3% larger, 0.95 leaves more air around it. Published music doesn't match A4, so this is the dial for that. Two details make it safe:
