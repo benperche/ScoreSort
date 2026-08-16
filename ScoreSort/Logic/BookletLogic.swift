@@ -100,16 +100,27 @@ func bookletSheetCount(segments: [Range<Int>]) -> Int {
 
 // MARK: - Imposition
 
+/// The range the page scale is clamped to. Published music rarely sits comfortably on A4,
+/// so the useful range runs either side of a straight fit — under 100% for more air around
+/// each page, over it to push the notes up a little.
+let bookletPageScaleRange: ClosedRange<Double> = 0.5...1.5
+
 /// Imposes `doc` as saddle-stitch booklets, one per segment, each padded with blanks to a
 /// whole number of folded sheets. Returns the sheet document along with the sheet index
 /// each booklet starts at, so the caller can rebuild an outline against the new pages.
+///
+/// `pageScale` sizes each page *within its half of the sheet*, about the half's centre, so
+/// the fold stays put and the two halves stay symmetrical: 1.0 fits the half exactly, 1.03
+/// draws the music 3% larger, 0.95 leaves more white space around it. Anything that spills
+/// past the half is clipped, so it can never cross the fold into the facing page.
 ///
 /// Like `stampedDocument(_:stamp:pageIndices:)`, this rebuilds page content through a
 /// `CGPDFContext`, so annotations, links and outlines on the source pages are dropped —
 /// callers that want an outline must build it on the returned document.
 func imposedBookletDocument(_ doc: PDFDocument,
                             segments: [Range<Int>],
-                            sheetSize: BookletSheetSize) -> (doc: PDFDocument, sheetStarts: [Int])? {
+                            sheetSize: BookletSheetSize,
+                            pageScale: Double = 1.0) -> (doc: PDFDocument, sheetStarts: [Int])? {
     guard doc.pageCount > 0, !segments.isEmpty else { return nil }
     guard let data = doc.dataRepresentation(),
           let provider = CGDataProvider(data: data as CFData),
@@ -123,6 +134,8 @@ func imposedBookletDocument(_ doc: PDFDocument,
 
     var sheetStarts: [Int] = []
     var facesWritten = 0
+    let scale = min(max(pageScale, bookletPageScaleRange.lowerBound),
+                    bookletPageScaleRange.upperBound)
 
     for segment in segments {
         // Appended for every segment, empty or not, so the returned array stays index-aligned
@@ -151,8 +164,10 @@ func imposedBookletDocument(_ doc: PDFDocument,
         // pair of slots is one face of paper.
         for slot in stride(from: 0, to: padded, by: 2) {
             ctx.beginPage(mediaBox: &sheetBox)
-            draw(readingPos: order[slot],     of: segment, from: source, into: leftHalf,  in: ctx)
-            draw(readingPos: order[slot + 1], of: segment, from: source, into: rightHalf, in: ctx)
+            draw(readingPos: order[slot],     of: segment, from: source, into: leftHalf,
+                 scale: scale, in: ctx)
+            draw(readingPos: order[slot + 1], of: segment, from: source, into: rightHalf,
+                 scale: scale, in: ctx)
             ctx.endPage()
             facesWritten += 1
         }
@@ -169,13 +184,23 @@ private func draw(readingPos: Int,
                   of segment: Range<Int>,
                   from source: CGPDFDocument,
                   into half: CGRect,
+                  scale: Double,
                   in ctx: CGContext) {
     guard readingPos < segment.count else { return }
     // CGPDFDocument pages are 1-based.
     guard let page = source.page(at: segment.lowerBound + readingPos + 1) else { return }
 
     ctx.saveGState()
+    // Clipping happens in sheet coordinates, before the transforms below, so an oversized
+    // page is trimmed at the half's edge and can never bleed across the fold.
     ctx.clip(to: half)
+    // Applied before the fit transform, so it scales the *fitted* page about the centre of
+    // its half rather than about the page's own origin — the fold line therefore doesn't move.
+    if scale != 1.0 {
+        ctx.translateBy(x: half.midX, y: half.midY)
+        ctx.scaleBy(x: CGFloat(scale), y: CGFloat(scale))
+        ctx.translateBy(x: -half.midX, y: -half.midY)
+    }
     // getDrawingTransform fits the page into `half` and accounts for its own /Rotate, so
     // it handles placement, scaling and rotation in one step — which is why both sheet
     // sizes share this code and only differ in how big `half` is.

@@ -219,6 +219,17 @@ struct ImposedBookletDocumentTests {
         #expect(result?.doc.pageCount == 8)
     }
 
+    @Test func pageScaleDoesNotChangeTheSheets() throws {
+        // Scaling is content-only: same number of sheets, same paper size.
+        let doc = document(pageCount: 8)
+        let scaled = try #require(imposedBookletDocument(doc, segments: [0..<8],
+                                                         sheetSize: .doubleSize, pageScale: 1.03))
+        #expect(scaled.doc.pageCount == 4)
+        let bounds = try #require(scaled.doc.page(at: 0)).bounds(for: .mediaBox)
+        #expect(abs(bounds.width - 1190) < 1)
+        #expect(abs(bounds.height - 842) < 1)
+    }
+
     @Test func emptyInputsReturnNil() {
         #expect(imposedBookletDocument(PDFDocument(), segments: [0..<4], sheetSize: .doubleSize) == nil)
         #expect(imposedBookletDocument(document(pageCount: 4), segments: [], sheetSize: .doubleSize) == nil)
@@ -407,6 +418,42 @@ struct BookletPlacementTests {
             #expect(reference.identify(sheet, atFractionX: 0.75) == expected[face * 2 + 1],
                     "right half of face \(face)")
         }
+    }
+
+    /// Below 100% the page shrinks *about the centre of its half*, leaving an even margin.
+    /// If it scaled about the page origin instead, the fold line would shift and the halves
+    /// would stop being mirror images.
+    @Test func scalingDownLeavesAnEvenMarginAroundEachHalf() throws {
+        let reference = try #require(GreyReference(pageCount: 8))
+        let imposed = try #require(imposedBookletDocument(reference.doc, segments: [0..<8],
+                                                          sheetSize: .doubleSize,
+                                                          pageScale: 0.8)).doc
+        let sheet = try #require(imposed.page(at: 0))
+
+        // At 80% the left half's page covers 0.05–0.45 of the sheet width, so the middle of
+        // the half is still the page and both of its edges have become white.
+        #expect(reference.identify(sheet, atFractionX: 0.25) == bookletImpositionOrder(n: 8)[0])
+        #expect(reference.identify(sheet, atFractionX: 0.01) == nil, "outer edge should be blank")
+        #expect(reference.identify(sheet, atFractionX: 0.47) == nil, "gutter edge should be blank")
+    }
+
+    /// Above 100% the page overflows its half and must be clipped at the fold — otherwise it
+    /// would paint over the facing page.
+    @Test func scalingUpIsClippedAtTheFold() throws {
+        let reference = try #require(GreyReference(pageCount: 8))
+        let imposed = try #require(imposedBookletDocument(reference.doc, segments: [0..<8],
+                                                          sheetSize: .doubleSize,
+                                                          pageScale: 1.2)).doc
+        let sheet = try #require(imposed.page(at: 0))
+
+        let order = bookletImpositionOrder(n: 8)
+        // The right half is drawn second, so if it weren't clipped it would spill left of the
+        // fold and cover the left half here. Seeing the left page just inside the fold proves
+        // the clip is holding.
+        #expect(reference.identify(sheet, atFractionX: 0.49) == order[0])
+        #expect(reference.identify(sheet, atFractionX: 0.51) == order[1])
+        // And it still fills its own half right out to the sheet edge.
+        #expect(reference.identify(sheet, atFractionX: 0.01) == order[0])
     }
 
     /// A 5-page part pads to 8, and the three padding slots must come out blank rather than

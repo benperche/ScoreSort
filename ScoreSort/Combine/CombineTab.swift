@@ -24,6 +24,9 @@ struct CombineView: View {
     @State private var addBlankPages = false
     @AppStorage("combineLayout") private var layout: CombineLayout = .singlePages
     @AppStorage("combineBookletSheetSize") private var bookletSheetSize: BookletSheetSize = .doubleSize
+    /// Stored as whole percent so the stepper and text field agree exactly — a Double would
+    /// drift and start showing 102.99999%.
+    @AppStorage("combineBookletScalePercent") private var bookletScalePercent = 100
     @AppStorage("combineTwoSidedShortEdge") private var twoSidedShortEdge = true
     @AppStorage("combineStampEnabled") private var stampEnabled = false
     @AppStorage("combineStampScope") private var stampScope: StampScope = .firstPageOfEachPart
@@ -359,6 +362,13 @@ struct CombineView: View {
                                                     sheetSize: $bookletSheetSize,
                                                     twoSidedShortEdge: $twoSidedShortEdge,
                                                     addBlankPages: $addBlankPages)
+
+                            // Only meaningful once pages are being placed two-up; in single-page
+                            // output the print dialog's own scaling is the right tool.
+                            if layout == .booklet {
+                                BookletScaleField(percent: scalePercentBinding,
+                                                  range: minScalePercent...maxScalePercent)
+                            }
 
                             Text(outputSummary)
                                 .font(.callout)
@@ -792,9 +802,22 @@ struct CombineView: View {
     private var outputOptions: CombineOutputOptions {
         CombineOutputOptions(layout: layout,
                              sheetSize: bookletSheetSize,
+                             bookletPageScale: Double(bookletScalePercent) / 100,
                              addBlankPages: addBlankPages,
                              twoSidedShortEdge: twoSidedShortEdge)
     }
+
+    /// Clamped to the same range the imposition enforces, so what the field shows is what
+    /// the output uses — typing 400 lands on 150, not silently on something else.
+    private var scalePercentBinding: Binding<Int> {
+        Binding(
+            get: { bookletScalePercent },
+            set: { bookletScalePercent = min(max($0, minScalePercent), maxScalePercent) }
+        )
+    }
+
+    private var minScalePercent: Int { Int(bookletPageScaleRange.lowerBound * 100) }
+    private var maxScalePercent: Int { Int(bookletPageScaleRange.upperBound * 100) }
 
     /// The counts line beside the output menu. Booklet mode adds the paper count, which is
     /// what actually matters when loading a tray.
@@ -1039,6 +1062,56 @@ struct CombineOutputMenuButton: View {
             sheet. Print two-sided with a short-edge flip, then fold and staple.
             """
         }
+    }
+}
+
+/// "Scale [103]% ⌃⌄" — how big each page is drawn within its half of the booklet sheet.
+///
+/// A typed field rather than a menu of presets: published music doesn't match A4, and the
+/// useful corrections are things like 103%, which a coarse preset list can't express.
+struct BookletScaleField: View {
+    @Binding var percent: Int
+    let range: ClosedRange<Int>
+
+    /// The field edits its own text so a half-typed value ("1" on the way to "105") doesn't
+    /// get clamped out from under the cursor. It commits on Return or on losing focus.
+    @State private var text = ""
+    @FocusState private var focused: Bool
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Text("Scale")
+                .foregroundColor(.secondary)
+            TextField("", text: $text)
+                .frame(width: 38)
+                .multilineTextAlignment(.trailing)
+                .font(.system(.body, design: .monospaced))
+                .focused($focused)
+                .onSubmit { commit() }
+                .onExitCommand { text = "\(percent)"; focused = false }
+            Text("%")
+                .foregroundColor(.secondary)
+            Stepper("", value: $percent, in: range)
+                .labelsHidden()
+        }
+        .help("""
+              How large each page is drawn within its half of the sheet. 100% fits the half \
+              exactly; lower leaves more space around the music, higher fills more of it. \
+              Applies to Create PDF, Preview and Print alike.
+              """)
+        .onAppear { text = "\(percent)" }
+        .onChange(of: percent) { _, new in if !focused { text = "\(new)" } }
+        .onChange(of: focused) { _, isFocused in if !isFocused { commit() } }
+    }
+
+    private func commit() {
+        // Anything unparseable snaps back to the last good value rather than resetting to 100.
+        guard let typed = Int(text.trimmingCharacters(in: .whitespaces)) else {
+            text = "\(percent)"
+            return
+        }
+        percent = min(max(typed, range.lowerBound), range.upperBound)
+        text = "\(percent)"
     }
 }
 
@@ -1963,6 +2036,9 @@ enum CombineLayout: String, CaseIterable, Identifiable, Codable {
 struct CombineOutputOptions {
     var layout: CombineLayout = .singlePages
     var sheetSize: BookletSheetSize = .doubleSize
+    /// Booklet only — how big each page is drawn within its half of the sheet. 1.0 fits the
+    /// half exactly; published music rarely matches A4, so this is the dial for that.
+    var bookletPageScale: Double = 1.0
     var addBlankPages = false
     /// Print only — presets the duplex mode a folded booklet needs.
     var twoSidedShortEdge = true
@@ -2310,7 +2386,8 @@ class CombineManager: ObservableObject {
             let segments = bookletSegments(pageCount: doc.pageCount,
                                            partFirstPages: bookmarks.map { $0.pageIndex })
             if let imposed = imposedBookletDocument(doc, segments: segments,
-                                                    sheetSize: options.sheetSize) {
+                                                    sheetSize: options.sheetSize,
+                                                    pageScale: options.bookletPageScale) {
                 doc = imposed.doc
                 pageCount = imposed.doc.pageCount
                 // Re-aim each bookmark at the sheet its booklet starts on. Match by looking
