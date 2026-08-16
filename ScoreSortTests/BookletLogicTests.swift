@@ -456,6 +456,36 @@ struct BookletPlacementTests {
         #expect(reference.identify(sheet, atFractionX: 0.01) == order[0])
     }
 
+    /// A long-edge duplexer turns a landscape sheet upside down between sides, so the back
+    /// faces are imposed rotated 180° to cancel it. Rotating a face swaps which half each page
+    /// lands on, which is what this checks — fronts untouched, backs mirrored.
+    @Test func backFacesAreRotatedForLongEdgeDuplex() throws {
+        let reference = try #require(GreyReference(pageCount: 8))
+        let order = bookletImpositionOrder(n: 8)
+
+        let plain = try #require(imposedBookletDocument(reference.doc, segments: [0..<8],
+                                                        sheetSize: .doubleSize)).doc
+        let rotated = try #require(imposedBookletDocument(reference.doc, segments: [0..<8],
+                                                          sheetSize: .doubleSize,
+                                                          rotateBackFaces: true)).doc
+        #expect(rotated.pageCount == plain.pageCount)
+
+        for face in 0..<rotated.pageCount {
+            let sheet = try #require(rotated.page(at: face))
+            let left = reference.identify(sheet, atFractionX: 0.25)
+            let right = reference.identify(sheet, atFractionX: 0.75)
+            if face % 2 == 0 {
+                // Front of a sheet — unchanged.
+                #expect(left == order[face * 2], "front face \(face) left")
+                #expect(right == order[face * 2 + 1], "front face \(face) right")
+            } else {
+                // Back of a sheet — rotated, so the halves trade places.
+                #expect(left == order[face * 2 + 1], "back face \(face) left")
+                #expect(right == order[face * 2], "back face \(face) right")
+            }
+        }
+    }
+
     /// A 5-page part pads to 8, and the three padding slots must come out blank rather than
     /// wrapping around to real pages.
     @Test func paddingSlotsAreBlank() throws {

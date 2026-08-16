@@ -44,6 +44,35 @@ enum BookletSheetSize: String, CaseIterable, Identifiable, Codable {
     }
 }
 
+// MARK: - Duplex flip
+
+/// Which way the printer turns the paper between sides.
+///
+/// This can't be chosen from code: the print panel resets duplex from the printer's own
+/// preset the moment it appears, so a requested value is overwritten (measured — asking for
+/// tumble yields no-tumble). What the app *can* do is lay the sheets out to suit, which is
+/// what this setting drives.
+enum BookletDuplexFlip: String, CaseIterable, Identifiable, Codable {
+    /// The usual default, and what "Double-sided: On" normally means. The sheet turns about
+    /// its long edge, which on a landscape booklet sheet lands the back upside down — so the
+    /// back faces are rotated 180° when imposing, to cancel it out.
+    case longEdge
+    /// The sheet turns about its short edge, which needs no compensation.
+    case shortEdge
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .longEdge:  return "Long edge (usual)"
+        case .shortEdge: return "Short edge"
+        }
+    }
+
+    /// True when imposition has to rotate the back of each sheet to compensate.
+    var rotatesBackFaces: Bool { self == .longEdge }
+}
+
 // MARK: - Imposition order
 
 /// Saddle-stitch imposition order: `order[sheetSlot] = readingPos`, where slots run
@@ -120,7 +149,8 @@ let bookletPageScaleRange: ClosedRange<Double> = 0.5...1.5
 func imposedBookletDocument(_ doc: PDFDocument,
                             segments: [Range<Int>],
                             sheetSize: BookletSheetSize,
-                            pageScale: Double = 1.0) -> (doc: PDFDocument, sheetStarts: [Int])? {
+                            pageScale: Double = 1.0,
+                            rotateBackFaces: Bool = false) -> (doc: PDFDocument, sheetStarts: [Int])? {
     guard doc.pageCount > 0, !segments.isEmpty else { return nil }
     guard let data = doc.dataRepresentation(),
           let provider = CGDataProvider(data: data as CFData),
@@ -164,6 +194,13 @@ func imposedBookletDocument(_ doc: PDFDocument,
         // pair of slots is one face of paper.
         for slot in stride(from: 0, to: padded, by: 2) {
             ctx.beginPage(mediaBox: &sheetBox)
+            // Faces alternate front, back, front, back — so every second one is the back of
+            // a sheet, and that's the one a long-edge duplexer lands upside down.
+            if rotateBackFaces && (slot / 2) % 2 == 1 {
+                ctx.translateBy(x: sheetBox.midX, y: sheetBox.midY)
+                ctx.rotate(by: .pi)
+                ctx.translateBy(x: -sheetBox.midX, y: -sheetBox.midY)
+            }
             draw(readingPos: order[slot],     of: segment, from: source, into: leftHalf,
                  scale: scale, in: ctx)
             draw(readingPos: order[slot + 1], of: segment, from: source, into: rightHalf,

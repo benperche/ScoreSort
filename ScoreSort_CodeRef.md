@@ -575,7 +575,8 @@ The forward direction, used by the Combine tab: reading order in, printer sheet 
 | `bookletSegments(pageCount:partFirstPages:) -> [Range<Int>]` | One range per booklet. The first always starts at 0 so pages ahead of the first bookmarked part aren't dropped; duplicate, unsorted and out-of-range indices are ignored. |
 | `bookletSheetCount(segments:) -> Int` | Sheets of paper (padded ÷ 4, summed). |
 | `bookletPageScaleRange: ClosedRange<Double>` | `0.5...1.5` — the clamp applied to `pageScale`, mirrored by the UI so the field shows what the output uses. |
-| `imposedBookletDocument(_:segments:sheetSize:pageScale:) -> (doc: PDFDocument, sheetStarts: [Int])?` | Rebuilds the document as sheets, one booklet per segment. Same `CGDataConsumer` + `beginPage(mediaBox:)` pipeline as `stampedDocument`, so **annotations, links and outlines are dropped** — build the outline on the result. Sheet size follows the segment's first page via `visualPageBox(_:)` (crop box, rotation-aware), so A5 parts give A4 sheets. `sheetStarts` is index-aligned with `segments`. |
+| `enum BookletDuplexFlip` | `.longEdge` (default) / `.shortEdge` — which way the printer turns the paper. `rotatesBackFaces` is true for `.longEdge`. **This describes the printer's behaviour rather than requesting it**, because duplex can't be set from code (see the Printing section). A long-edge duplexer turns a *landscape* sheet upside down between sides, so imposition rotates every second face 180° to cancel it — confirmed on real paper, where un-rotated backs printed inverted. |
+| `imposedBookletDocument(_:segments:sheetSize:pageScale:rotateBackFaces:) -> (doc: PDFDocument, sheetStarts: [Int])?` | Rebuilds the document as sheets, one booklet per segment. Same `CGDataConsumer` + `beginPage(mediaBox:)` pipeline as `stampedDocument`, so **annotations, links and outlines are dropped** — build the outline on the result. Sheet size follows the segment's first page via `visualPageBox(_:)` (crop box, rotation-aware), so A5 parts give A4 sheets. `sheetStarts` is index-aligned with `segments`. |
 
 **`pageScale`** sizes each page *within its half of the sheet*, about the half's centre — 1.0 fits the half exactly, 1.03 draws the music 3% larger, 0.95 leaves more air around it. Published music doesn't match A4, so this is the dial for that. Two details make it safe:
 - The scale transform is applied **before** `getDrawingTransform`, so it scales the *fitted* page about the half's centre rather than about the page's own origin. The fold line therefore doesn't move and the halves stay mirror images.
@@ -594,7 +595,19 @@ Three settings matter, and two are counter-intuitive:
 - **Centring is ON.** The fold has to land in the middle of the paper. Centring only *translates* the sheet, so it can't disturb the imposition — the earlier worry that it would shrink the sheet was wrong.
 - **`scalingMode: .pageScaleDownToFit`**, not `.pageScaleNone`. An imposed sheet is exactly full-bleed A4/A3 but printers have an unprintable hardware margin, so 1:1 clips the outer edges of the music. Down-scaling is uniform, so the halves stay symmetrical about the fold, and this mode never scales *up* (which is what would wreck the layout). **Trade-off:** this mode ignores `NSPrintInfo.scalingFactor`, so the print dialog's Scale box does nothing. That is deliberate — `CombineOutputOptions.bookletPageScale` is the scaling control, and unlike the dialog's it also applies to Create PDF and Preview.
 
-Duplex is set through `info.printSettings["com_apple_print_PrintSettings_PMDuplexing"] = kPMDuplexTumble` — **not** `PMSetDuplex`, which isn't declared in the public SDK (PrintCore exposes only the opaque `PMPrintSettings` typedef). The key is `kPMDuplexingStr` with dots swapped for underscores, the convention `NSPrintInfo.h` documents.
+**Duplex cannot be chosen from code.** The value is set through
+`info.printSettings["com_apple_print_PrintSettings_PMDuplexing"]` (there is no public setter —
+PrintCore exposes only the opaque `PMPrintSettings` typedef, and the key is `kPMDuplexingStr`
+with dots swapped for underscores per `NSPrintInfo.h`), but **the print panel overwrites it from
+the printer's own preset the moment it appears.** Measured: asking for `kPMDuplexTumble` (3)
+came back as `kPMDuplexNoTumble` (2) every time — on `NSPrintInfo.shared` and on a fresh
+`NSPrintInfo`, with the value written into `printSettings` and into `dictionary()`, as a 64-bit
+and an `SInt32` `NSNumber`, and set both before and after the operation was created.
+
+So the request is left in as a harmless hint, and the *layout* compensates instead — see
+`BookletDuplexFlip`. Don't "fix" this by re-applying duplex around the panel: running the panel
+standalone via `NSPrintPanel.runModal(with:)` would lose the page preview, and forcing the value
+after the panel closes would silently override a deliberate user choice.
 
 ### `SplitControlsSection` layout (3 rows)
 
@@ -864,7 +877,9 @@ Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.
 | `PreferredInstrumentNameTests` | `preferredInstrumentDisplayName(_:)` — sax family (any spelling/order) → full "X Saxophone"; baritone/euphonium clef variants → "X B.C."/"X T.C."; bari *sax* stays a saxophone (distinct identity from baritone brass); non-sax names unchanged |
 | `NextSuggestionIndexTests` | `nextSuggestionIndex(after:in:usedKeys:)` — skips same-instrument aliases to next distinct; offers unused bassoon after bass clarinet; nil for unrecognised |
 
-**Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; `applyBookletOrder` state mutations; `printPDFDocument` (opens a modal dialog, so it can't be driven headlessly — and whether short-edge duplex actually lands the right way up on a *landscape* sheet can only be confirmed on real paper); UI/integration tests beyond `ViewSmokeTests` and `CombineBookletOutputTests`.
+**Not covered:** collate group logic (no unit tests yet — `createCollateGroup`/`dissolveGroup`/`updateGroupCopies` and the collated PDF output loop); rescan mode stripping; `performRename()` filesystem operation; `applyBookletOrder` state mutations; `printPDFDocument` (opens a modal dialog, so it can't be driven headlessly); UI/integration tests beyond `ViewSmokeTests` and `CombineBookletOutputTests`.
+
+⚠️ **When probing the print dialog, always set `info.jobDisposition = .save` first.** Dismissing a print sheet programmatically (e.g. `window.endSheet(_:)`) returns a code the operation reads as *OK*, and it will spool a real job to a real printer. This has already happened once.
 
 ---
 

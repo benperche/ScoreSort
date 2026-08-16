@@ -24,12 +24,17 @@ private let duplexingSettingKey = "com_apple_print_PrintSettings_PMDuplexing"
 /// stays off so PDFKit can't turn individual sheets and break the fold; the orientation is
 /// decided here instead.
 ///
-/// `twoSidedShortEdge` presets the duplex mode a folded booklet needs. It is a *request*:
-/// drivers may ignore it, and the user can always change it in the dialog.
+/// `wantsTwoSided` asks for duplex, but **only as a hint**: the print panel resets duplex from
+/// the printer's own preset as soon as it appears, so a requested value is overwritten
+/// (measured — asking for tumble came back as no-tumble every time, on a fresh `NSPrintInfo`,
+/// with an SInt32 value, and set both before and after the operation was created). Which way
+/// the paper actually turns is therefore handled in the imposition instead, by
+/// `BookletDuplexFlip`. This is left in because it costs nothing and is correct if a future
+/// macOS stops overriding it.
 @MainActor
 func printPDFDocument(_ doc: PDFDocument,
                       jobName: String,
-                      twoSidedShortEdge: Bool,
+                      wantsTwoSided: Bool,
                       in window: NSWindow?,
                       onError: PDFAlertHandler) {
     guard doc.pageCount > 0 else {
@@ -38,7 +43,7 @@ func printPDFDocument(_ doc: PDFDocument,
     }
 
     guard let info = printSettings(for: doc, basedOn: NSPrintInfo.shared,
-                                   twoSidedShortEdge: twoSidedShortEdge) else {
+                                   wantsTwoSided: wantsTwoSided) else {
         onError("Error", "Could not read the current print settings.", true)
         return
     }
@@ -65,7 +70,7 @@ func printPDFDocument(_ doc: PDFDocument,
 /// itself can't be driven headlessly.
 func printSettings(for doc: PDFDocument,
                    basedOn base: NSPrintInfo,
-                   twoSidedShortEdge: Bool) -> NSPrintInfo? {
+                   wantsTwoSided: Bool) -> NSPrintInfo? {
     guard let info = base.copy() as? NSPrintInfo else { return nil }
     info.topMargin = 0
     info.bottomMargin = 0
@@ -82,17 +87,14 @@ func printSettings(for doc: PDFDocument,
     let sheet = visualPageBox(for: doc.page(at: 0))
     info.orientation = sheet.width > sheet.height ? .landscape : .portrait
 
-    // Booklets fold across the short edge of a landscape sheet, so tumble is the mode that
-    // puts the back of each sheet the right way up.
-    //
-    // Set through the printSettings dictionary rather than PMSetDuplex: the Core Printing
-    // setter isn't declared in the public SDK (PrintCore exposes only the opaque
-    // PMPrintSettings typedef), whereas this key is the documented convention — NSPrintInfo.h
-    // says other parts of the printing system use "com.apple.print.PrintSettings.*" keys with
-    // the dots replaced by underscores, and PMPrintSettingsKeys.h spells this one
-    // kPMDuplexingStr = "com.apple.print.PrintSettings.PMDuplexing".
+    // A hint only — see the note on printPDFDocument. Set through the printSettings dictionary
+    // because no PM* setter is declared in the public SDK (PrintCore exposes only the opaque
+    // PMPrintSettings typedef); this key is the documented convention, spelled
+    // kPMDuplexingStr = "com.apple.print.PrintSettings.PMDuplexing" with the dots replaced by
+    // underscores as NSPrintInfo.h requires. Long-edge is requested rather than short, because
+    // that is what the panel falls back to anyway and what the imposition is laid out for.
     info.printSettings[duplexingSettingKey] =
-        NSNumber(value: twoSidedShortEdge ? kPMDuplexTumble : kPMDuplexNone)
+        NSNumber(value: wantsTwoSided ? kPMDuplexNoTumble : kPMDuplexNone)
 
     return info
 }

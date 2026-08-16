@@ -33,7 +33,7 @@ struct PrintSettingsTests {
         // An A5 booklet's sheets are A4 landscape; on portrait paper they'd be squashed.
         let doc = document(width: 842, height: 595)
         let info = try #require(printSettings(for: doc, basedOn: NSPrintInfo(),
-                                              twoSidedShortEdge: true))
+                                              wantsTwoSided: true))
         #expect(info.orientation == .landscape)
         #expect(info.paperSize.width > info.paperSize.height)
     }
@@ -41,7 +41,7 @@ struct PrintSettingsTests {
     @Test func doubleSizeSheetsAlsoTurnThePaper() throws {
         let doc = document(width: 1190, height: 842)
         let info = try #require(printSettings(for: doc, basedOn: NSPrintInfo(),
-                                              twoSidedShortEdge: true))
+                                              wantsTwoSided: true))
         #expect(info.orientation == .landscape)
     }
 
@@ -49,7 +49,7 @@ struct PrintSettingsTests {
         // Single-page output is ordinary A4 portrait and must stay that way.
         let doc = document(width: 595, height: 842)
         let info = try #require(printSettings(for: doc, basedOn: NSPrintInfo(),
-                                              twoSidedShortEdge: false))
+                                              wantsTwoSided: false))
         #expect(info.orientation == .portrait)
         #expect(info.paperSize.height > info.paperSize.width)
     }
@@ -59,7 +59,7 @@ struct PrintSettingsTests {
         // than anywhere else in the app.
         let doc = document(width: 842, height: 595)
         let info = try #require(printSettings(for: doc, basedOn: NSPrintInfo(),
-                                              twoSidedShortEdge: true))
+                                              wantsTwoSided: true))
         #expect(info.isHorizontallyCentered)
         #expect(info.isVerticallyCentered)
         #expect(info.topMargin == 0)
@@ -68,16 +68,20 @@ struct PrintSettingsTests {
         #expect(info.rightMargin == 0)
     }
 
-    @Test func duplexIsRequestedAsShortEdgeFlip() throws {
+    /// The duplex value is only ever a hint — the print panel resets it from the printer's own
+    /// preset, which is why the *layout* compensates instead (see `BookletDuplexFlip`). Still
+    /// worth pinning down what we ask for: long-edge, matching both the panel's fallback and
+    /// what the imposition is laid out for.
+    @Test func duplexIsRequestedAsLongEdgeFlip() throws {
         let doc = document(width: 842, height: 595)
         let key = "com_apple_print_PrintSettings_PMDuplexing"
 
-        let tumbling = try #require(printSettings(for: doc, basedOn: NSPrintInfo(),
-                                                  twoSidedShortEdge: true))
-        #expect((tumbling.printSettings[key] as? NSNumber)?.intValue == kPMDuplexTumble)
+        let twoSided = try #require(printSettings(for: doc, basedOn: NSPrintInfo(),
+                                                  wantsTwoSided: true))
+        #expect((twoSided.printSettings[key] as? NSNumber)?.intValue == kPMDuplexNoTumble)
 
         let simplex = try #require(printSettings(for: doc, basedOn: NSPrintInfo(),
-                                                 twoSidedShortEdge: false))
+                                                 wantsTwoSided: false))
         #expect((simplex.printSettings[key] as? NSNumber)?.intValue == kPMDuplexNone)
     }
 }

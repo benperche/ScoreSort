@@ -27,7 +27,7 @@ struct CombineView: View {
     /// Stored as whole percent so the stepper and text field agree exactly — a Double would
     /// drift and start showing 102.99999%.
     @AppStorage("combineBookletScalePercent") private var bookletScalePercent = 100
-    @AppStorage("combineTwoSidedShortEdge") private var twoSidedShortEdge = true
+    @AppStorage("combineDuplexFlip") private var duplexFlip: BookletDuplexFlip = .longEdge
     @AppStorage("combineStampEnabled") private var stampEnabled = false
     @AppStorage("combineStampScope") private var stampScope: StampScope = .firstPageOfEachPart
     @State private var isTargeted = false
@@ -360,7 +360,7 @@ struct CombineView: View {
                         HStack {
                             CombineOutputMenuButton(layout: $layout,
                                                     sheetSize: $bookletSheetSize,
-                                                    twoSidedShortEdge: $twoSidedShortEdge,
+                                                    duplexFlip: $duplexFlip,
                                                     addBlankPages: $addBlankPages)
 
                             // Only meaningful once pages are being placed two-up; in single-page
@@ -804,7 +804,7 @@ struct CombineView: View {
                              sheetSize: bookletSheetSize,
                              bookletPageScale: Double(bookletScalePercent) / 100,
                              addBlankPages: addBlankPages,
-                             twoSidedShortEdge: twoSidedShortEdge)
+                             duplexFlip: duplexFlip)
     }
 
     /// Clamped to the same range the imposition enforces, so what the field shows is what
@@ -1010,7 +1010,7 @@ extension Color {
 struct CombineOutputMenuButton: View {
     @Binding var layout: CombineLayout
     @Binding var sheetSize: BookletSheetSize
-    @Binding var twoSidedShortEdge: Bool
+    @Binding var duplexFlip: BookletDuplexFlip
     @Binding var addBlankPages: Bool
 
     var body: some View {
@@ -1034,8 +1034,13 @@ struct CombineOutputMenuButton: View {
 
             Divider()
 
-            Toggle("Two-sided, short-edge flip", isOn: $twoSidedShortEdge)
-                .disabled(layout != .booklet)
+            Picker("Two-sided flip", selection: $duplexFlip) {
+                ForEach(BookletDuplexFlip.allCases) { option in
+                    Text(option.label).tag(option)
+                }
+            }
+            .pickerStyle(.inline)
+            .disabled(layout != .booklet)
 
             Toggle("Blank page after odd-length parts", isOn: $addBlankPages)
                 .disabled(layout == .booklet)  // booklets pad to a whole folded sheet anyway
@@ -1059,7 +1064,8 @@ struct CombineOutputMenuButton: View {
         case .booklet:
             return """
             Each part is imposed as its own saddle-stitch booklet, padded to a whole folded \
-            sheet. Print two-sided with a short-edge flip, then fold and staple.
+            sheet. Print two-sided, then fold and staple. If the backs come out upside down, \
+            switch the Two-sided flip setting.
             """
         }
     }
@@ -2040,8 +2046,11 @@ struct CombineOutputOptions {
     /// half exactly; published music rarely matches A4, so this is the dial for that.
     var bookletPageScale: Double = 1.0
     var addBlankPages = false
-    /// Print only — presets the duplex mode a folded booklet needs.
-    var twoSidedShortEdge = true
+    /// Booklet only — which way the printer turns the paper, so imposition can lay the back
+    /// of each sheet out to suit. Not a request to the printer: the print panel resets duplex
+    /// from the printer's own preset, so this describes what the printer will do, rather than
+    /// telling it what to do.
+    var duplexFlip: BookletDuplexFlip = .longEdge
 }
 
 // MARK: - Combine Manager
@@ -2387,7 +2396,8 @@ class CombineManager: ObservableObject {
                                            partFirstPages: bookmarks.map { $0.pageIndex })
             if let imposed = imposedBookletDocument(doc, segments: segments,
                                                     sheetSize: options.sheetSize,
-                                                    pageScale: options.bookletPageScale) {
+                                                    pageScale: options.bookletPageScale,
+                                                    rotateBackFaces: options.duplexFlip.rotatesBackFaces) {
                 doc = imposed.doc
                 pageCount = imposed.doc.pageCount
                 // Re-aim each bookmark at the sheet its booklet starts on. Match by looking
@@ -2444,7 +2454,7 @@ class CombineManager: ObservableObject {
         let built = buildDocument(options: options, stampJob: stampJob)
         printPDFDocument(built.doc,
                          jobName: "ScoreSort \u{2014} Combined",
-                         twoSidedShortEdge: options.layout == .booklet && options.twoSidedShortEdge,
+                         wantsTwoSided: options.layout == .booklet,
                          in: window,
                          onError: onError)
     }
