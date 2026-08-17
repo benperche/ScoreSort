@@ -191,6 +191,10 @@ your two-sided setting, so:
 
 The answer is remembered **per printer**, so home and school can each keep their own.
 
+> **The print dialog's preview may show every second side upside down.** That's normal — it's how
+> the sheet has to be sent so it comes out the right way up once the printer turns the paper over.
+> Judge it by what comes out of the printer, not by the preview.
+
 If your printer has no two-sided mode, print the odd pages, put the stack back in, and print the
 even pages using **Paper Handling** in the print dialog.
 

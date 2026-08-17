@@ -617,7 +617,14 @@ no understanding of long versus short edges.
 out right?" → on *no*, it flips the setting itself and offers another sheet. Presented with
 `.sheet(item:)` per the blank-sheet gotcha. Its print dialog is presented on **`NSApp.keyWindow`**,
 which while the wizard is up is the wizard's own sheet window — a second sheet on the *main*
-window would queue behind the wizard rather than appear.
+window would queue behind the wizard rather than appear. The print call is wrapped in
+`DispatchQueue.main.async`: presenting it from inside the button's own update pass makes AppKit
+log *"not legal to call -layoutSubtreeIfNeeded on a view which is already being laid out"*.
+
+**Both the wizard and the menu tooltip warn that the dialog's preview shows every second side
+upside down.** With long-edge compensation that is the correct thing to send, but it reads as a
+fault — and the danger is someone "fixing" a setting that was already right. The wording points
+them at the paper instead.
 
 **The flip is stored per printer, not globally**, because it's a property of the machine: someone
 printing at home and at a school needs a different answer at each. `CombineView.duplexFlip` is

@@ -1088,6 +1088,7 @@ struct BookletDuplexSetupView: View {
             Label("In the print dialog, make sure Double-sided is set to On.",
                   systemImage: "exclamationmark.circle")
                 .foregroundColor(.secondary)
+            previewNote
             printerLine
 
             HStack {
@@ -1095,8 +1096,11 @@ struct BookletDuplexSetupView: View {
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Print Test Sheet\u{2026}") {
-                    onPrint()
                     step = .check
+                    // One runloop turn later: presenting the print sheet from inside the
+                    // button's own update pass makes AppKit complain about laying out a view
+                    // that's already being laid out.
+                    DispatchQueue.main.async { onPrint() }
                 }
                 .keyboardShortcut(.defaultAction)
                 .buttonStyle(.borderedProminent)
@@ -1110,8 +1114,10 @@ struct BookletDuplexSetupView: View {
                 .fontWeight(.medium)
             Text("Do the four pages read **1, 2, 3, 4**, all the right way up?")
 
+            previewNote
+
             HStack {
-                Button("Print Again") { onPrint() }
+                Button("Print Again") { DispatchQueue.main.async { onPrint() } }
                 Spacer()
                 Button("They\u{2019}re upside down") {
                     flip = (flip == .longEdge) ? .shortEdge : .longEdge
@@ -1137,14 +1143,26 @@ struct BookletDuplexSetupView: View {
             HStack {
                 Spacer()
                 Button("Print Test Sheet\u{2026}") {
-                    onPrint()
                     step = .check
+                    DispatchQueue.main.async { onPrint() }
                 }
                 Button("Done", action: onClose)
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
             }
         }
+    }
+
+    /// The dialog's preview shows the second side upside down, because that's exactly what has
+    /// to be sent for it to come out right. Saying so up front stops it reading as a fault and
+    /// stops anyone "correcting" it before the paper has had its say.
+    private var previewNote: some View {
+        Label("""
+              The preview may show a side upside down — that's normal. Judge it by what comes \
+              out of the printer.
+              """,
+              systemImage: "info.circle")
+            .foregroundColor(.secondary)
     }
 
     /// Named because the setting is remembered per printer — worth showing which one is about
@@ -1233,6 +1251,10 @@ struct CombineOutputMenuButton: View {
 
             First time on a new printer, use Set Up Two-Sided Printing\u{2026} — it prints one \
             numbered sheet and sets the flip from what you see. Remembered per printer.
+
+            When printing, the dialog's preview may show every second side upside down. That's \
+            normal — it's how the sheet has to be sent so it comes out right once the printer \
+            turns the paper over.
 
             The flip is applied only when ScoreSort prints, so Create PDF and Open in Preview \
             stay the right way up on screen — an ordinary booklet file you can print later, \
