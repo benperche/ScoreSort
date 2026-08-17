@@ -642,6 +642,8 @@ Because it lives in the imposition rather than in `NSPrintInfo`, it reaches **Cr
 
 Both halves of a sheet are drawn with `page.getDrawingTransform(.cropBox, rect: half, rotate: 0, preserveAspectRatio: true)` + `drawPDFPage`, which handles placement, scaling **and** the source page's own `/Rotate` in one step — which is why both sheet sizes share the drawing code and mixed page sizes within a part degrade gracefully (each centred and fitted in its half).
 
+**Creep is deliberately not compensated, and shouldn't be.** In a saddle-stitch booklet the inner sheets protrude at the fore-edge by the thickness of the sheets wrapped around them; compensation shifts inner pages' content toward the fold so the margins line up *after the booklet is trimmed flush*. ScoreSort's users fold and staple — nothing is guillotined, so nothing is clipped, and untrimmed creep is just a slight stair-step on the outer edge. The magnitude is negligible anyway (80gsm ≈ 0.1 mm, so a 12-page part protrudes ~0.3 mm). Don't add compensation, and don't add a warning either: it would flag a problem that never manifests and could push someone into splitting a part into signatures for no reason.
+
 ### Printing — `Logic/PrintLogic.swift`
 
 `printPDFDocument(_:jobName:twoSidedShortEdge:in:onError:)` (`@MainActor`) builds settings via `printSettings(for:basedOn:twoSidedShortEdge:)`, makes the operation with `printOperation(for:info:)`, then runs `runModal(for:delegate:didRun:contextInfo:)`. Takes a `PDFAlertHandler` and never raises an `NSAlert` itself. The settings are a separate function so they can be unit-tested — the dialog can't be driven headlessly.
