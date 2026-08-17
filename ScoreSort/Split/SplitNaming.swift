@@ -606,6 +606,11 @@ struct SplitFileNamingRow: View {
                 .clipShape(Circle())
         }
         .buttonStyle(.plain)
+        // Never a tab stop. Tab is how you move from one instrument name to the next, and
+        // the field's own `.onKeyPress(.tab)` returns `.ignored` for that — it relies on
+        // AppKit's traversal, so anything focusable between the fields lands there instead.
+        // These pan the preview and are always reachable by mouse.
+        .focusable(false)
     }
 
     // ── Validation ──────────────────────────────────────────────────────────

@@ -1197,6 +1197,10 @@ struct StampMenuButton: View {
         // Sized to its (already trimmed) label, so the toolbar around it stays put instead of
         // the title wrapping to make room.
         .fixedSize()
+        // Not a focus stop. As a pull-down this is focusable by default, unlike the plain
+        // buttons it sits beside — so it collected the focus ring when a click landed
+        // somewhere non-focusable, taking the arrow keys away from the page navigator.
+        .focusable(false)
         .help(helpText)
     }
 

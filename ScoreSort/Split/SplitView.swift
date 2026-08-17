@@ -638,9 +638,18 @@ struct SplitView: View {
                                             isPartiallySkipped: isFilePartiallySkipped(fileIndex),
                                             skippedPages: skippedPages,
                                             isSelected: selectedFileIndices.contains(fileIndex),
-                                            onNavigate: { pageIndex in currentPage = pageIndex },
+                                            // Both of these take focus back to the page
+                                            // navigator. Clicking a card used to leave focus
+                                            // wherever it landed, so ← → stopped paging until
+                                            // you clicked the preview — the tap handler there
+                                            // has always done this.
+                                            onNavigate: { pageIndex in
+                                                currentPage = pageIndex
+                                                isViewFocused = true
+                                            },
                                             onSelect: { isCmd, isShift in
                                                 handleFileSelection(fileIndex, isCmd: isCmd, isShift: isShift)
+                                                isViewFocused = true
                                             },
                                             onFixBookletOrder: bookletFixAction,
                                             onRedoBookletOrder: bookletRedoAction
