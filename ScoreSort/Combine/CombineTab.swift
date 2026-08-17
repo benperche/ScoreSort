@@ -113,27 +113,31 @@ struct CombineView: View {
 
                 Spacer()
 
-                StampMenuButton(isEnabled: $stampEnabled, scope: $stampScope)
-
-                // A Toggle rather than a Button: the sidebar is either showing or not, and the
-                // .button style gives it the same bordered chrome as the Stamp menu and Clear
-                // Files either side of it, plus a filled state while the panel is open — which
-                // the old plain style could only hint at with a tint.
-                Toggle(isOn: Binding(
-                    get: { showPresetSidebar },
-                    set: { newValue in withAnimation { showPresetSidebar = newValue } }
-                )) {
-                    Label("Presets", systemImage: "sidebar.right")
-                }
-                .toggleStyle(.button)
-                .help(showPresetSidebar ? "Hide Presets" : "Show Presets")
-
+                // Ahead of the working controls rather than in among them: it's a quiet help
+                // affordance, and the only plain-styled thing here — sitting between two
+                // bordered buttons it read as a gap in the row.
                 Button(action: { showingKeyboardHelp = true }) {
                     Image(systemName: "keyboard")
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.secondary)
                 .help("Keyboard Shortcuts")
+
+                StampMenuButton(isEnabled: $stampEnabled, scope: $stampScope)
+
+                // A Toggle rather than a Button: the sidebar is either showing or not, and the
+                // .button style gives it the same bordered chrome as the Stamp menu and Clear
+                // Files either side of it, plus a filled state while the panel is open — which
+                // the old plain style could only hint at with a tint.
+                Toggle(isOn: $showPresetSidebar) {
+                    Label("Presets", systemImage: "sidebar.right")
+                }
+                .toggleStyle(.button)
+                // The panel slides, but the button shouldn't fade with it: the `.animation` on
+                // the outer HStack covers this whole subtree, so without opting out the accent
+                // fill cross-fades over the same 0.2s and lingers after the click.
+                .animation(nil, value: showPresetSidebar)
+                .help(showPresetSidebar ? "Hide Presets" : "Show Presets")
 
                 if !combineManager.files.isEmpty {
                     Button(action: { combineManager.clearAll(undoManager: undoManager) }) {
@@ -893,7 +897,7 @@ struct CombineView: View {
         menuState.selectNext              = { navigateSelection(direction:  1, extending: false) }
         menuState.selectPreviousExtending = { navigateSelection(direction: -1, extending: true)  }
         menuState.selectNextExtending     = { navigateSelection(direction:  1, extending: true)  }
-        menuState.togglePresetSidebar     = { withAnimation { showPresetSidebar.toggle() } }
+        menuState.togglePresetSidebar     = { showPresetSidebar.toggle() }
         syncMenuFlags()
     }
 
@@ -947,7 +951,7 @@ struct CombineView: View {
         slice.print         = hasFiles ? { printCombined() } : nil
         slice.clearTitle    = "Clear Files"
         slice.clear         = hasFiles ? { combineManager.clearAll(undoManager: undoManager) } : nil
-        slice.togglePresets = { withAnimation { showPresetSidebar.toggle() } }
+        slice.togglePresets = { showPresetSidebar.toggle() }
         let revealTarget = combineManager.files.first?.url
         slice.tabActions = [
             MenuAction(title: "Move Up", key: KeyEquivalent.upArrow, isEnabled: canMoveUp, perform: { moveUp() }),
