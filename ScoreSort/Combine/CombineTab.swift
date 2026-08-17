@@ -115,13 +115,17 @@ struct CombineView: View {
 
                 StampMenuButton(isEnabled: $stampEnabled, scope: $stampScope)
 
-                Button {
-                    withAnimation { showPresetSidebar.toggle() }
-                } label: {
+                // A Toggle rather than a Button: the sidebar is either showing or not, and the
+                // .button style gives it the same bordered chrome as the Stamp menu and Clear
+                // Files either side of it, plus a filled state while the panel is open — which
+                // the old plain style could only hint at with a tint.
+                Toggle(isOn: Binding(
+                    get: { showPresetSidebar },
+                    set: { newValue in withAnimation { showPresetSidebar = newValue } }
+                )) {
                     Label("Presets", systemImage: "sidebar.right")
                 }
-                .buttonStyle(.plain)
-                .foregroundColor(showPresetSidebar ? .accentColor : .secondary)
+                .toggleStyle(.button)
                 .help(showPresetSidebar ? "Hide Presets" : "Show Presets")
 
                 Button(action: { showingKeyboardHelp = true }) {

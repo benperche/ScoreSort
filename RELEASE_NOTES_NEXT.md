@@ -11,6 +11,7 @@ _Draft for the next release after 1.9.0. Keep adding to this as more changes lan
 - **Print without saving first.** A new **Print…** button (⌘P) sends the combined PDF straight to the printer, alongside Create PDF and Open in Preview.
 - **Booklets.** Switch the output menu at the bottom left from *Single pages* to **Booklet**, and every part is laid out as its own fold-and-staple booklet — the whole folder in one print job, instead of one document at a time. Choose full size (A4 parts onto A3 paper) or **fit A4 landscape**, which gives an A5 booklet that prints on any printer. Each copy of a part becomes its own booklet, and short parts are padded out to a whole folded sheet automatically.
 - **Booklet page scale.** Published music rarely matches A4 exactly, so a **Scale** box beside the output menu sizes each page within its half of the sheet — above 100% to fill more of the page, below it for more space around the music.
+- **The Presets button looks like a button.** It now matches the Stamp and Clear Files buttons either side of it, and stays visibly switched on while the presets panel is open.
 - **Two-sided printing setup.** macOS doesn't let an app choose your two-sided setting, and printers differ in which edge they turn the paper on. **Set Up Two-Sided Printing…** in the output menu prints one numbered test sheet: fold it, say whether the pages came out the right way up, and ScoreSort sets the rest for you. It's remembered separately for each printer, so home and school can each keep their own answer.
 
 ## ✂️ Split PDF
