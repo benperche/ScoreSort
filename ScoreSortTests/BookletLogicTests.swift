@@ -333,32 +333,6 @@ struct CombineBookletOutputTests {
         #expect(reference.identify(back, atFractionX: 0.75) == order[3])
     }
 
-    /// The test sheet is one piece of paper — the outer sheet's front and back — laid out
-    /// exactly as a full run would be, compensation included.
-    @Test func testSheetIsOneSheetOfPaper() throws {
-        let dir = try tempDir()
-        defer { try? FileManager.default.removeItem(at: dir) }
-
-        for (name, pages) in [("Flute", 8), ("Clarinet", 5)] {
-            writePDF(pages: pages, to: dir.appendingPathComponent("\(name).pdf"))
-        }
-        let manager = CombineManager()
-        manager.addFiles(urls: ["Flute", "Clarinet"].map {
-            dir.appendingPathComponent("\($0).pdf")
-        }, undoManager: nil)
-
-        var options = CombineOutputOptions()
-        options.layout = .booklet
-        let sheet = try #require(manager.testSheetDocument(options: options))
-        #expect(sheet.pageCount == 2)           // front + back of one sheet, not the whole run
-    }
-
-    @Test func testSheetNeedsFiles() {
-        var options = CombineOutputOptions()
-        options.layout = .booklet
-        #expect(CombineManager().testSheetDocument(options: options) == nil)
-    }
-
     @Test func singlePageLayoutIsUnchanged() throws {
         let dir = try tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

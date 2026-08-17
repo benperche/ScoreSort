@@ -184,11 +184,12 @@ document at a time. Each part (and each *copy* of a part) becomes its own foldab
 **Printing from ScoreSort.** Setting up your printer, once. macOS does not let an app choose
 your two-sided setting, so:
 
-1. In the print dialog, set **Double-sided** to *On*
-2. Printers differ in which edge they turn the paper on, so use **Print Test Sheet…** in the
-   output menu — it prints a single sheet, front and back. Fold it: if both sides read the right
-   way up, you're done
-3. If the back is upside down, switch **Two-sided flip** in the same menu and test once more
+1. Choose **Set Up Two-Sided Printing…** from the output menu
+2. It prints one numbered sheet. Make sure **Double-sided** is set to *On* in the print dialog
+3. Fold the sheet: if the pages read **1, 2, 3, 4** all the right way up, you're done. If they
+   don't, say so and ScoreSort switches the setting for you and offers another test sheet
+
+The answer is remembered **per printer**, so home and school can each keep their own.
 
 If your printer has no two-sided mode, print the odd pages, put the stack back in, and print the
 even pages using **Paper Handling** in the print dialog.

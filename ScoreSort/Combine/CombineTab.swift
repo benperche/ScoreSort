@@ -27,7 +27,10 @@ struct CombineView: View {
     /// Stored as whole percent so the stepper and text field agree exactly — a Double would
     /// drift and start showing 102.99999%.
     @AppStorage("combineBookletScalePercent") private var bookletScalePercent = 100
-    @AppStorage("combineDuplexFlip") private var duplexFlip: BookletDuplexFlip = .longEdge
+    /// Not `@AppStorage`: the answer belongs to the printer, not the app, so it's loaded from
+    /// `BookletDuplexDefaults` for whichever printer is currently the default.
+    @State private var duplexFlip: BookletDuplexFlip = .longEdge
+    @State private var bookletSetupRequest: BookletSetupRequest?
     @AppStorage("combineStampEnabled") private var stampEnabled = false
     @AppStorage("combineStampScope") private var stampScope: StampScope = .firstPageOfEachPart
     @State private var isTargeted = false
@@ -67,6 +70,15 @@ struct CombineView: View {
         .onAppear {
             DispatchQueue.main.async { syncMenuClosures(); syncMenuFlags(); syncTabCommands() }
             installKeyMonitor()
+            loadDuplexFlipForCurrentPrinter()
+        }
+        // The setup wizard is a sheet(item:) rather than sheet(isPresented:) — see the blank-sheet
+        // gotcha that bit ManualAssignmentView.
+        .sheet(item: $bookletSetupRequest) { _ in
+            BookletDuplexSetupView(flip: $duplexFlip,
+                                   printerName: BookletDuplexDefaults.currentPrinterName,
+                                   onPrint: printCalibrationSheet,
+                                   onClose: { bookletSetupRequest = nil })
         }
         .onDisappear {
             if let m = combineKeyMonitor { NSEvent.removeMonitor(m) }
@@ -75,7 +87,20 @@ struct CombineView: View {
         .onChange(of: selectedFiles)          { DispatchQueue.main.async { syncMenuFlags(); syncTabCommands() } }
         .onChange(of: combineManager.files)   { DispatchQueue.main.async { syncMenuFlags(); syncTabCommands() } }
         // Re-publish the moment Combine becomes (or stops being) the active tab.
-        .onChange(of: appState.selectedTab)   { DispatchQueue.main.async { syncMenuFlags(); syncTabCommands() } }
+        .onChange(of: appState.selectedTab)   {
+            DispatchQueue.main.async { syncMenuFlags(); syncTabCommands() }
+            // Also the cheapest moment to notice the default printer changed since last time —
+            // the answer is per-printer, and someone who works at two sites shouldn't have to
+            // remember which way this was set.
+            loadDuplexFlipForCurrentPrinter()
+        }
+        .onChange(of: duplexFlip) { _, new in
+            BookletDuplexDefaults.setFlip(new, forPrinter: BookletDuplexDefaults.currentPrinterName)
+        }
+    }
+
+    private func loadDuplexFlipForCurrentPrinter() {
+        duplexFlip = BookletDuplexDefaults.flip(forPrinter: BookletDuplexDefaults.currentPrinterName)
     }
 
     private var mainContent: some View {
@@ -362,8 +387,7 @@ struct CombineView: View {
                                                     sheetSize: $bookletSheetSize,
                                                     duplexFlip: $duplexFlip,
                                                     addBlankPages: $addBlankPages,
-                                                    hasFiles: !combineManager.files.isEmpty,
-                                                    onPrintTestSheet: printTestSheet)
+                                                    onSetUpTwoSided: { bookletSetupRequest = BookletSetupRequest() })
 
                             // Only meaningful once pages are being placed two-up; in single-page
                             // output the print dialog's own scaling is the right tool.
@@ -792,10 +816,20 @@ struct CombineView: View {
         }
     }
 
-    private func printTestSheet() {
-        combineManager.printTestSheet(options: outputOptions,
-                                      stampJob: activeStampJob,
-                                      in: NSApp.keyWindow ?? NSApp.mainWindow) { title, message, isError in
+    /// Prints the generated calibration sheet. Presented on `keyWindow`, which while the wizard
+    /// is up is the wizard's own sheet window — a second sheet on the *main* window would queue
+    /// behind the wizard instead of appearing.
+    private func printCalibrationSheet() {
+        guard let sheet = bookletCalibrationSheet(sheetSize: bookletSheetSize,
+                                                  pageScale: Double(bookletScalePercent) / 100,
+                                                  rotateBackFaces: duplexFlip.rotatesBackFaces) else {
+            showNSAlert(title: "Error", message: "Could not build the test sheet.", isError: true)
+            return
+        }
+        printPDFDocument(sheet,
+                         jobName: "ScoreSort \u{2014} Two-Sided Test Sheet",
+                         wantsTwoSided: true,
+                         in: NSApp.keyWindow ?? NSApp.mainWindow) { title, message, isError in
             showNSAlert(title: title, message: message, isError: isError)
         }
     }
@@ -1012,6 +1046,118 @@ extension Color {
 }
 
 // MARK: - Combine File Row
+// MARK: - Two-Sided Setup Wizard
+
+struct BookletSetupRequest: Identifiable { let id = UUID() }
+
+/// Walks the user through the one thing about booklets that can't be settled in software:
+/// which way their printer turns the paper. Prints a single generated sheet, then asks the only
+/// question that matters — did it come out readable — and sets the flip from the answer, so
+/// nobody has to translate "upside down" into "long edge" themselves.
+struct BookletDuplexSetupView: View {
+    @Binding var flip: BookletDuplexFlip
+    let printerName: String
+    let onPrint: () -> Void
+    let onClose: () -> Void
+
+    private enum Step { case intro, check, switched }
+    @State private var step: Step = .intro
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Set Up Two-Sided Printing")
+                .font(.title2).fontWeight(.semibold)
+
+            switch step {
+            case .intro:    intro
+            case .check:    check
+            case .switched: switched
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
+    }
+
+    private var intro: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("""
+                 Printers differ in which edge they turn the paper on, and macOS doesn't let an \
+                 app choose it. This prints one sheet so you can find out — you only need to do \
+                 it once per printer.
+                 """)
+            Label("In the print dialog, make sure Double-sided is set to On.",
+                  systemImage: "exclamationmark.circle")
+                .foregroundColor(.secondary)
+            printerLine
+
+            HStack {
+                Button("Cancel", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Print Test Sheet\u{2026}") {
+                    onPrint()
+                    step = .check
+                }
+                .keyboardShortcut(.defaultAction)
+                .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private var check: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Fold the printed sheet in half.")
+                .fontWeight(.medium)
+            Text("Do the four pages read **1, 2, 3, 4**, all the right way up?")
+
+            HStack {
+                Button("Print Again") { onPrint() }
+                Spacer()
+                Button("They\u{2019}re upside down") {
+                    flip = (flip == .longEdge) ? .shortEdge : .longEdge
+                    step = .switched
+                }
+                Button("Yes \u{2014} all correct") { onClose() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    private var switched: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label("Switched to \u{201C}\(flip.label)\u{201D}.", systemImage: "checkmark.circle.fill")
+                .foregroundColor(.green)
+            Text("""
+                 Print another test sheet to confirm. If it's still wrong, the problem is more \
+                 likely that Double-sided wasn't set to On in the print dialog.
+                 """)
+            printerLine
+
+            HStack {
+                Spacer()
+                Button("Print Test Sheet\u{2026}") {
+                    onPrint()
+                    step = .check
+                }
+                Button("Done", action: onClose)
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+    }
+
+    /// Named because the setting is remembered per printer — worth showing which one is about
+    /// to be calibrated, especially for someone who prints at more than one site.
+    @ViewBuilder private var printerLine: some View {
+        if !printerName.isEmpty {
+            Text("This setting is remembered for **\(printerName)**.")
+                .font(.callout)
+                .foregroundColor(.secondary)
+        }
+    }
+}
+
 // MARK: - Output Menu Button
 
 /// The single pull-down holding everything about the *shape* of the output, so the bottom
@@ -1022,8 +1168,7 @@ struct CombineOutputMenuButton: View {
     @Binding var sheetSize: BookletSheetSize
     @Binding var duplexFlip: BookletDuplexFlip
     @Binding var addBlankPages: Bool
-    let hasFiles: Bool
-    let onPrintTestSheet: () -> Void
+    let onSetUpTwoSided: () -> Void
 
     var body: some View {
         Menu {
@@ -1060,9 +1205,10 @@ struct CombineOutputMenuButton: View {
             Divider()
 
             // Lives in here rather than on the main screen: it's a one-off setup step, not part
-            // of the everyday flow.
-            Button("Print Test Sheet\u{2026}", action: onPrintTestSheet)
-                .disabled(layout != .booklet || !hasFiles)
+            // of the everyday flow. It needs no files — the test sheet is generated — so a new
+            // printer can be calibrated before anything has been assembled.
+            Button("Set Up Two-Sided Printing\u{2026}", action: onSetUpTwoSided)
+                .disabled(layout != .booklet)
         } label: {
             Label(title, systemImage: layout == .booklet ? "book.closed" : "doc.on.doc")
                 .lineLimit(1)
@@ -1085,8 +1231,8 @@ struct CombineOutputMenuButton: View {
             Each part is imposed as its own saddle-stitch booklet, padded to a whole folded \
             sheet. Set Double-sided to On in the print dialog, then fold and staple.
 
-            First time on a new printer, use Print Test Sheet\u{2026} — it prints one sheet, \
-            front and back. If the back comes out upside down, switch Two-sided flip.
+            First time on a new printer, use Set Up Two-Sided Printing\u{2026} — it prints one \
+            numbered sheet and sets the flip from what you see. Remembered per printer.
 
             The flip is applied only when ScoreSort prints, so Create PDF and Open in Preview \
             stay the right way up on screen — an ordinary booklet file you can print later, \
@@ -2495,37 +2641,6 @@ class CombineManager: ObservableObject {
         options.layout == .booklet && options.duplexFlip.rotatesBackFaces
     }
 
-    /// One sheet of paper — the front and back of the first booklet's outer sheet — laid out
-    /// exactly as a full run would be. Printing and folding it costs a single page and settles
-    /// whether the two-sided flip is set the right way, which nothing on screen can show.
-    func testSheetDocument(options: CombineOutputOptions, stampJob: StampJob? = nil) -> PDFDocument? {
-        var options = options
-        options.layout = .booklet          // meaningless otherwise; the menu only offers it there
-        let built = buildDocument(options: options, stampJob: stampJob,
-                                  rotateBackFaces: shouldRotateBackFaces(options))
-        guard built.doc.pageCount > 0 else { return nil }
-
-        let sheet = PDFDocument()
-        for i in 0..<min(2, built.doc.pageCount) {
-            guard let page = built.doc.page(at: i)?.copy() as? PDFPage else { continue }
-            sheet.insert(page, at: sheet.pageCount)
-        }
-        return sheet.pageCount > 0 ? sheet : nil
-    }
-
-    @MainActor
-    func printTestSheet(options: CombineOutputOptions, stampJob: StampJob? = nil,
-                        in window: NSWindow?, onError: PDFAlertHandler) {
-        guard let sheet = testSheetDocument(options: options, stampJob: stampJob) else {
-            onError("Nothing to Print", "Add some files first.", true)
-            return
-        }
-        printPDFDocument(sheet,
-                         jobName: "ScoreSort \u{2014} Booklet Test Sheet",
-                         wantsTwoSided: true,
-                         in: window,
-                         onError: onError)
-    }
 
     private func createBlankPage() -> PDFPage? {
         let pageRect = CGRect(x: 0, y: 0, width: 595, height: 842) // A4

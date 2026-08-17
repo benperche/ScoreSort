@@ -587,7 +587,7 @@ The forward direction, used by the Combine tab: reading order in, printer sheet 
 | Create PDF | upright — a reading spread you can check on screen |
 | Open in Preview | upright |
 | Print… | rotated, to survive the duplexer |
-| Print Test Sheet… | rotated (it must match a real run) |
+| Set Up Two-Sided Printing… | rotated (the test sheet must match a real run) |
 
 This is deliberate, and the reasoning is worth keeping. Exporting the booklet to print later is a
 normal workflow — assembled at home in the morning, printed at a school that afternoon, or emailed
@@ -598,11 +598,33 @@ app being clever about hardware it knows nothing about, and would look like a bu
 opened the file. **Don't extend the compensation to Create PDF or Preview**, and don't frame
 exporting-then-printing as a mistake in user-facing text.
 
-`testSheetDocument(options:stampJob:)` returns the first two faces (one physical sheet, front
-and back) of the first booklet, imposed exactly as a full run would be. It forces
-`layout = .booklet` so it's meaningful whatever the menu says, and returns nil with no files.
-It exists because which flip a printer needs **cannot be determined in software** — one folded
-sheet settles it, instead of a whole band folder.
+### Two-sided setup — `Logic/BookletCalibration.swift`
+
+Which flip a printer needs **cannot be determined in software**, so the app asks the paper.
+
+| Signature | Behaviour |
+|---|---|
+| `bookletCalibrationPages() -> PDFDocument?` | Four A4 reading pages carrying a large numeral and a line of instruction, drawn with `NSAttributedString` into a `CGPDFContext` via an `NSGraphicsContext(cgContext:flipped: false)`. |
+| `bookletCalibrationSheet(sheetSize:pageScale:rotateBackFaces:) -> PDFDocument?` | Those pages through **the real `imposedBookletDocument`** — one physical sheet. Using the genuine imposition is the point: a mocked-up sheet would prove nothing about real booklets. |
+| `enum BookletDuplexDefaults` | `flip(forPrinter:)` / `setFlip(_:forPrinter:)` over a `[String: String]` in `UserDefaults` (`combineDuplexFlipByPrinter`), plus `currentPrinterName` from `NSPrintInfo.shared.printer.name`. |
+
+**Generated pages, not the user's music.** Made-up pages can carry their own instructions, and
+work before any files have been added — so a new printer can be calibrated from a standing start.
+The whole test reduces to "fold it; do the pages read 1, 2, 3, 4 the right way up?", which needs
+no understanding of long versus short edges.
+
+**`BookletDuplexSetupView`** (in `CombineTab.swift`) is the wizard: intro → print → "did it come
+out right?" → on *no*, it flips the setting itself and offers another sheet. Presented with
+`.sheet(item:)` per the blank-sheet gotcha. Its print dialog is presented on **`NSApp.keyWindow`**,
+which while the wizard is up is the wizard's own sheet window — a second sheet on the *main*
+window would queue behind the wizard rather than appear.
+
+**The flip is stored per printer, not globally**, because it's a property of the machine: someone
+printing at home and at a school needs a different answer at each. `CombineView.duplexFlip` is
+therefore `@State` loaded from `BookletDuplexDefaults` on appear and on tab switch, and written
+back on change — *not* `@AppStorage`. Known limit: the real printer is chosen inside the print
+dialog, after the document has been imposed, so changing printer mid-dialog can't be reacted to.
+This covers the ordinary case of the *default* printer differing between sites.
 | `imposedBookletDocument(_:segments:sheetSize:pageScale:rotateBackFaces:) -> (doc: PDFDocument, sheetStarts: [Int])?` | Rebuilds the document as sheets, one booklet per segment. Same `CGDataConsumer` + `beginPage(mediaBox:)` pipeline as `stampedDocument`, so **annotations, links and outlines are dropped** — build the outline on the result. Sheet size follows the segment's first page via `visualPageBox(_:)` (crop box, rotation-aware), so A5 parts give A4 sheets. `sheetStarts` is index-aligned with `segments`. |
 
 **`pageScale`** sizes each page *within its half of the sheet*, about the half's centre — 1.0 fits the half exactly, 1.03 draws the music 3% larger, 0.95 leaves more air around it. Published music doesn't match A4, so this is the dial for that. Two details make it safe:
