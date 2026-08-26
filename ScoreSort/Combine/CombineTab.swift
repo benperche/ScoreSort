@@ -82,15 +82,22 @@ struct CombineView: View {
             switch sheet {
             case .bookletIntro:
                 BookletIntroView(
-                    onSetUp: {
+                    printerName: BookletDuplexDefaults.currentPrinterName,
+                    onPrint: {
                         activeSheet = nil
-                        // Let the first sheet finish dismissing before the next goes up.
-                        DispatchQueue.main.async { activeSheet = .duplexSetup }
+                        // Let each sheet finish dismissing before the next goes up, and print
+                        // only once the wizard owns the window — the print dialog is presented
+                        // on keyWindow.
+                        DispatchQueue.main.async {
+                            activeSheet = .duplexSetup(startAtCheck: true)
+                            DispatchQueue.main.async { printCalibrationSheet() }
+                        }
                     },
                     onClose: { activeSheet = nil })
-            case .duplexSetup:
+            case .duplexSetup(let startAtCheck):
                 BookletDuplexSetupView(flip: $duplexFlip,
                                        printerName: BookletDuplexDefaults.currentPrinterName,
+                                       startAtCheck: startAtCheck,
                                        onPrint: printCalibrationSheet,
                                        onClose: { activeSheet = nil })
             }
@@ -423,7 +430,7 @@ struct CombineView: View {
                                                     sheetSize: $bookletSheetSize,
                                                     duplexFlip: $duplexFlip,
                                                     addBlankPages: $addBlankPages,
-                                                    onSetUpTwoSided: { activeSheet = .duplexSetup })
+                                                    onSetUpTwoSided: { activeSheet = .duplexSetup(startAtCheck: false) })
 
                             // Only meaningful once pages are being placed two-up; in single-page
                             // output the print dialog's own scaling is the right tool.
@@ -1085,10 +1092,18 @@ extension Color {
 // MARK: - Two-Sided Setup Wizard
 
 /// The Combine tab's modal sheets, as one value so a single `.sheet(item:)` drives both.
-enum CombineSheet: String, Identifiable {
+enum CombineSheet: Identifiable {
     case bookletIntro
-    case duplexSetup
-    var id: String { rawValue }
+    /// `startAtCheck` when the test sheet is already on its way to the printer — the first-run
+    /// modal does the explaining, so replaying the wizard's own intro would just repeat it.
+    case duplexSetup(startAtCheck: Bool)
+
+    var id: String {
+        switch self {
+        case .bookletIntro:                return "bookletIntro"
+        case .duplexSetup(let startAtCheck): return "duplexSetup-\(startAtCheck)"
+        }
+    }
 }
 
 /// Shown once, when someone first switches the output menu to Booklet.
@@ -1097,7 +1112,8 @@ enum CombineSheet: String, Identifiable {
 /// the tour is only ever shown once per install and existing users would never see it — and they
 /// are exactly the people meeting booklets for the first time.
 struct BookletIntroView: View {
-    let onSetUp: () -> Void
+    let printerName: String
+    let onPrint: () -> Void
     let onClose: () -> Void
 
     var body: some View {
@@ -1107,7 +1123,7 @@ struct BookletIntroView: View {
 
             Text("""
                  Each part becomes its own fold-and-staple booklet, two pages to a side, so a \
-                 whole folder goes out in one print job. Print two-sided, fold, staple.
+                 whole folder goes out in one print job.
                  """)
 
             Label("""
@@ -1118,31 +1134,30 @@ struct BookletIntroView: View {
                 .foregroundColor(.secondary)
 
             Label("""
-                  Printers also differ in which edge they turn the paper on. Setting up takes one \
-                  test sheet, once per printer.
+                  Printers also differ in which edge they turn the paper on, so this prints one \
+                  sheet to find out. You only do it once per printer.
                   """,
                   systemImage: "arrow.2.squarepath")
                 .foregroundColor(.secondary)
 
             Label("""
-                  The print preview may show every second side upside down. That's normal — judge \
-                  it by what comes out of the printer.
+                  The preview may show a side upside down — that's normal. Judge it by what comes \
+                  out of the printer.
                   """,
                   systemImage: "info.circle")
                 .foregroundColor(.secondary)
 
-            Text("""
-                 Create PDF and Open in Preview always give an upright booklet you can read on \
-                 screen, so a file you save is fine to keep or send on to whoever is printing it.
-                 """)
-                .font(.callout)
-                .foregroundColor(.secondary)
+            if !printerName.isEmpty {
+                Text("This setting is remembered for **\(printerName)**.")
+                    .font(.callout)
+                    .foregroundColor(.secondary)
+            }
 
             HStack {
                 Button("Not Now", action: onClose)
                     .keyboardShortcut(.cancelAction)
                 Spacer()
-                Button("Set Up Two-Sided Printing\u{2026}", action: onSetUp)
+                Button("Print Test Sheet\u{2026}", action: onPrint)
                     .keyboardShortcut(.defaultAction)
                     .buttonStyle(.borderedProminent)
             }
@@ -1159,6 +1174,8 @@ struct BookletIntroView: View {
 struct BookletDuplexSetupView: View {
     @Binding var flip: BookletDuplexFlip
     let printerName: String
+    /// True when the caller has already explained things and sent a sheet to the printer.
+    var startAtCheck: Bool = false
     let onPrint: () -> Void
     let onClose: () -> Void
 
@@ -1178,6 +1195,7 @@ struct BookletDuplexSetupView: View {
         }
         .padding(24)
         .frame(width: 460)
+        .onAppear { if startAtCheck { step = .check } }
     }
 
     private var intro: some View {
