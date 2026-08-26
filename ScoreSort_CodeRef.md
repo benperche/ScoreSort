@@ -209,6 +209,27 @@ A `bookmarks` array of `(label: String, pageIndex: Int)` is accumulated during t
 | `showPresetSidebar` | `Bool` | Controls sidebar slide-in |
 | `unmatchedFileIds` | `Set<UUID>` | Files not matched by last preset apply (orange tint) |
 
+**Focus and selection are separate, and only selection is drawn.** The list carries
+`.focusEffectDisabled()`, so nothing marks it as having key focus — deliberately. The ring used to
+sit around the middle of the layout (Combine is the only tab that attaches `.focusable()` to an
+inner view rather than the whole tab) and marked the one state nobody wonders about, since the only
+other focusable things are text fields, which show a text cursor.
+
+Consequences that look like bugs but aren't, so **don't "fix" them**:
+- **Tab into the list does nothing visible.** That's accepted: Tab moves focus, not selection, and a
+  list that selected a row because you tabbed to it would fight ⌘A and Select None. The first ↓
+  then selects the first file (`navigateSelection` treats a nil cursor as starting just off the end),
+  which is unmistakable, so the invisible step lasts one keystroke. In the default state there is
+  nothing else to tab to anyway — the Scale field only exists in booklet mode, the copies field only
+  while being edited, the preset fields only when the sidebar is open.
+- **`focusedFileId` never sits on an unselected row**, despite reading like a free-floating cursor:
+  `selectFile`, `navigateSelection` (both branches) and `selectAll` all point it at a row that is
+  also selected, and `selectNone` and ⌘-click-to-deselect clear it to nil. So it is only ever
+  distinguishable *within* a multi-row selection, where it renders as accent 0.18 against 0.10.
+  Adding a background case for "cursor but not selected" is dead code — this was tried.
+- Combine also **never self-focuses the list on appear** (unlike Rotate/Split/Stamp, which set
+  `isViewFocused = true`); it only pulls focus after a click.
+
 #### Collate group helpers
 **`expandForGroups(_ ids: Set<UUID>) -> Set<UUID>`** — for each ID that belongs to a group, adds all group-mates to the set. Used by `moveUp()`, `moveDown()`, `canMoveUp`, `canMoveDown` so groups always move as a block.
 
