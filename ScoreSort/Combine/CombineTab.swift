@@ -336,6 +336,12 @@ struct CombineView: View {
                     .onTapGesture { selectNone() }
                     .focusable()
                     .focused($listFocused)
+                    // The list is focusable so it can catch the bare keys below, but it doesn't
+                    // need to advertise it: there's nothing else here to compete for focus except
+                    // text fields, which show their own cursor. Drawing a ring round the middle of
+                    // the layout marked the one state nobody wonders about. Where the arrow keys
+                    // will move from is the useful thing, and that's on the cursor row instead.
+                    .focusEffectDisabled()
                     .onKeyPress { press in
                         guard appState.selectedTab == 0 else { return .ignored }   // Combine tab only
                         guard !menuState.isPanelOpen else { return .ignored }
