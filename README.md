@@ -9,6 +9,7 @@ Combine multiple PDF files into a single document with flexible copying and page
 
 - **Drag-and-drop or browse** to add PDF files or images (JPEG, PNG, TIFF, HEIC, BMP, GIF); multi-frame TIFFs appear as a single entry with the correct page count
 - **Add blank pages** — insert a blank A4 page at any position in the list
+- **Quick Look** — press `Space` to preview the selected file without leaving the app; arrow keys step through the other parts
 - **Specify copies** for each file (great for printing multiple parts)
 - **Collate groups** — select files and press `C` to create a group whose copies are printed *interleaved*: 4 copies of [Perc 1, Perc 2, Timpani] → P1, P2, T, P1, P2, T, … ready to hand out by player
 - **Reorder files** with Move Up/Down buttons; groups always move as a unit
@@ -214,6 +215,7 @@ The page order is already sorted.
 | `⌫` | Remove selected files |
 | `⌘↑` / `⌘↓` | Move selected files up / down |
 | `C` | Group selected files into a collate set |
+| `Space` | Quick Look the selected file |
 | `P` | Toggle Presets panel |
 | `⌘P` | Print the combined PDF |
 | `⌘T` | Booklet page turns (in Booklet output) |

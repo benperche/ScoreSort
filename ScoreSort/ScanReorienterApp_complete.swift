@@ -503,6 +503,7 @@ struct ShortcutsHelpView: View {
                     shortcutRow("⌥⌘P", "Show / hide the presets panel (also P)")
                     shortcutRow("⇧⌘P", "Open the combined PDF in Preview")
                     shortcutRow("⌘P", "Print the combined PDF")
+                    shortcutRow("Space", "Quick Look the selected file")
                     shortcutRow("⌘T", "Booklet page turns (in Booklet output)")
                 }
 

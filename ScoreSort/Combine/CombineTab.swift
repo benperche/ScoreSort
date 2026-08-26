@@ -32,6 +32,8 @@ struct CombineView: View {
     @State private var duplexFlip: BookletDuplexFlip = .longEdge
     @State private var activeSheet: CombineSheet?
     @State private var showBookletLayout = false
+    /// Index into `quickLookFiles` while the Quick Look overlay is up; nil when it isn't.
+    @State private var quickLookIndex: Int?
     /// Shown once, the first time anyone switches to Booklet — which catches people who
     /// upgraded as well as new users, unlike the welcome tour.
     @AppStorage("combineBookletIntroShown") private var bookletIntroShown = false
@@ -95,6 +97,29 @@ struct CombineView: View {
                 }
             }
         }
+        .overlay {
+            if let index = quickLookIndex {
+                ZStack {
+                    Color.black.opacity(0.32)
+                        .ignoresSafeArea()
+                        .onTapGesture { quickLookIndex = nil }
+                        .transition(.opacity)
+
+                    CombineQuickLookView(
+                        files: quickLookFiles,
+                        index: Binding(get: { index }, set: { quickLookIndex = $0 }),
+                        onClose: { quickLookIndex = nil })
+                        .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .center)))
+
+                    Button("") { quickLookIndex = nil }
+                        .keyboardShortcut(.cancelAction)
+                        .frame(width: 0, height: 0)
+                        .opacity(0)
+                }
+            }
+        }
+        .onChange(of: quickLookIndex) { _, shown in menuState.isPanelOpen = shown != nil }
+        .animation(.easeInOut(duration: 0.12), value: quickLookIndex)
         .animation(.easeInOut(duration: 0.15), value: showBookletLayout)
         // The ⌫ monitor is app-global, so without this it would still be deleting files from the
         // list behind the overlay. isPanelOpen is the existing flag for "a panel owns the keys".
@@ -160,6 +185,22 @@ struct CombineView: View {
         .onChange(of: duplexFlip) { _, new in
             BookletDuplexDefaults.setFlip(new, forPrinter: BookletDuplexDefaults.currentPrinterName)
         }
+    }
+
+    /// The parts Quick Look can show: blank-page entries are synthetic and have no file behind
+    /// them, so they're skipped rather than opening an empty panel.
+    private var quickLookFiles: [CombineFile] {
+        combineManager.files.filter { !$0.isBlankPage }
+    }
+
+    /// Opens Quick Look on the cursor row, or the first selected row, or the first part.
+    /// Returns false when there's nothing to show, so the key falls through untouched.
+    private func openQuickLook() -> Bool {
+        let candidates = quickLookFiles
+        guard !candidates.isEmpty else { return false }
+        let wanted = focusedFileId ?? selectedFiles.first
+        quickLookIndex = wanted.flatMap { id in candidates.firstIndex { $0.id == id } } ?? 0
+        return true
     }
 
     private func loadDuplexFlipForCurrentPrinter() {
@@ -437,6 +478,8 @@ struct CombineView: View {
                         case KeyEquivalent("c") where press.modifiers == []:
                             if canGroup { groupSelected(); return .handled }
                             return .ignored
+                        case KeyEquivalent(" ") where press.modifiers == []:
+                            return openQuickLook() ? .handled : .ignored
                         default:
                             return .ignored
                         }
