@@ -515,9 +515,10 @@ struct BookletPlacementTests {
         }
     }
 
-    /// A two-page part is laid out flat rather than folded: both pages on the front face, so
-    /// the player opens it on the stand and never turns a page mid-piece.
-    @Test func twoPagePartIsAFlatSpread() throws {
+    /// A two-page part defaults to flat: both pages on the front face, so the player opens it on
+    /// the stand and never turns a page mid-piece.
+    @Test func twoPagePartDefaultsToFlat() throws {
+        #expect(bookletDefaultLayout(pageCount: 2) == .flat)
         let reference = try #require(GreyReference(pageCount: 2))
         let imposed = try #require(imposedBookletDocument(reference.doc, segments: [0..<2],
                                                           sheetSize: .doubleSize)).doc
@@ -527,10 +528,53 @@ struct BookletPlacementTests {
         #expect(reference.identify(front, atFractionX: 0.25) == 0, "p1 on the left")
         #expect(reference.identify(front, atFractionX: 0.75) == 1, "p2 on the right")
 
-        // The back is blank, so it can be folded inwards and read flat.
         let back = try #require(imposed.page(at: 1))
         #expect(reference.identify(back, atFractionX: 0.25) == nil)
         #expect(reference.identify(back, atFractionX: 0.75) == nil)
+    }
+
+    /// Flat on a four-page part is "1 2 | 3 4" — reading order, two up, both sides.
+    @Test func flatLayoutIsReadingOrder() throws {
+        let reference = try #require(GreyReference(pageCount: 4))
+        let imposed = try #require(imposedBookletDocument(reference.doc, segments: [0..<4],
+                                                          sheetSize: .doubleSize,
+                                                          layouts: [.flat])).doc
+        #expect(imposed.pageCount == 2)
+        let front = try #require(imposed.page(at: 0))
+        #expect(reference.identify(front, atFractionX: 0.25) == 0)
+        #expect(reference.identify(front, atFractionX: 0.75) == 1)
+        let back = try #require(imposed.page(at: 1))
+        #expect(reference.identify(back, atFractionX: 0.25) == 2)
+        #expect(reference.identify(back, atFractionX: 0.75) == 3)
+    }
+
+    /// The same part folded is "4 1 | 2 3" — so the two layouts really are different output.
+    @Test func foldedLayoutIsSaddleStitch() throws {
+        let reference = try #require(GreyReference(pageCount: 4))
+        let imposed = try #require(imposedBookletDocument(reference.doc, segments: [0..<4],
+                                                          sheetSize: .doubleSize,
+                                                          layouts: [.folded])).doc
+        let front = try #require(imposed.page(at: 0))
+        #expect(reference.identify(front, atFractionX: 0.25) == 3)
+        #expect(reference.identify(front, atFractionX: 0.75) == 0)
+    }
+
+    /// Parts in one run can differ, which is the whole point of the setting.
+    @Test func layoutsCanDifferBetweenPartsInOneRun() throws {
+        let reference = try #require(GreyReference(pageCount: 8))
+        let imposed = try #require(imposedBookletDocument(reference.doc,
+                                                          segments: [0..<4, 4..<8],
+                                                          sheetSize: .doubleSize,
+                                                          layouts: [.flat, .folded])).doc
+        #expect(imposed.pageCount == 4)
+        // First part flat: front reads p1|p2.
+        let first = try #require(imposed.page(at: 0))
+        #expect(reference.identify(first, atFractionX: 0.25) == 0)
+        #expect(reference.identify(first, atFractionX: 0.75) == 1)
+        // Second part folded: front reads p8|p5 (last then first of that part).
+        let second = try #require(imposed.page(at: 2))
+        #expect(reference.identify(second, atFractionX: 0.25) == 7)
+        #expect(reference.identify(second, atFractionX: 0.75) == 4)
     }
 
     /// Three pages and up keep the saddle stitch, which already reads correctly.

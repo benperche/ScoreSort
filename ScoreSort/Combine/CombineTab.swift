@@ -2329,6 +2329,15 @@ struct CombineFile: Identifiable, Equatable {
     var collateGroupId: UUID? = nil
     /// True for synthetic blank-page entries (url is unused).
     var isBlankPage: Bool = false
+    /// Booklet output only. `nil` means "whatever suits this length" —
+    /// `bookletDefaultLayout(pageCount:)` — so a part only carries a value once someone has
+    /// deliberately chosen one.
+    var bookletLayout: BookletPartLayout? = nil
+
+    /// The layout this part will actually print with.
+    var effectiveBookletLayout: BookletPartLayout {
+        bookletLayout ?? bookletDefaultLayout(pageCount: pageCount)
+    }
 }
 
 // MARK: - Output options
@@ -2661,6 +2670,7 @@ class CombineManager: ObservableObject {
         var doc = PDFDocument()
         var idx = 0
         var bookmarks: [(label: String, pageIndex: Int)] = []
+        var partLayouts: [BookletPartLayout] = []
 
         func addPages(from file: CombineFile, copyIndex: Int, totalCopies: Int) {
             if file.isBlankPage {
@@ -2671,6 +2681,9 @@ class CombineManager: ObservableObject {
             let baseName = file.name.hasSuffix(".pdf") ? String(file.name.dropLast(4)) : file.name
             let label = totalCopies > 1 ? "\(baseName) \(copyIndex + 1)/\(totalCopies)" : baseName
             bookmarks.append((label: label, pageIndex: idx))
+            // Parallel to `bookmarks`, so each booklet segment can be matched to the part it
+            // came from. One entry per part *per copy*, exactly like the bookmarks.
+            partLayouts.append(file.effectiveBookletLayout)
             if ext != "pdf" {
                 for page in pdfPages(fromImageAt: file.url) { doc.insert(page, at: idx); idx += 1 }
             } else {
@@ -2712,10 +2725,18 @@ class CombineManager: ObservableObject {
         if options.layout == .booklet {
             let segments = bookletSegments(pageCount: doc.pageCount,
                                            partFirstPages: bookmarks.map { $0.pageIndex })
+            // Match each segment to the part that starts inside it, the same way the outline is
+            // remapped below — the arrays aren't always the same length, so position won't do.
+            let layouts: [BookletPartLayout] = segments.map { segment in
+                guard let i = bookmarks.indices.first(where: { segment.contains(bookmarks[$0].pageIndex) })
+                else { return bookletDefaultLayout(pageCount: segment.count) }
+                return partLayouts[i]
+            }
             if let imposed = imposedBookletDocument(doc, segments: segments,
                                                     sheetSize: options.sheetSize,
                                                     pageScale: options.bookletPageScale,
-                                                    rotateBackFaces: rotateBackFaces) {
+                                                    rotateBackFaces: rotateBackFaces,
+                                                    layouts: layouts) {
                 doc = imposed.doc
                 pageCount = imposed.doc.pageCount
                 // Re-aim each bookmark at the sheet its booklet starts on. Match by looking

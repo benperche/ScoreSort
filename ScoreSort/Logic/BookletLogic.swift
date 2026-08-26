@@ -100,17 +100,68 @@ func bookletPaddedCount(_ pages: Int) -> Int {
     return max(4, (pages + 3) / 4 * 4)
 }
 
-/// A two-page part is laid out flat — both pages side by side on one face — rather than as a
-/// booklet.
+/// How one part's pages are arranged on its sheets.
 ///
-/// Folded as a booklet, two pages become a cover and an inside page, so the player has to turn
-/// mid-piece and never sees both at once. Printed flat they sit side by side: fold it inwards to
-/// live in the folder, open it on the stand, no page turn at all. It still costs one sheet and
-/// two faces, so it interleaves correctly with longer parts in the same duplex run.
+/// Publishers design page turns, so the right answer differs part to part — sometimes within the
+/// same print run. Both go through the same imposition; they differ only in the slot order, and
+/// `.flat` is simply reading order, so this is a choice of *where the page turns fall* rather than
+/// two separate algorithms.
+enum BookletPartLayout: String, CaseIterable, Identifiable, Codable {
+    /// Saddle stitch — sheets nest and the part is folded and stapled. 4|1, 2|3.
+    case folded
+    /// Reading order, two pages up, printed on both sides. 1|2, 3|4. The sheet is read open,
+    /// turning the whole sheet rather than a page.
+    case flat
+
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .folded: return "Folded"
+        case .flat:   return "Flat"
+        }
+    }
+
+    /// Which pages end up facing each other, e.g. "1 · 2–3 · 4" — the thing a player actually
+    /// judges, since it says where they'll have to turn.
+    func spreadDescription(pageCount: Int) -> String {
+        let n = bookletPaddedCount(pageCount)
+        guard n > 0 else { return "" }
+        var groups: [String] = []
+        switch self {
+        case .folded:
+            // A cover on its own, facing pairs through the middle, then the back on its own.
+            groups.append("1")
+            var page = 2
+            while page + 1 <= n - 1 { groups.append("\(page)–\(page + 1)"); page += 2 }
+            if n > 1 { groups.append("\(n)") }
+        case .flat:
+            var page = 1
+            while page <= n { groups.append("\(page)–\(page + 1)"); page += 2 }
+        }
+        return groups.joined(separator: " · ")
+    }
+}
+
+/// The layout to use when the user hasn't chosen one.
 ///
-/// Only two pages. One page has nothing to pair with, and from three up the saddle stitch already
-/// does the right thing — three gives a cover plus a spread, four gives cover, spread, back cover.
-func bookletIsFlatSpread(pageCount: Int) -> Bool { pageCount == 2 }
+/// Two pages read best flat — side by side, no page turn at all — which is the one case where the
+/// folded form is simply worse. Anything longer defaults to the folded booklet.
+func bookletDefaultLayout(pageCount: Int) -> BookletPartLayout {
+    pageCount == 2 ? .flat : .folded
+}
+
+/// `order[sheetSlot] = readingPos`, slots running [front-left, front-right, back-left,
+/// back-right] per sheet. Reading positions past the end of the part are padding and are left
+/// blank by the drawing step.
+func bookletSlotOrder(pageCount: Int, layout: BookletPartLayout) -> [Int] {
+    let n = bookletPaddedCount(pageCount)
+    guard n > 0 else { return [] }
+    switch layout {
+    case .folded: return bookletImpositionOrder(n: n)
+    case .flat:   return Array(0..<n)
+    }
+}
 
 // MARK: - Segments
 
@@ -160,11 +211,14 @@ let bookletPageScaleRange: ClosedRange<Double> = 0.5...1.5
 /// Like `stampedDocument(_:stamp:pageIndices:)`, this rebuilds page content through a
 /// `CGPDFContext`, so annotations, links and outlines on the source pages are dropped —
 /// callers that want an outline must build it on the returned document.
+/// `layouts` is index-aligned with `segments`; anything missing falls back to
+/// `bookletDefaultLayout(pageCount:)` for that segment's length.
 func imposedBookletDocument(_ doc: PDFDocument,
                             segments: [Range<Int>],
                             sheetSize: BookletSheetSize,
                             pageScale: Double = 1.0,
-                            rotateBackFaces: Bool = false) -> (doc: PDFDocument, sheetStarts: [Int])? {
+                            rotateBackFaces: Bool = false,
+                            layouts: [BookletPartLayout] = []) -> (doc: PDFDocument, sheetStarts: [Int])? {
     guard doc.pageCount > 0, !segments.isEmpty else { return nil }
     guard let data = doc.dataRepresentation(),
           let provider = CGDataProvider(data: data as CFData),
@@ -181,16 +235,15 @@ func imposedBookletDocument(_ doc: PDFDocument,
     let scale = min(max(pageScale, bookletPageScaleRange.lowerBound),
                     bookletPageScaleRange.upperBound)
 
-    for segment in segments {
+    for (segmentIndex, segment) in segments.enumerated() {
         // Appended for every segment, empty or not, so the returned array stays index-aligned
         // with `segments` and the caller's outline labels line up.
         sheetStarts.append(facesWritten)
         let padded = bookletPaddedCount(segment.count)
-        // Slots run [front-left, front-right, back-left, back-right]. A flat spread puts both
-        // pages on the front face and leaves the back blank; -1 marks a slot to leave empty.
-        let order = bookletIsFlatSpread(pageCount: segment.count)
-            ? [0, 1, -1, -1]
-            : bookletImpositionOrder(n: padded)
+        let layout = segmentIndex < layouts.count
+            ? layouts[segmentIndex]
+            : bookletDefaultLayout(pageCount: segment.count)
+        let order = bookletSlotOrder(pageCount: segment.count, layout: layout)
         guard !order.isEmpty else { continue }
 
         // Sheet size follows the segment's first page, so a booklet of A4 parts gives A3
