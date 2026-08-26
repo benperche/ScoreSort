@@ -110,15 +110,26 @@ struct BookletSpreadsTests {
         #expect(bookletSpreads(pageCount: 8, layout: .flat) == [[1, 2], [3, 4], [5, 6], [7, 8]])
     }
 
-    /// Padding is grouped like any other side, but a trailing group that is nothing but blanks is
-    /// dropped — a two-page part laid flat has no page turn at all, so claiming "1–2 · 3–4" would
-    /// promise a turn onto two empty sides.
-    @Test func trailingBlankSpreadsAreDropped() {
+    /// Padding is grouped like any other side, then trimmed away — the description must never
+    /// name a page the part doesn't have, and a two-page part laid flat has no turn at all.
+    @Test func paddingIsTrimmedOutOfSpreads() {
         #expect(bookletSpreads(pageCount: 3, layout: .folded) == [[1], [2, 3]])
+        #expect(bookletSpreads(pageCount: 3, layout: .flat) == [[1, 2], [3]])
         #expect(bookletSpreads(pageCount: 2, layout: .flat) == [[1, 2]])
+        #expect(bookletSpreads(pageCount: 1, layout: .folded) == [[1]])
+        #expect(BookletPartLayout.flat.spreadDescription(pageCount: 3) == "1–2 · 3")
         #expect(BookletPartLayout.flat.spreadDescription(pageCount: 2) == "1–2")
-        // A real page still facing a blank is kept — you can see that blank.
+        // A full four-page part still shows all four.
         #expect(bookletSpreads(pageCount: 4, layout: .folded) == [[1], [2, 3], [4]])
+    }
+
+    @Test func neverNamesAPageThePartDoesNotHave() {
+        for n in 1...16 {
+            for layout in BookletPartLayout.allCases {
+                let pages = bookletSpreads(pageCount: n, layout: layout).flatMap { $0 }
+                #expect(pages.allSatisfy { $0 <= n }, "n=\(n) \(layout.label) named a missing page")
+            }
+        }
     }
 
     @Test func everyRealPageAppearsExactlyOnce() {

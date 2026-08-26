@@ -134,16 +134,15 @@ enum BookletPartLayout: String, CaseIterable, Identifiable, Codable {
 /// The pages visible at once, in order, as 1-based page numbers — so `[[1], [2, 3], [4]]` for a
 /// folded four-page part. The gaps between these groups are exactly where the player turns.
 ///
-/// Grouped over the *padded* length, since that's the booklet that physically exists — but any
-/// trailing group that is entirely padding is dropped, because announcing a turn onto two blank
-/// sides would be worse than saying nothing. A two-page part laid flat is "1–2", not "1–2 · 3–4".
+/// Grouped over the *padded* length, since that's the booklet that physically exists, but the
+/// padding itself is then trimmed away: only pages the part actually has are listed. So a
+/// three-page part laid flat is "1–2 · 3", not "1–2 · 3–4", and a two-page part is "1–2" with no
+/// turn at all. Naming a page that doesn't exist is worse than saying nothing.
 func bookletSpreads(pageCount: Int, layout: BookletPartLayout) -> [[Int]] {
     let n = bookletPaddedCount(pageCount)
     guard n > 0 else { return [] }
     func trimmed(_ groups: [[Int]]) -> [[Int]] {
-        var groups = groups
-        while let last = groups.last, last.allSatisfy({ $0 > pageCount }) { groups.removeLast() }
-        return groups
+        groups.map { $0.filter { $0 <= pageCount } }.filter { !$0.isEmpty }
     }
     switch layout {
     case .folded:

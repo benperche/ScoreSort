@@ -96,6 +96,9 @@ struct CombineView: View {
             }
         }
         .animation(.easeInOut(duration: 0.15), value: showBookletLayout)
+        // The ⌫ monitor is app-global, so without this it would still be deleting files from the
+        // list behind the overlay. isPanelOpen is the existing flag for "a panel owns the keys".
+        .onChange(of: showBookletLayout) { _, shown in menuState.isPanelOpen = shown }
         .animation(.easeInOut(duration: 0.2), value: showPresetSidebar)
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
             handleDrop(providers: providers)
