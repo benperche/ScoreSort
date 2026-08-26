@@ -1058,6 +1058,13 @@ struct CombineView: View {
             MenuAction(title: "Remove Selected", isEnabled: !selectedFiles.isEmpty, perform: { removeSelected() }),
             MenuAction(title: "Select All", isEnabled: hasFiles, perform: { selectAll() }),
             MenuAction(title: "Select None", isEnabled: hasFiles, perform: { selectNone() }),
+            // Present but disabled outside booklet output, so it teaches that booklets have this
+            // rather than appearing from nowhere. ⌘T is safe to bind: a CommandMenu shortcut fires
+            // even while disabled, but nothing else here wants it — the app has no tabbed windows
+            // and no font panel, and NSTextView doesn't claim it.
+            MenuAction(title: "Booklet Page Turns\u{2026}", key: KeyEquivalent("t"),
+                       isEnabled: layout == .booklet && hasFiles,
+                       perform: { showBookletLayout = true }),
             MenuAction(title: "Show in Finder", key: KeyEquivalent("f"), modifiers: [.command, .shift],
                        isEnabled: revealTarget != nil, perform: { revealInFinder(revealTarget) }),
         ]

@@ -216,6 +216,7 @@ The page order is already sorted.
 | `C` | Group selected files into a collate set |
 | `P` | Toggle Presets panel |
 | `⌘P` | Print the combined PDF |
+| `⌘T` | Booklet page turns (in Booklet output) |
 | `⇧⌘P` | Open the combined PDF in Preview |
 | `⌘Z` / `⌘⇧Z` | Undo / Redo |
 
