@@ -13,7 +13,7 @@ _Draft for the next release after 1.9.0. Keep adding to this as more changes lan
 - **Booklet page scale.** Published music rarely matches A4 exactly, so a **Scale** box beside the output menu sizes each page within its half of the sheet — above 100% to fill more of the page, below it for more space around the music.
 - **A calmer file list.** The green highlight around the file list is gone. It only ever meant "the list has the keyboard", which was never in doubt — the rows themselves show what's selected.
 - **The Presets button looks like a button.** It now matches the Stamp and Clear Files buttons either side of it, and stays visibly switched on while the presets panel is open.
-- **Two-sided printing setup.** macOS doesn't let an app choose your two-sided setting, and printers differ in which edge they turn the paper on. **Set Up Two-Sided Printing…** in the output menu prints one numbered test sheet: fold it, say whether the pages came out the right way up, and ScoreSort sets the rest for you. It's remembered separately for each printer, so home and school can each keep their own answer.
+- **Two-sided printing setup.** macOS doesn't let an app choose your two-sided setting, and printers differ in which edge they turn the paper on. The first time you choose Booklet, ScoreSort explains what it needs from you. **Set Up Two-Sided Printing…** in the output menu then prints one numbered test sheet: fold it, say whether the pages came out the right way up, and ScoreSort sets the rest for you. It's remembered separately for each printer, so home and school can each keep their own answer.
 
 ## ✂️ Split PDF
 

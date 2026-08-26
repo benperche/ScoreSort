@@ -30,7 +30,10 @@ struct CombineView: View {
     /// Not `@AppStorage`: the answer belongs to the printer, not the app, so it's loaded from
     /// `BookletDuplexDefaults` for whichever printer is currently the default.
     @State private var duplexFlip: BookletDuplexFlip = .longEdge
-    @State private var bookletSetupRequest: BookletSetupRequest?
+    @State private var activeSheet: CombineSheet?
+    /// Shown once, the first time anyone switches to Booklet — which catches people who
+    /// upgraded as well as new users, unlike the welcome tour.
+    @AppStorage("combineBookletIntroShown") private var bookletIntroShown = false
     @AppStorage("combineStampEnabled") private var stampEnabled = false
     @AppStorage("combineStampScope") private var stampScope: StampScope = .firstPageOfEachPart
     @State private var isTargeted = false
@@ -72,13 +75,32 @@ struct CombineView: View {
             installKeyMonitor()
             loadDuplexFlipForCurrentPrinter()
         }
-        // The setup wizard is a sheet(item:) rather than sheet(isPresented:) — see the blank-sheet
-        // gotcha that bit ManualAssignmentView.
-        .sheet(item: $bookletSetupRequest) { _ in
-            BookletDuplexSetupView(flip: $duplexFlip,
-                                   printerName: BookletDuplexDefaults.currentPrinterName,
-                                   onPrint: printCalibrationSheet,
-                                   onClose: { bookletSetupRequest = nil })
+        // One sheet(item:) for both — two .sheet modifiers on the same view fight over
+        // presentation, and the intro hands straight over to the wizard. item: rather than
+        // isPresented: per the blank-sheet gotcha that bit ManualAssignmentView.
+        .sheet(item: $activeSheet) { sheet in
+            switch sheet {
+            case .bookletIntro:
+                BookletIntroView(
+                    onSetUp: {
+                        activeSheet = nil
+                        // Let the first sheet finish dismissing before the next goes up.
+                        DispatchQueue.main.async { activeSheet = .duplexSetup }
+                    },
+                    onClose: { activeSheet = nil })
+            case .duplexSetup:
+                BookletDuplexSetupView(flip: $duplexFlip,
+                                       printerName: BookletDuplexDefaults.currentPrinterName,
+                                       onPrint: printCalibrationSheet,
+                                       onClose: { activeSheet = nil })
+            }
+        }
+        // The first time someone chooses Booklet — before any paper is at stake, and while
+        // they're forming the intent rather than halfway through a print job.
+        .onChange(of: layout) { _, new in
+            guard new == .booklet, !bookletIntroShown else { return }
+            bookletIntroShown = true
+            activeSheet = .bookletIntro
         }
         .onDisappear {
             if let m = combineKeyMonitor { NSEvent.removeMonitor(m) }
@@ -401,7 +423,7 @@ struct CombineView: View {
                                                     sheetSize: $bookletSheetSize,
                                                     duplexFlip: $duplexFlip,
                                                     addBlankPages: $addBlankPages,
-                                                    onSetUpTwoSided: { bookletSetupRequest = BookletSetupRequest() })
+                                                    onSetUpTwoSided: { activeSheet = .duplexSetup })
 
                             // Only meaningful once pages are being placed two-up; in single-page
                             // output the print dialog's own scaling is the right tool.
@@ -1062,7 +1084,73 @@ extension Color {
 // MARK: - Combine File Row
 // MARK: - Two-Sided Setup Wizard
 
-struct BookletSetupRequest: Identifiable { let id = UUID() }
+/// The Combine tab's modal sheets, as one value so a single `.sheet(item:)` drives both.
+enum CombineSheet: String, Identifiable {
+    case bookletIntro
+    case duplexSetup
+    var id: String { rawValue }
+}
+
+/// Shown once, when someone first switches the output menu to Booklet.
+///
+/// This is where the two-sided printing explanation lives rather than the welcome tour, because
+/// the tour is only ever shown once per install and existing users would never see it — and they
+/// are exactly the people meeting booklets for the first time.
+struct BookletIntroView: View {
+    let onSetUp: () -> Void
+    let onClose: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Text("Printing Booklets")
+                .font(.title2).fontWeight(.semibold)
+
+            Text("""
+                 Each part becomes its own fold-and-staple booklet, two pages to a side, so a \
+                 whole folder goes out in one print job. Print two-sided, fold, staple.
+                 """)
+
+            Label("""
+                  macOS doesn't let an app choose your two-sided setting, so set **Double-sided** \
+                  to *On* in the print dialog yourself.
+                  """,
+                  systemImage: "printer")
+                .foregroundColor(.secondary)
+
+            Label("""
+                  Printers also differ in which edge they turn the paper on. Setting up takes one \
+                  test sheet, once per printer.
+                  """,
+                  systemImage: "arrow.2.squarepath")
+                .foregroundColor(.secondary)
+
+            Label("""
+                  The print preview may show every second side upside down. That's normal — judge \
+                  it by what comes out of the printer.
+                  """,
+                  systemImage: "info.circle")
+                .foregroundColor(.secondary)
+
+            Text("""
+                 Create PDF and Open in Preview always give an upright booklet you can read on \
+                 screen, so a file you save is fine to keep or send on to whoever is printing it.
+                 """)
+                .font(.callout)
+                .foregroundColor(.secondary)
+
+            HStack {
+                Button("Not Now", action: onClose)
+                    .keyboardShortcut(.cancelAction)
+                Spacer()
+                Button("Set Up Two-Sided Printing\u{2026}", action: onSetUp)
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+            }
+        }
+        .padding(24)
+        .frame(width: 460)
+    }
+}
 
 /// Walks the user through the one thing about booklets that can't be settled in software:
 /// which way their printer turns the paper. Prints a single generated sheet, then asks the only
