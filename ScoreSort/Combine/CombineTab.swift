@@ -260,6 +260,12 @@ struct CombineView: View {
                         Text("Pages")
                             .frame(width: 80, alignment: .center)
                             .font(.headline)
+
+                        if layout == .booklet {
+                            Text("Opens to")
+                                .frame(width: 150, alignment: .center)
+                                .font(.headline)
+                        }
                         
                         Text("# Copies")
                             .frame(width: 100, alignment: .center)
@@ -323,6 +329,15 @@ struct CombineView: View {
                                             unmatchedFileIds.remove(file.id)
                                             combineManager.removeFiles(ids: [file.id], undoManager: undoManager)
                                             showRemovalNotice(undoManager: undoManager)
+                                        },
+                                        showsBookletLayout: layout == .booklet,
+                                        onBookletLayoutChanged: { newLayout in
+                                            // Applies to the whole selection when this row is part
+                                            // of it, so a whole chart can be set in one go.
+                                            let targets = selectedFiles.contains(file.id)
+                                                ? selectedFiles : [file.id]
+                                            combineManager.setBookletLayout(newLayout, for: targets,
+                                                                            undoManager: undoManager)
                                         }
                                     )
                                     .draggable(file.id.uuidString) { dragPreview(for: file) }
@@ -1451,6 +1466,9 @@ struct CombineFileRow: View {
     let onRowTap: () -> Void
     let onCopiesChanged: (Int) -> Void
     let onRemove: () -> Void
+    /// True while booklet output is selected — the layout column is meaningless otherwise.
+    var showsBookletLayout: Bool = false
+    var onBookletLayoutChanged: ((BookletPartLayout) -> Void)? = nil
 
     @State private var isEditingCopies = false
     @State private var copiesText = ""
@@ -1477,6 +1495,32 @@ struct CombineFileRow: View {
             Text("\(file.pageCount)")
                 .frame(width: 80, alignment: .center)
                 .foregroundColor(.secondary)
+
+            if showsBookletLayout {
+                // Labelled by the pages that end up facing each other rather than by the format,
+                // because that's what tells a player where they'll have to turn.
+                Menu {
+                    ForEach(BookletPartLayout.allCases) { option in
+                        Button {
+                            onBookletLayoutChanged?(option)
+                        } label: {
+                            if option == file.effectiveBookletLayout {
+                                Label("\(option.label) — \(option.spreadDescription(pageCount: file.pageCount))",
+                                      systemImage: "checkmark")
+                            } else {
+                                Text("\(option.label) — \(option.spreadDescription(pageCount: file.pageCount))")
+                            }
+                        }
+                    }
+                } label: {
+                    Text(file.effectiveBookletLayout.spreadDescription(pageCount: file.pageCount))
+                        .lineLimit(1)
+                }
+                .menuStyle(.borderlessButton)
+                .frame(width: 150)
+                .disabled(file.isBlankPage)
+                .help("Where the page turns fall in this part's booklet")
+            }
 
             // Grouped files don't have their own copy count — the group header owns it
             if isGrouped {
@@ -2512,6 +2556,19 @@ class CombineManager: ObservableObject {
         collateGroups.removeAll()
         registerUndo(undoManager: undoManager, actionName: "Clear All",
                      restoringFiles: bf, restoringGroups: bg)
+    }
+
+    /// Sets the booklet layout on every file in `ids`. Undoable as one step, like the other
+    /// list edits.
+    func setBookletLayout(_ layout: BookletPartLayout, for ids: Set<UUID>, undoManager: UndoManager?) {
+        guard !ids.isEmpty else { return }
+        let beforeFiles = files, beforeGroups = collateGroups
+        for i in files.indices where ids.contains(files[i].id) && !files[i].isBlankPage {
+            files[i].bookletLayout = layout
+        }
+        guard files != beforeFiles else { return }
+        registerUndo(undoManager: undoManager, actionName: "Change Booklet Layout",
+                     restoringFiles: beforeFiles, restoringGroups: beforeGroups)
     }
 
     func updateCopies(for id: UUID, copies: Int, undoManager: UndoManager?) {
