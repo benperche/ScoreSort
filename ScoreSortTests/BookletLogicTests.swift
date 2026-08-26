@@ -515,6 +515,38 @@ struct BookletPlacementTests {
         }
     }
 
+    /// A two-page part is laid out flat rather than folded: both pages on the front face, so
+    /// the player opens it on the stand and never turns a page mid-piece.
+    @Test func twoPagePartIsAFlatSpread() throws {
+        let reference = try #require(GreyReference(pageCount: 2))
+        let imposed = try #require(imposedBookletDocument(reference.doc, segments: [0..<2],
+                                                          sheetSize: .doubleSize)).doc
+        #expect(imposed.pageCount == 2)                 // still one sheet, two faces
+
+        let front = try #require(imposed.page(at: 0))
+        #expect(reference.identify(front, atFractionX: 0.25) == 0, "p1 on the left")
+        #expect(reference.identify(front, atFractionX: 0.75) == 1, "p2 on the right")
+
+        // The back is blank, so it can be folded inwards and read flat.
+        let back = try #require(imposed.page(at: 1))
+        #expect(reference.identify(back, atFractionX: 0.25) == nil)
+        #expect(reference.identify(back, atFractionX: 0.75) == nil)
+    }
+
+    /// Three pages and up keep the saddle stitch, which already reads correctly.
+    @Test func threePagePartStaysABooklet() throws {
+        let reference = try #require(GreyReference(pageCount: 3))
+        let imposed = try #require(imposedBookletDocument(reference.doc, segments: [0..<3],
+                                                          sheetSize: .doubleSize)).doc
+        let front = try #require(imposed.page(at: 0))
+        #expect(reference.identify(front, atFractionX: 0.25) == nil, "cover's outer half is blank")
+        #expect(reference.identify(front, atFractionX: 0.75) == 0, "p1 is the cover")
+
+        let back = try #require(imposed.page(at: 1))
+        #expect(reference.identify(back, atFractionX: 0.25) == 1)
+        #expect(reference.identify(back, atFractionX: 0.75) == 2)   // p2|p3 spread inside
+    }
+
     /// A 5-page part pads to 8, and the three padding slots must come out blank rather than
     /// wrapping around to real pages.
     @Test func paddingSlotsAreBlank() throws {

@@ -100,6 +100,18 @@ func bookletPaddedCount(_ pages: Int) -> Int {
     return max(4, (pages + 3) / 4 * 4)
 }
 
+/// A two-page part is laid out flat — both pages side by side on one face — rather than as a
+/// booklet.
+///
+/// Folded as a booklet, two pages become a cover and an inside page, so the player has to turn
+/// mid-piece and never sees both at once. Printed flat they sit side by side: fold it inwards to
+/// live in the folder, open it on the stand, no page turn at all. It still costs one sheet and
+/// two faces, so it interleaves correctly with longer parts in the same duplex run.
+///
+/// Only two pages. One page has nothing to pair with, and from three up the saddle stitch already
+/// does the right thing — three gives a cover plus a spread, four gives cover, spread, back cover.
+func bookletIsFlatSpread(pageCount: Int) -> Bool { pageCount == 2 }
+
 // MARK: - Segments
 
 /// Reading-page ranges, one per booklet, derived from the first-page index of each part.
@@ -124,6 +136,8 @@ func bookletSegments(pageCount: Int, partFirstPages: [Int]) -> [Range<Int>] {
 /// Physical sheets of paper the job will consume — each segment padded to a whole number
 /// of folded sheets. Two sheet faces (four reading pages) per sheet of paper.
 func bookletSheetCount(segments: [Range<Int>]) -> Int {
+    // A flat spread is one sheet too, and bookletPaddedCount already rounds 2 up to 4, so this
+    // needs no special case.
     segments.reduce(0) { $0 + bookletPaddedCount($1.count) / 4 }
 }
 
@@ -172,7 +186,11 @@ func imposedBookletDocument(_ doc: PDFDocument,
         // with `segments` and the caller's outline labels line up.
         sheetStarts.append(facesWritten)
         let padded = bookletPaddedCount(segment.count)
-        let order = bookletImpositionOrder(n: padded)
+        // Slots run [front-left, front-right, back-left, back-right]. A flat spread puts both
+        // pages on the front face and leaves the back blank; -1 marks a slot to leave empty.
+        let order = bookletIsFlatSpread(pageCount: segment.count)
+            ? [0, 1, -1, -1]
+            : bookletImpositionOrder(n: padded)
         guard !order.isEmpty else { continue }
 
         // Sheet size follows the segment's first page, so a booklet of A4 parts gives A3
@@ -223,7 +241,7 @@ private func draw(readingPos: Int,
                   into half: CGRect,
                   scale: Double,
                   in ctx: CGContext) {
-    guard readingPos < segment.count else { return }
+    guard readingPos >= 0, readingPos < segment.count else { return }
     // CGPDFDocument pages are 1-based.
     guard let page = source.page(at: segment.lowerBound + readingPos + 1) else { return }
 
