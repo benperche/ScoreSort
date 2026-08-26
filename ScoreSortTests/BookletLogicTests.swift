@@ -389,6 +389,55 @@ struct CombineBookletOutputTests {
         #expect(reference.identify(back, atFractionX: 0.75) == order[3])
     }
 
+    /// Apply to All must not undo a choice already made by hand on another part — that would
+    /// silently throw away the decision the user came here to make.
+    @Test func applyToAllKeepsExistingOverrides() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        for name in ["A", "B", "C"] {
+            writePDF(pages: 4, to: dir.appendingPathComponent("\(name).pdf"))
+        }
+        let manager = CombineManager()
+        manager.addFiles(urls: ["A", "B", "C"].map { dir.appendingPathComponent("\($0).pdf") },
+                         undoManager: nil)
+
+        // A is decided by hand; B is where Apply is pressed; C has never been touched.
+        let a = try #require(manager.files.first)
+        manager.setBookletLayout(.flat, for: [a.id], undoManager: nil)
+
+        let b = manager.files[1]
+        let result = manager.applyBookletLayoutToUndecided(.folded, including: b.id, undoManager: nil)
+
+        #expect(manager.files[0].bookletLayout == .flat, "A's own choice survives")
+        #expect(manager.files[1].bookletLayout == .folded)
+        #expect(manager.files[2].bookletLayout == .folded)
+        #expect(result.applied == 2)
+        #expect(result.kept == 1)
+    }
+
+    /// The part Apply is pressed on takes the layout even if it was set by hand — it's the one
+    /// being looked at, so leaving it out would be baffling.
+    @Test func applyToAllIncludesThePartYoureOn() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        for name in ["A", "B"] {
+            writePDF(pages: 4, to: dir.appendingPathComponent("\(name).pdf"))
+        }
+        let manager = CombineManager()
+        manager.addFiles(urls: ["A", "B"].map { dir.appendingPathComponent("\($0).pdf") },
+                         undoManager: nil)
+
+        let a = try #require(manager.files.first)
+        manager.setBookletLayout(.flat, for: [a.id], undoManager: nil)
+        let result = manager.applyBookletLayoutToUndecided(.folded, including: a.id, undoManager: nil)
+
+        #expect(manager.files[0].bookletLayout == .folded)
+        #expect(result.applied == 2)
+        #expect(result.kept == 0)
+    }
+
     @Test func singlePageLayoutIsUnchanged() throws {
         let dir = try tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }

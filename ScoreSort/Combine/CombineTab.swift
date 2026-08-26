@@ -80,10 +80,10 @@ struct CombineView: View {
                             combineManager.setBookletLayout(newLayout, for: [id],
                                                             undoManager: undoManager)
                         },
-                        onApplyToAll: { newLayout in
-                            let all = Set(combineManager.files.filter { !$0.isBlankPage }.map(\.id))
-                            combineManager.setBookletLayout(newLayout, for: all,
-                                                            undoManager: undoManager)
+                        onApplyToAll: { newLayout, current in
+                            combineManager.applyBookletLayoutToUndecided(newLayout,
+                                                                         including: current,
+                                                                         undoManager: undoManager)
                         },
                         onClose: { showBookletLayout = false })
                         .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .center)))
@@ -2608,6 +2608,33 @@ class CombineManager: ObservableObject {
         collateGroups.removeAll()
         registerUndo(undoManager: undoManager, actionName: "Clear All",
                      restoringFiles: bf, restoringGroups: bg)
+    }
+
+    /// Applies `layout` to every part that hasn't been given one explicitly, plus `current`
+    /// itself. Parts someone has already decided on are left alone — having set one part by hand,
+    /// it would be rude to overwrite that from a different part's screen.
+    ///
+    /// Returns how many parts took the layout and how many kept a choice already made, so the
+    /// caller can say what happened.
+    @discardableResult
+    func applyBookletLayoutToUndecided(_ layout: BookletPartLayout,
+                                       including current: UUID?,
+                                       undoManager: UndoManager?) -> (applied: Int, kept: Int) {
+        let beforeFiles = files, beforeGroups = collateGroups
+        var applied = 0, kept = 0
+        for i in files.indices where !files[i].isBlankPage {
+            if files[i].bookletLayout == nil || files[i].id == current {
+                files[i].bookletLayout = layout
+                applied += 1
+            } else {
+                kept += 1
+            }
+        }
+        if files != beforeFiles {
+            registerUndo(undoManager: undoManager, actionName: "Apply Booklet Layout",
+                         restoringFiles: beforeFiles, restoringGroups: beforeGroups)
+        }
+        return (applied, kept)
     }
 
     /// Sets the booklet layout on every file in `ids`. Undoable as one step, like the other

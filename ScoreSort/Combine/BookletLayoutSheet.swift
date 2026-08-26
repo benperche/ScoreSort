@@ -16,7 +16,7 @@ import PDFKit
 struct BookletLayoutReviewView: View {
     let files: [CombineFile]
     let onSet: (UUID, BookletPartLayout) -> Void
-    let onApplyToAll: (BookletPartLayout) -> Void
+    let onApplyToAll: (BookletPartLayout, UUID?) -> (applied: Int, kept: Int)
     let onClose: () -> Void
 
     /// One part at a time, like Step 1 of the Split tab — every part at once left the pages far
@@ -26,6 +26,9 @@ struct BookletLayoutReviewView: View {
     /// doesn't re-render anything, and so the next part can be fetched while this one is read.
     @State private var cache: [UUID: [NSImage]] = [:]
     @FocusState private var focused: Bool
+    /// What the last Apply did, shown briefly so the button doesn't feel inert.
+    @State private var applyNotice: String?
+    @State private var noticeToken = 0
 
     private var current: CombineFile? {
         files.indices.contains(index) ? files[index] : nil
@@ -52,6 +55,7 @@ struct BookletLayoutReviewView: View {
             }
         }
         .frame(width: 940, height: 700)
+        .animation(.easeInOut(duration: 0.15), value: applyNotice)
         .background(
             RoundedRectangle(cornerRadius: 12)
                 .fill(Color(NSColor.windowBackgroundColor))
@@ -78,6 +82,22 @@ struct BookletLayoutReviewView: View {
                 guard files.indices.contains(i) else { continue }
                 await load(files[i])
             }
+        }
+    }
+
+    private func applyToAll(_ file: CombineFile) {
+        let result = onApplyToAll(file.effectiveBookletLayout, file.id)
+        let parts = result.applied == 1 ? "1 part" : "\(result.applied) parts"
+        applyNotice = result.kept == 0
+            ? "Applied to \(parts)"
+            : "Applied to \(parts) · \(result.kept) kept your setting"
+
+        // Clear it again, unless another Apply has happened in the meantime.
+        noticeToken += 1
+        let token = noticeToken
+        Task {
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
+            if token == noticeToken { applyNotice = nil }
         }
     }
 
@@ -126,10 +146,16 @@ struct BookletLayoutReviewView: View {
             Button { step(1) } label: { Label("Next", systemImage: "chevron.right") }
                 .disabled(index >= files.count - 1)
 
+            if let applyNotice {
+                Label(applyNotice, systemImage: "checkmark.circle.fill")
+                    .foregroundColor(.secondary)
+                    .transition(.opacity)
+            }
+
             Spacer()
 
-            Button("Apply to All Parts") { onApplyToAll(file.effectiveBookletLayout) }
-                .help("Give every part the layout shown here")
+            Button("Apply to All Parts") { applyToAll(file) }
+                .help("Give every part this layout, except any you've already set yourself")
                 .disabled(files.count < 2)
 
             Button("Done", action: onClose)
