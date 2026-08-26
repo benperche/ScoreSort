@@ -94,6 +94,13 @@ struct CombineView: View {
                         }
                     },
                     onClose: { activeSheet = nil })
+            case .bookletLayout:
+                BookletLayoutReviewView(
+                    files: combineManager.files.filter { !$0.isBlankPage },
+                    onSet: { id, newLayout in
+                        combineManager.setBookletLayout(newLayout, for: [id], undoManager: undoManager)
+                    },
+                    onClose: { activeSheet = nil })
             case .duplexSetup(let startAtCheck):
                 BookletDuplexSetupView(flip: $duplexFlip,
                                        printerName: BookletDuplexDefaults.currentPrinterName,
@@ -445,7 +452,9 @@ struct CombineView: View {
                                                     sheetSize: $bookletSheetSize,
                                                     duplexFlip: $duplexFlip,
                                                     addBlankPages: $addBlankPages,
-                                                    onSetUpTwoSided: { activeSheet = .duplexSetup(startAtCheck: false) })
+                                                    onSetUpTwoSided: { activeSheet = .duplexSetup(startAtCheck: false) },
+                                                    onReviewLayout: { activeSheet = .bookletLayout },
+                                                    hasFiles: !combineManager.files.isEmpty)
 
                             // Only meaningful once pages are being placed two-up; in single-page
                             // output the print dialog's own scaling is the right tool.
@@ -1112,11 +1121,13 @@ enum CombineSheet: Identifiable {
     /// `startAtCheck` when the test sheet is already on its way to the printer — the first-run
     /// modal does the explaining, so replaying the wizard's own intro would just repeat it.
     case duplexSetup(startAtCheck: Bool)
+    case bookletLayout
 
     var id: String {
         switch self {
-        case .bookletIntro:                return "bookletIntro"
+        case .bookletIntro:                  return "bookletIntro"
         case .duplexSetup(let startAtCheck): return "duplexSetup-\(startAtCheck)"
+        case .bookletLayout:                 return "bookletLayout"
         }
     }
 }
@@ -1322,6 +1333,8 @@ struct CombineOutputMenuButton: View {
     @Binding var duplexFlip: BookletDuplexFlip
     @Binding var addBlankPages: Bool
     let onSetUpTwoSided: () -> Void
+    let onReviewLayout: () -> Void
+    let hasFiles: Bool
 
     var body: some View {
         Menu {
@@ -1360,6 +1373,9 @@ struct CombineOutputMenuButton: View {
             // Lives in here rather than on the main screen: it's a one-off setup step, not part
             // of the everyday flow. It needs no files — the test sheet is generated — so a new
             // printer can be calibrated before anything has been assembled.
+            Button("Booklet Layout\u{2026}", action: onReviewLayout)
+                .disabled(layout != .booklet || !hasFiles)
+
             Button("Set Up Two-Sided Printing\u{2026}", action: onSetUpTwoSided)
                 .disabled(layout != .booklet)
         } label: {
