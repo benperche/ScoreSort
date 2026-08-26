@@ -215,6 +215,8 @@ The page order is already sorted.
 | `⌘↑` / `⌘↓` | Move selected files up / down |
 | `C` | Group selected files into a collate set |
 | `P` | Toggle Presets panel |
+| `⌘P` | Print the combined PDF |
+| `⇧⌘P` | Open the combined PDF in Preview |
 | `⌘Z` / `⌘⇧Z` | Undo / Redo |
 
 ---
