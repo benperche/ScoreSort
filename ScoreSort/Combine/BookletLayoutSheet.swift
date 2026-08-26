@@ -52,6 +52,14 @@ struct BookletLayoutReviewView: View {
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity)
                 Spacer()
+                Divider()
+                HStack {
+                    Spacer()
+                    Button("Done", action: onClose)
+                        .keyboardShortcut(.defaultAction)
+                        .buttonStyle(.borderedProminent)
+                }
+                .padding(20)
             }
         }
         .frame(width: 940, height: 700)
@@ -110,7 +118,7 @@ struct BookletLayoutReviewView: View {
         let url = file.url
         let count = file.pageCount
         let images: [NSImage] = await Task.detached(priority: .userInitiated) {
-            guard let doc = PDFDocument(url: url) else { return [] }
+            guard let doc = pdfDocument(forFileAt: url) else { return [] }
             return (0..<min(count, doc.pageCount)).compactMap {
                 stampPagePreviewImage(page: doc.page(at: $0), maxDimension: 700)
             }
