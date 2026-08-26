@@ -97,6 +97,51 @@ struct BookletPaddedCountTests {
     }
 }
 
+@Suite("Booklet spreads — bookletSpreads")
+struct BookletSpreadsTests {
+
+    @Test func foldedIsCoverPairsThenBack() {
+        #expect(bookletSpreads(pageCount: 4, layout: .folded) == [[1], [2, 3], [4]])
+        #expect(bookletSpreads(pageCount: 8, layout: .folded) == [[1], [2, 3], [4, 5], [6, 7], [8]])
+    }
+
+    @Test func flatIsSequentialPairs() {
+        #expect(bookletSpreads(pageCount: 4, layout: .flat) == [[1, 2], [3, 4]])
+        #expect(bookletSpreads(pageCount: 8, layout: .flat) == [[1, 2], [3, 4], [5, 6], [7, 8]])
+    }
+
+    /// Padding is grouped like any other side, but a trailing group that is nothing but blanks is
+    /// dropped — a two-page part laid flat has no page turn at all, so claiming "1–2 · 3–4" would
+    /// promise a turn onto two empty sides.
+    @Test func trailingBlankSpreadsAreDropped() {
+        #expect(bookletSpreads(pageCount: 3, layout: .folded) == [[1], [2, 3]])
+        #expect(bookletSpreads(pageCount: 2, layout: .flat) == [[1, 2]])
+        #expect(BookletPartLayout.flat.spreadDescription(pageCount: 2) == "1–2")
+        // A real page still facing a blank is kept — you can see that blank.
+        #expect(bookletSpreads(pageCount: 4, layout: .folded) == [[1], [2, 3], [4]])
+    }
+
+    @Test func everyRealPageAppearsExactlyOnce() {
+        for n in 1...16 {
+            for layout in BookletPartLayout.allCases {
+                let pages = bookletSpreads(pageCount: n, layout: layout).flatMap { $0 }
+                #expect(Set(pages).isSuperset(of: Set(1...n)), "n=\(n) \(layout.label) lost a page")
+                #expect(pages.count == Set(pages).count, "n=\(n) \(layout.label) repeated a page")
+                #expect(pages.allSatisfy { $0 <= bookletPaddedCount(n) })
+                // Never ends on a group that's nothing but padding.
+                if let last = bookletSpreads(pageCount: n, layout: layout).last {
+                    #expect(last.contains { $0 <= n }, "n=\(n) \(layout.label) ends on blanks")
+                }
+            }
+        }
+    }
+
+    @Test func descriptionMatchesTheSpreads() {
+        #expect(BookletPartLayout.folded.spreadDescription(pageCount: 4) == "1 · 2–3 · 4")
+        #expect(BookletPartLayout.flat.spreadDescription(pageCount: 4) == "1–2 · 3–4")
+    }
+}
+
 // MARK: - Segments
 
 @Suite("Booklet segments — bookletSegments")

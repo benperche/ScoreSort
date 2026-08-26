@@ -125,21 +125,36 @@ enum BookletPartLayout: String, CaseIterable, Identifiable, Codable {
     /// Which pages end up facing each other, e.g. "1 · 2–3 · 4" — the thing a player actually
     /// judges, since it says where they'll have to turn.
     func spreadDescription(pageCount: Int) -> String {
-        let n = bookletPaddedCount(pageCount)
-        guard n > 0 else { return "" }
-        var groups: [String] = []
-        switch self {
-        case .folded:
-            // A cover on its own, facing pairs through the middle, then the back on its own.
-            groups.append("1")
-            var page = 2
-            while page + 1 <= n - 1 { groups.append("\(page)–\(page + 1)"); page += 2 }
-            if n > 1 { groups.append("\(n)") }
-        case .flat:
-            var page = 1
-            while page <= n { groups.append("\(page)–\(page + 1)"); page += 2 }
-        }
-        return groups.joined(separator: " · ")
+        bookletSpreads(pageCount: pageCount, layout: self)
+            .map { $0.count == 1 ? "\($0[0])" : "\($0[0])–\($0[$0.count - 1])" }
+            .joined(separator: " · ")
+    }
+}
+
+/// The pages visible at once, in order, as 1-based page numbers — so `[[1], [2, 3], [4]]` for a
+/// folded four-page part. The gaps between these groups are exactly where the player turns.
+///
+/// Grouped over the *padded* length, since that's the booklet that physically exists — but any
+/// trailing group that is entirely padding is dropped, because announcing a turn onto two blank
+/// sides would be worse than saying nothing. A two-page part laid flat is "1–2", not "1–2 · 3–4".
+func bookletSpreads(pageCount: Int, layout: BookletPartLayout) -> [[Int]] {
+    let n = bookletPaddedCount(pageCount)
+    guard n > 0 else { return [] }
+    func trimmed(_ groups: [[Int]]) -> [[Int]] {
+        var groups = groups
+        while let last = groups.last, last.allSatisfy({ $0 > pageCount }) { groups.removeLast() }
+        return groups
+    }
+    switch layout {
+    case .folded:
+        // A cover on its own, facing pairs through the middle, then the back on its own.
+        var groups: [[Int]] = [[1]]
+        var page = 2
+        while page + 1 <= n - 1 { groups.append([page, page + 1]); page += 2 }
+        if n > 1 { groups.append([n]) }
+        return trimmed(groups)
+    case .flat:
+        return trimmed(stride(from: 1, through: n, by: 2).map { [$0, $0 + 1] })
     }
 }
 

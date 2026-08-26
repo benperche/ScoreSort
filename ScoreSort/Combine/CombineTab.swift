@@ -31,6 +31,7 @@ struct CombineView: View {
     /// `BookletDuplexDefaults` for whichever printer is currently the default.
     @State private var duplexFlip: BookletDuplexFlip = .longEdge
     @State private var activeSheet: CombineSheet?
+    @State private var showBookletLayout = false
     /// Shown once, the first time anyone switches to Booklet — which catches people who
     /// upgraded as well as new users, unlike the welcome tour.
     @AppStorage("combineBookletIntroShown") private var bookletIntroShown = false
@@ -65,6 +66,36 @@ struct CombineView: View {
                     .transition(.move(edge: .trailing).combined(with: .opacity))
             }
         }
+        .overlay {
+            if showBookletLayout {
+                ZStack {
+                    Color.black.opacity(0.32)
+                        .ignoresSafeArea()
+                        .onTapGesture { showBookletLayout = false }
+                        .transition(.opacity)
+
+                    BookletLayoutReviewView(
+                        files: combineManager.files.filter { !$0.isBlankPage },
+                        onSet: { id, newLayout in
+                            combineManager.setBookletLayout(newLayout, for: [id],
+                                                            undoManager: undoManager)
+                        },
+                        onApplyToAll: { newLayout in
+                            let all = Set(combineManager.files.filter { !$0.isBlankPage }.map(\.id))
+                            combineManager.setBookletLayout(newLayout, for: all,
+                                                            undoManager: undoManager)
+                        },
+                        onClose: { showBookletLayout = false })
+                        .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .center)))
+
+                    Button("") { showBookletLayout = false }
+                        .keyboardShortcut(.cancelAction)
+                        .frame(width: 0, height: 0)
+                        .opacity(0)
+                }
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: showBookletLayout)
         .animation(.easeInOut(duration: 0.2), value: showPresetSidebar)
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
             handleDrop(providers: providers)
@@ -92,13 +123,6 @@ struct CombineView: View {
                             activeSheet = .duplexSetup(startAtCheck: true)
                             DispatchQueue.main.async { printCalibrationSheet() }
                         }
-                    },
-                    onClose: { activeSheet = nil })
-            case .bookletLayout:
-                BookletLayoutReviewView(
-                    files: combineManager.files.filter { !$0.isBlankPage },
-                    onSet: { id, newLayout in
-                        combineManager.setBookletLayout(newLayout, for: [id], undoManager: undoManager)
                     },
                     onClose: { activeSheet = nil })
             case .duplexSetup(let startAtCheck):
@@ -453,7 +477,7 @@ struct CombineView: View {
                                                     duplexFlip: $duplexFlip,
                                                     addBlankPages: $addBlankPages,
                                                     onSetUpTwoSided: { activeSheet = .duplexSetup(startAtCheck: false) },
-                                                    onReviewLayout: { activeSheet = .bookletLayout },
+                                                    onReviewLayout: { showBookletLayout = true },
                                                     hasFiles: !combineManager.files.isEmpty)
 
                             // Only meaningful once pages are being placed two-up; in single-page
@@ -461,6 +485,17 @@ struct CombineView: View {
                             if layout == .booklet {
                                 BookletScaleField(percent: scalePercentBinding,
                                                   range: minScalePercent...maxScalePercent)
+
+                                // On the bar rather than only in the output menu: deciding where
+                                // page turns fall is part of setting a booklet up, not a setting
+                                // you'd go hunting for.
+                                Button {
+                                    showBookletLayout = true
+                                } label: {
+                                    Label("Page Turns\u{2026}", systemImage: "book")
+                                }
+                                .disabled(combineManager.files.isEmpty)
+                                .help("Choose where each part's page turns fall")
                             }
 
                             Text(outputSummary)
@@ -1121,13 +1156,11 @@ enum CombineSheet: Identifiable {
     /// `startAtCheck` when the test sheet is already on its way to the printer — the first-run
     /// modal does the explaining, so replaying the wizard's own intro would just repeat it.
     case duplexSetup(startAtCheck: Bool)
-    case bookletLayout
 
     var id: String {
         switch self {
         case .bookletIntro:                  return "bookletIntro"
         case .duplexSetup(let startAtCheck): return "duplexSetup-\(startAtCheck)"
-        case .bookletLayout:                 return "bookletLayout"
         }
     }
 }
@@ -1373,7 +1406,7 @@ struct CombineOutputMenuButton: View {
             // Lives in here rather than on the main screen: it's a one-off setup step, not part
             // of the everyday flow. It needs no files — the test sheet is generated — so a new
             // printer can be calibrated before anything has been assembled.
-            Button("Booklet Layout\u{2026}", action: onReviewLayout)
+            Button("Page Turns\u{2026}", action: onReviewLayout)
                 .disabled(layout != .booklet || !hasFiles)
 
             Button("Set Up Two-Sided Printing\u{2026}", action: onSetUpTwoSided)
