@@ -4,6 +4,9 @@ _Draft for the next release after 1.9.0. Keep adding to this as more changes lan
 
 ## ✨ General Improvements
 
+- **⌘W closes the window** — it previously did nothing.
+- **One View menu instead of two.** The menu bar had two menus both called *View*; the tab shortcuts now live in the standard one alongside Full Screen.
+
 ## 🏷️ Rename Files
 
 ## 🔗 Combine PDFs

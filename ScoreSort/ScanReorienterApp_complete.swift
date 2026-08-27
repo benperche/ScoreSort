@@ -134,6 +134,13 @@ struct FileCommands: Commands {
         // ⌘P is free (⇧⌘P is Open in Preview, ⌥⌘P toggles the presets sidebar) and is a
         // modifier shortcut, so binding it in the menu bar is safe under the rule that only
         // non-editing shortcuts live here.
+        // SwiftUI gave this WindowGroup no Close item — checked against the running app, where
+        // neither File nor Window had one, so ⌘W did nothing. Closing quits, via
+        // applicationShouldTerminateAfterLastWindowClosed.
+        CommandGroup(after: .saveItem) {
+            Button("Close") { NSApp.keyWindow?.performClose(nil) }
+                .keyboardShortcut("w", modifiers: .command)
+        }
         CommandGroup(replacing: .printItem) {
             Button("Print\u{2026}") { commands.slice.print?() }
                 .keyboardShortcut("p", modifiers: .command)
@@ -147,7 +154,7 @@ struct ViewCommands: Commands {
     @ObservedObject var appState: AppState
 
     var body: some Commands {
-        CommandMenu("View") {
+        CommandGroup(after: .sidebar) {
             Button("Combine PDFs") { appState.selectedTab = 0 }
                 .keyboardShortcut("1", modifiers: .command)
             Button("Rename Files") { appState.selectedTab = 1 }
