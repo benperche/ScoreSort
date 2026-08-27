@@ -599,7 +599,10 @@ struct ScoreOrderSortView: View {
             HStack(spacing: 12) {
                 Text("Ensemble:")
                     .font(.headline)
-                Picker("", selection: $renamerManager.ensembleType) {
+                // Deferred for the same reason as the Preferences copy: ensembleType's didSet
+                // republishes and may rescan, which a segmented picker would otherwise trigger
+                // from inside a view update.
+                Picker("", selection: $renamerManager.ensembleType.deferredCommit()) {
                     Text("Wind Band").tag(EnsembleType.band)
                     Text("Jazz Band").tag(EnsembleType.jazz)
                     Text("Orchestra").tag(EnsembleType.orchestra)

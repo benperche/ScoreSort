@@ -1034,7 +1034,9 @@ struct PreferencesView: View {
                     VStack(alignment: .leading, spacing: 8) {
                         Text("Ensemble Type:")
                             .font(.headline)
-                        Picker("Ensemble Type", selection: $ensembleType) {
+                        // Deferred: this binding reaches RenamerManager.ensembleType, whose
+                        // didSet republishes the instrument order and can start a folder rescan.
+                        Picker("Ensemble Type", selection: $ensembleType.deferredCommit()) {
                             Text("Wind Band").tag(EnsembleType.band)
                             Text("Jazz Band").tag(EnsembleType.jazz)
                             Text("Orchestra").tag(EnsembleType.orchestra)
@@ -1833,6 +1835,21 @@ class PDFManager: ObservableObject {
 /// a flag indicating whether the operation failed. The caller is responsible for presenting
 /// the alert — managers never show UI directly.
 typealias PDFAlertHandler = (_ title: String, _ message: String, _ isError: Bool) -> Void
+
+extension Binding {
+    /// The same binding, but committing on the next runloop turn rather than during the current
+    /// view update.
+    ///
+    /// A segmented `Picker` commits its selection *while the view is updating*. If that writes to
+    /// an `@Published` property — worse, one whose `didSet` republishes other properties or kicks
+    /// off work — SwiftUI logs "Publishing changes from within view updates is not allowed, this
+    /// will cause undefined behavior", once per publish. Deferring the write by a turn moves it
+    /// out of the update pass, which is what the warning is asking for.
+    func deferredCommit() -> Binding<Value> {
+        Binding(get: { wrappedValue },
+                set: { newValue in DispatchQueue.main.async { wrappedValue = newValue } })
+    }
+}
 
 /// Convenience wrapper so call sites don't repeat the NSAlert boilerplate.
 func showNSAlert(title: String, message: String, isError: Bool) {
