@@ -107,7 +107,11 @@ struct CombineView: View {
 
                     CombineQuickLookView(
                         files: quickLookFiles,
-                        index: Binding(get: { index }, set: { quickLookIndex = $0 }),
+                        // Reads quickLookIndex, not the `index` unwrapped above: the key monitor
+                        // captures this view once, so a binding over a captured constant would
+                        // keep computing every step from the index the preview opened on.
+                        index: Binding(get: { quickLookIndex ?? index },
+                                       set: { quickLookIndex = $0 }),
                         onClose: { quickLookIndex = nil })
                         .transition(.opacity.combined(with: .scale(scale: 0.97, anchor: .center)))
 
