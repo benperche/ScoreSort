@@ -25,7 +25,13 @@ class RenamerManager: ObservableObject {
     @Published var ensembleType: EnsembleType = .band {
         didSet {
             if !hasCustomOrder {
+                // Flagged, because the assignment below lands in customInstrumentOrder's own
+                // didSet. Without this it set hasCustomOrder itself, so the *first* ensemble
+                // switch locked the list: every switch after it updated the picker while
+                // detection carried on using whichever order had loaded first.
+                isLoadingPresetOrder = true
                 customInstrumentOrder = InstrumentOrders.getOrder(for: ensembleType)
+                isLoadingPresetOrder = false
             }
             if hasContent {
                 scanFolder()
@@ -34,6 +40,10 @@ class RenamerManager: ObservableObject {
     }
     @Published var customInstrumentOrder: [String] = InstrumentOrders.getOrder(for: .band) {
         didSet {
+            // Only a change the *user* made counts as customising. A preset being loaded for a
+            // newly chosen ensemble is not, and the rescan is left to ensembleType's didSet so
+            // one ensemble change doesn't scan the folder twice.
+            guard !isLoadingPresetOrder else { return }
             hasCustomOrder = true
             if hasContent {
                 scanFolder()
@@ -54,6 +64,8 @@ class RenamerManager: ObservableObject {
     var hasContent: Bool { folderURL != nil || !directFiles.isEmpty }
 
     private var hasCustomOrder = false
+    /// True only while an ensemble's preset order is being loaded into `customInstrumentOrder`.
+    private var isLoadingPresetOrder = false
     var manualOverrides: [String: Int] = [:]
     @Published private(set) var isRescanMode = false
     

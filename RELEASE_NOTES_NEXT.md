@@ -26,4 +26,6 @@ _Draft for the next release after 1.9.0. Keep adding to this as more changes lan
 
 ## 🐞 Fixed
 
+- **Renamer: switching ensemble works every time.** After the first change, picking a different ensemble moved the buttons but carried on matching against the previous ensemble's instruments — so on Orchestra, say, an Oboe or Violin part could come up "not recognised" because it was still checking the Jazz Band list.
+
 - **Split: keyboard navigation works again.** Clicking an output file left the arrow keys unable to page through the PDF, and in Step 2 Tab jumped to a preview arrow instead of the next instrument name. Both were side effects of the new Stamp button in 1.9.0.
