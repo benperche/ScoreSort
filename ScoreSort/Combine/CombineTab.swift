@@ -124,6 +124,7 @@ struct CombineView: View {
         }
         .onChange(of: quickLookIndex) { _, shown in
             menuState.isPanelOpen = shown != nil
+            guard shown != nil else { returnFocusToList(); return }
             // Keep the list in step with what's being previewed, the way arrowing through Quick
             // Look moves the selection in Finder. Otherwise closing it drops you back wherever
             // you started, and the arrow keys appear to do nothing.
@@ -137,7 +138,10 @@ struct CombineView: View {
         .animation(.easeInOut(duration: 0.15), value: showBookletLayout)
         // The ⌫ monitor is app-global, so without this it would still be deleting files from the
         // list behind the overlay. isPanelOpen is the existing flag for "a panel owns the keys".
-        .onChange(of: showBookletLayout) { _, shown in menuState.isPanelOpen = shown }
+        .onChange(of: showBookletLayout) { _, shown in
+            menuState.isPanelOpen = shown
+            if !shown { returnFocusToList() }
+        }
         .animation(.easeInOut(duration: 0.2), value: showPresetSidebar)
         .onDrop(of: [.fileURL], isTargeted: $isTargeted) { providers in
             handleDrop(providers: providers)
@@ -215,6 +219,16 @@ struct CombineView: View {
         let wanted = focusedFileId ?? selectedFiles.first
         quickLookIndex = wanted.flatMap { id in candidates.firstIndex { $0.id == id } } ?? 0
         return true
+    }
+
+    /// Hands the keyboard back to the file list after an overlay closes.
+    ///
+    /// Both overlays take focus away — Quick Look's preview has to own first responder to scroll
+    /// at all — and nothing gives it back on the way out, so the list stops hearing Space and the
+    /// arrows until it's clicked. Deferred a runloop turn so the overlay has finished tearing
+    /// down before the focus is claimed.
+    private func returnFocusToList() {
+        DispatchQueue.main.async { listFocused = true }
     }
 
     private func loadDuplexFlipForCurrentPrinter() {
