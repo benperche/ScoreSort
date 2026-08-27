@@ -7,6 +7,43 @@
         <language>en</language>
 
         <item>
+            <title>Version 1.10.0</title>
+            <sparkle:version>14</sparkle:version>
+            <sparkle:shortVersionString>1.10.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <pubDate>Thu, 27 Aug 2026 11:51:41 +1000</pubDate>
+            <description><![CDATA[
+                <h2>ScoreSort 1.10.0</h2>
+                <p>This update contains a lot of improvements to the Combine tab, and a few bug fixes in the rest of the app.</p>
+                <p><b>🔗 Combine — major new feature: Booklets!</b></p>
+                <ul>
+                    <li><b>Booklets.</b> Switch the output menu at the bottom left from <i>Single pages</i> to <b>Booklet</b>, and every part is laid out as its own fold-and-staple booklet — the whole folder in one print job, instead of one document at a time. Full size prints multiple A4 parts onto A3 paper. (You can also print in A5 onto an A4 booklet if you want to.) Each copy of a part becomes its own booklet, and short parts are padded out to a whole folded sheet automatically. <b>Two-page parts</b> are laid out flat — both pages side by side on one sheet — so you can open them on the stand and never turn a page mid-piece.</li>
+                    <li><b>Choose where the page turns fall.</b> When creating a booklet, you can specify how to arrange the pages for sensible page turns. When in booklet mode, try the <b>Page Turns</b> (⌘T) button to view each part and specify where you want to place your page breaks.</li>
+                    <li><b>Booklet page scale.</b> Published music rarely matches A4 exactly, so a <b>Scale</b> box beside the output menu sizes each page within its half of the sheet — above 100% to fill more of the page, below it for more space around the music.</li>
+                    <li><b>Two-sided printing setup.</b> macOS doesn't let an app choose your two-sided setting, and printers differ in which edge they turn the paper on. <b>Set Up Two-Sided Printing…</b> in the output menu prints one numbered test sheet: fold it, say whether the pages came out the right way up, and ScoreSort sets the rest for you, remembered for each printer you use.</li>
+                    <li><b>Print without saving first.</b> A new <b>Print…</b> button (⌘P) sends the combined PDF straight to the print dialog in one step, alongside Create PDF and Open in Preview.</li>
+                </ul>
+                <p><b>🔗 Combine — other improvements</b></p>
+                <ul>
+                    <li><b>Press Space to look at a file in the list.</b> Quick Look opens on the file you've got selected, just like in Finder — arrow keys move to the next part, Space or Escape closes it again.</li>
+                    <li>The <b>Presets</b> button now looks like a button, and stays visibly switched on while the presets panel is open.</li>
+                </ul>
+                <p><b>🐞 Fixed</b></p>
+                <ul>
+                    <li><b>Renamer: switching ensemble works every time.</b> After the first change, picking a different ensemble moved the buttons but carried on matching against the previous ensemble's instruments — so on Orchestra, an Oboe or Violin part could come up "not recognised" because it was still checking the Jazz Band list.</li>
+                    <li><b>Split: keyboard navigation works again.</b> Clicking an output file left the arrow keys unable to page through the PDF, and in Step 2 Tab jumped to a preview arrow instead of the next instrument name. Sorry!</li>
+                    <li><b>⌘W now closes the window</b> as you'd hope — it previously did nothing.</li>
+                    <li><b>One View menu instead of two.</b> The menu bar had two menus both called <i>View</i>; the tab shortcuts now live in the standard one alongside Full Screen.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/benperche/ScoreSort/releases/download/v1.10.0/ScoreSort.dmg"
+                sparkle:edSignature="zf0AY8PnuZvW6z5pQ3k88oUko/qEbnZLC4xOBbz0HkgZgQrNnV3BbVRTiO7CDjLdz02ZTViuR7z7sjIeiQpXCA=="
+                length="8453487"
+                type="application/octet-stream"/>
+        </item>
+
+        <item>
             <title>Version 1.9.0</title>
             <sparkle:version>13</sparkle:version>
             <sparkle:shortVersionString>1.9.0</sparkle:shortVersionString>
