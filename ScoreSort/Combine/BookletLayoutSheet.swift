@@ -113,16 +113,30 @@ struct BookletLayoutReviewView: View {
         index = min(max(0, index + delta), max(0, files.count - 1))
     }
 
+    /// Renders on the main actor, a page at a time, yielding in between.
+    ///
+    /// The module is `SWIFT_DEFAULT_ACTOR_ISOLATION = MainActor`, so the PDF helpers are
+    /// main-actor isolated and a detached task can't call them — an error under Swift 6. Marking
+    /// them `nonisolated` would cascade into `visualPageBox(for:)` and the rest of StampLogic,
+    /// which Stamp and Split share, so the work stays here instead: one page per pass with a
+    /// yield between, which keeps the window responsive without moving anything off the actor.
     private func load(_ file: CombineFile) async {
         guard cache[file.id] == nil else { return }
-        let url = file.url
-        let count = file.pageCount
-        let images: [NSImage] = await Task.detached(priority: .userInitiated) {
-            guard let doc = pdfDocument(forFileAt: url) else { return [] }
-            return (0..<min(count, doc.pageCount)).compactMap {
-                stampPagePreviewImage(page: doc.page(at: $0), maxDimension: 700)
+        guard let doc = pdfDocument(forFileAt: file.url) else {
+            cache[file.id] = []          // cached so a broken file isn't retried on every step
+            return
+        }
+
+        var images: [NSImage] = []
+        for i in 0..<min(file.pageCount, doc.pageCount) {
+            // Stepping quickly changes the task id and cancels this one; drop the partial work
+            // rather than rendering pages nobody is looking at any more.
+            if Task.isCancelled { return }
+            if let image = stampPagePreviewImage(page: doc.page(at: i), maxDimension: 700) {
+                images.append(image)
             }
-        }.value
+            await Task.yield()
+        }
         cache[file.id] = images
     }
 
