@@ -118,7 +118,17 @@ struct CombineView: View {
                 }
             }
         }
-        .onChange(of: quickLookIndex) { _, shown in menuState.isPanelOpen = shown != nil }
+        .onChange(of: quickLookIndex) { _, shown in
+            menuState.isPanelOpen = shown != nil
+            // Keep the list in step with what's being previewed, the way arrowing through Quick
+            // Look moves the selection in Finder. Otherwise closing it drops you back wherever
+            // you started, and the arrow keys appear to do nothing.
+            guard let shown, quickLookFiles.indices.contains(shown) else { return }
+            let id = quickLookFiles[shown].id
+            selectedFiles = [id]
+            focusedFileId = id
+            anchorFileId = id
+        }
         .animation(.easeInOut(duration: 0.12), value: quickLookIndex)
         .animation(.easeInOut(duration: 0.15), value: showBookletLayout)
         // The ⌫ monitor is app-global, so without this it would still be deleting files from the

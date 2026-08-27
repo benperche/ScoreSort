@@ -18,6 +18,9 @@ import QuickLookUI
 struct QuickLookPreview: NSViewRepresentable {
     let url: URL
 
+    final class Coordinator { var handedFocus = false }
+    func makeCoordinator() -> Coordinator { Coordinator() }
+
     func makeNSView(context: Context) -> QLPreviewView {
         let view = QLPreviewView(frame: .zero, style: .normal) ?? QLPreviewView()
         view.autostarts = true
@@ -26,8 +29,15 @@ struct QuickLookPreview: NSViewRepresentable {
 
     func updateNSView(_ nsView: QLPreviewView, context: Context) {
         // Reassigning the same item makes it flicker and reload, so only set it on a change.
-        guard (nsView.previewItem as? URL) != url else { return }
-        nsView.previewItem = url as NSURL
+        if (nsView.previewItem as? URL) != url {
+            nsView.previewItem = url as NSURL
+        }
+        // Quick Look renders out of process, and the remote view only gets scroll and gesture
+        // events once it's first responder — otherwise scrolling does nothing until you click.
+        // Once only: re-making it first responder on every update would fight the user.
+        guard !context.coordinator.handedFocus else { return }
+        context.coordinator.handedFocus = true
+        DispatchQueue.main.async { nsView.window?.makeFirstResponder(nsView) }
     }
 
     /// Quick Look holds onto resources until told otherwise.
@@ -41,7 +51,11 @@ struct CombineQuickLookView: View {
     @Binding var index: Int
     let onClose: () -> Void
 
-    @FocusState private var focused: Bool
+    /// Keys come through a local event monitor rather than SwiftUI's onKeyPress, because the
+    /// Quick Look view has to own first responder for scrolling to work. A monitor sees the
+    /// event before the responder chain does, so both can coexist — the same approach the tab
+    /// already uses for ⌫.
+    @State private var keyMonitor: Any?
 
     private var current: CombineFile? {
         files.indices.contains(index) ? files[index] : nil
@@ -65,7 +79,6 @@ struct CombineQuickLookView: View {
                 Divider()
 
                 QuickLookPreview(url: file.url)
-                    .id(file.url)
 
                 Divider()
 
@@ -92,20 +105,25 @@ struct CombineQuickLookView: View {
                 .shadow(radius: 30)
         )
         .clipShape(RoundedRectangle(cornerRadius: 12))
-        // Without focus the file list behind keeps the arrow keys, so stepping here would also be
-        // moving a selection nobody can see.
-        .focusable()
-        .focused($focused)
-        .onAppear { focused = true }
-        .onKeyPress { press in
-            switch press.key {
-            case .leftArrow, .upArrow:    step(-1); return .handled
-            case .rightArrow, .downArrow: step(1);  return .handled
-            // Space closes as well as opens, as it does in Finder.
-            case KeyEquivalent(" "):      onClose(); return .handled
-            default:                      return .ignored
+        .onAppear { installKeyMonitor() }
+        .onDisappear { removeKeyMonitor() }
+    }
+
+    private func installKeyMonitor() {
+        guard keyMonitor == nil else { return }
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { event in
+            switch event.keyCode {
+            case 123, 126: step(-1); return nil        // ← and ↑
+            case 124, 125: step(1);  return nil        // → and ↓
+            case 49, 53:   onClose(); return nil       // Space closes as well as opens, and Escape
+            default:       return event                // everything else reaches Quick Look
             }
         }
+    }
+
+    private func removeKeyMonitor() {
+        if let keyMonitor { NSEvent.removeMonitor(keyMonitor) }
+        keyMonitor = nil
     }
 
     private func step(_ delta: Int) {
