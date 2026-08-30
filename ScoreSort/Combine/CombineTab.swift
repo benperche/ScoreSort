@@ -3008,7 +3008,13 @@ class CombineManager: ObservableObject {
             if let page = doc.page(at: pageIndex) {
                 let item = PDFOutline()
                 item.label = label
-                item.destination = PDFDestination(page: page, at: .zero)
+                // PDF coordinates start at the bottom-left, so `.zero` is the *foot* of the page:
+                // a viewer jumping there puts the bottom of the right page at the top of the
+                // window, which reads as landing on the next part — and nothing ever lands at the
+                // top of page 1. Aim at the top-left of the visible box instead.
+                let box = page.bounds(for: .cropBox)
+                item.destination = PDFDestination(page: page,
+                                                  at: CGPoint(x: box.minX, y: box.maxY))
                 root.insertChild(item, at: root.numberOfChildren)
             }
         }

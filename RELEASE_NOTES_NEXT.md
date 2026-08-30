@@ -15,3 +15,5 @@ _Draft for the next release after 1.10.0. Keep adding to this as more changes la
 ## 🔖 Stamp
 
 ## 🐞 Fixed
+
+- **The combined PDF's contents list lands on the right part.** Clicking a name in Preview's sidebar jumped to the foot of that part's first page, which looks like landing on the *next* part — and nothing pointed at the very first one. It now jumps to the top of the page, as you'd expect.

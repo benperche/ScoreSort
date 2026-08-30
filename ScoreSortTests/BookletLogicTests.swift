@@ -438,6 +438,40 @@ struct CombineBookletOutputTests {
         #expect(result.kept == 0)
     }
 
+    /// The table of contents must land at the *top* of each part's first page. PDF coordinates
+    /// start at the bottom-left, so a destination of .zero puts the foot of the right page at the
+    /// top of the window — which reads as every entry pointing at the following part, and nothing
+    /// pointing at the first.
+    @Test func tableOfContentsPointsAtTheTopOfEachPart() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+
+        for (name, pages) in [("Flute", 3), ("Oboe", 2), ("Horn", 4)] {
+            writePDF(pages: pages, to: dir.appendingPathComponent("\(name).pdf"))
+        }
+        let manager = CombineManager()
+        manager.addFiles(urls: ["Flute", "Oboe", "Horn"].map {
+            dir.appendingPathComponent("\($0).pdf")
+        }, undoManager: nil)
+
+        let out = dir.appendingPathComponent("out.pdf")
+        manager.createCombinedPDF(to: out, options: CombineOutputOptions()) { _, _, _ in }
+        let result = try #require(PDFDocument(url: out))
+        let root = try #require(result.outlineRoot)
+        #expect(root.numberOfChildren == 3)
+
+        // Parts start at pages 0, 3 and 5.
+        let expectedPages = [0, 3, 5]
+        for i in 0..<root.numberOfChildren {
+            let destination = try #require(root.child(at: i)?.destination)
+            let page = try #require(destination.page)
+            #expect(result.index(for: page) == expectedPages[i], "entry \(i) lands on the wrong page")
+            let top = page.bounds(for: .cropBox).maxY
+            #expect(abs(destination.point.y - top) < 1,
+                    "entry \(i) should aim at the top of the page, not the bottom")
+        }
+    }
+
     @Test func singlePageLayoutIsUnchanged() throws {
         let dir = try tempDir()
         defer { try? FileManager.default.removeItem(at: dir) }
