@@ -47,6 +47,9 @@ struct CombineView: View {
     @State private var anchorFileId: UUID?      // anchor for shift-range selection
     @State private var showPresetSidebar = false
     @State private var unmatchedFileIds: Set<UUID> = []
+    /// Files whose copy count the app divided up rather than read straight off the preset —
+    /// tinted so a guessed split is distinguishable from a number the preset actually stated.
+    @State private var splitCopyFileIds: Set<UUID> = []
     /// Drag-to-reorder: the (group-snapped) row id an insertion line is shown above,
     /// or `.endOfList` when hovering the trailing drop zone. Nil when not dragging.
     @State private var dropTargetId: UUID?
@@ -419,6 +422,7 @@ struct CombineView: View {
                                         isSelected: selectedFiles.contains(file.id),
                                         isFocused: focusedFileId == file.id,
                                         isUnmatched: unmatchedFileIds.contains(file.id),
+                                        hasSplitCopies: splitCopyFileIds.contains(file.id),
                                         isGrouped: file.collateGroupId != nil,
                                         isLastInGroup: isLastInGroup(file),
                                         isMergeTarget: file.collateGroupId != nil && mergeTargetGroupId == file.collateGroupId,
@@ -430,6 +434,7 @@ struct CombineView: View {
                                         onRemove: {
                                             selectedFiles.remove(file.id)
                                             unmatchedFileIds.remove(file.id)
+                                            splitCopyFileIds.remove(file.id)
                                             combineManager.removeFiles(ids: [file.id], undoManager: undoManager)
                                             showRemovalNotice(undoManager: undoManager)
                                         },
@@ -887,6 +892,7 @@ struct CombineView: View {
         guard !selectedFiles.isEmpty else { return }
         let count = selectedFiles.count
         unmatchedFileIds.subtract(selectedFiles)
+        splitCopyFileIds.subtract(selectedFiles)
         combineManager.removeFiles(ids: selectedFiles, undoManager: undoManager)
         selectedFiles.removeAll()
         focusedFileId = nil
@@ -1167,16 +1173,39 @@ struct CombineView: View {
         var matchedPartNames: Set<String> = []
 
         // ── Phase 1: direct match (with roman-numeral normalisation) ──────────
+        // Matches are gathered per *part* before any copies are set, because one preset entry
+        // can match several files — a single "Trumpet: 7" against both Trumpet 1 and Trumpet 2.
+        // Applying its full count to each would print two players' worth of paper for every one
+        // the preset asked for.
+        var filesForPart: [String: [UUID]] = [:]
+        var partsByName: [String: PresetPart] = [:]
         for file in combineManager.files {
             let filename = normalizeRomanNumerals(file.name.lowercased())
             if let match = sortedParts.first(where: {
                 presetPartMatches(part: normalizeRomanNumerals($0.name.lowercased()), in: filename)
             }) {
-                combineManager.updateCopies(for: file.id, copies: match.copies, undoManager: undoManager)
-                matched += 1
+                filesForPart[match.name, default: []].append(file.id)
+                partsByName[match.name] = match
                 matchedPartNames.insert(match.name)
             } else {
                 newUnmatched.insert(file.id)
+            }
+        }
+
+        var newSplit: Set<UUID> = []
+        for (name, ids) in filesForPart {
+            guard let part = partsByName[name] else { continue }
+            matched += ids.count
+            guard ids.count > 1 else {
+                combineManager.updateCopies(for: ids[0], copies: part.copies, undoManager: undoManager)
+                continue
+            }
+            // Spread the entry's copies over the files it matched. Files were gathered in list
+            // order, so the remainder goes to the lower-numbered parts.
+            let shares = splitPresetCopies(part.copies, across: ids.count)
+            for (offset, id) in ids.enumerated() {
+                combineManager.updateCopies(for: id, copies: shares[offset], undoManager: undoManager)
+                newSplit.insert(id)
             }
         }
 
@@ -1215,6 +1244,7 @@ struct CombineView: View {
         }
 
         unmatchedFileIds = newUnmatched
+        splitCopyFileIds = newSplit
         let unmatchedPartNames = Set(parts.map(\.name)).subtracting(matchedPartNames)
         return (matched: matched, unmatched: newUnmatched.count, unmatchedPartNames: unmatchedPartNames)
     }
@@ -1226,6 +1256,8 @@ extension Color {
     /// Indigo isn't one of macOS's selectable accent colours, so it never collides with
     /// the selection tint whatever accent the user has chosen.
     static let collateGroup = Color.indigo
+    /// Copies the app divided between parts rather than reading off the preset.
+    static let presetSplit = Color.blue
 }
 
 // MARK: - Combine File Row
@@ -1584,6 +1616,8 @@ struct CombineFileRow: View {
     let isSelected: Bool
     let isFocused: Bool
     let isUnmatched: Bool
+    /// True when the app divided a preset entry's copies across this file and its siblings.
+    var hasSplitCopies: Bool = false
     /// True when this file belongs to a collate group (indents row, hides copies stepper).
     var isGrouped: Bool = false
     /// True when this is the last member of its collate group (draws the closing border).
@@ -1718,6 +1752,9 @@ struct CombineFileRow: View {
         if isMergeTarget { return Color.collateGroup.opacity(0.22) }   // drag merge highlight
         if isSelected { return Color.accentColor.opacity(isFocused ? 0.18 : 0.1) }
         if isUnmatched { return Color.orange.opacity(0.12) }
+        // Distinct from the orange of "couldn't match this" — the app did match it, but had to
+        // guess how to divide the players, so the number is worth a second look.
+        if hasSplitCopies { return Color.presetSplit.opacity(0.14) }
         if isGrouped { return Color.collateGroup.opacity(0.08) }   // faint group fill
         if file.isBlankPage { return Color.gray.opacity(0.08) }
         return Color.clear

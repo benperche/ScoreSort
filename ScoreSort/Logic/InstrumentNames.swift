@@ -483,3 +483,21 @@ func matchInstrumentOrder(in filename: String, order: [String]) -> Int? {
     }
     return matches.min(by: { $0.position < $1.position })?.index
 }
+
+// MARK: - Preset copy splitting
+
+/// How one preset entry's copies divide across the files it matched.
+///
+/// A preset can be less specific than the music — a single "Trumpet: 7" against separate
+/// Trumpet 1 and Trumpet 2 parts. Seven players still need seven sheets between them, not seven
+/// each, so the count is spread rather than repeated: 7 across two files is `[4, 3]`.
+///
+/// The remainder goes to the earlier files, which are the lower-numbered parts. Every file gets
+/// at least one copy — more files than copies means a part would otherwise print zero times,
+/// which is worse than being one over.
+func splitPresetCopies(_ copies: Int, across fileCount: Int) -> [Int] {
+    guard fileCount > 0 else { return [] }
+    let base = copies / fileCount
+    let remainder = copies % fileCount
+    return (0..<fileCount).map { max(1, base + ($0 < remainder ? 1 : 0)) }
+}
