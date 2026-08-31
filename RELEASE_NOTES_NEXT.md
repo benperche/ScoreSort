@@ -8,6 +8,7 @@ _Draft for the next release after 1.10.0. Keep adding to this as more changes la
 
 ## 🔗 Combine PDFs
 
+- **Bass guitar matches the bass part.** A preset entry for *Bass Guitar* now finds a *String Bass*, *Double Bass* or *Contrabass* file, and the other way round — the player reads whichever one is in the folder.
 - **Presets divide copies between split parts.** If your preset says *Trumpet: 7* but the music comes as separate 1st and 2nd trumpet files, applying it used to put 7 on each — twice the paper for the same seven players. It now shares the count out (4 and 3), and tints those rows blue so you can see the app made the call and adjust it.
 
 ## ✂️ Split PDF

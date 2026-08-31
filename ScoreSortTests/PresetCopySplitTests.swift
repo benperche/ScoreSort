@@ -53,3 +53,34 @@ struct PresetCopySplitTests {
         #expect(splitPresetCopies(7, across: 0).isEmpty)
     }
 }
+
+@Suite("Preset instrument aliases")
+struct PresetAliasTests {
+
+    /// In a school band the bass-guitar player reads whichever bass part the folder has, so the
+    /// preset entry and the file rarely use the same word.
+    @Test func bassGuitarFindsTheBassPart() {
+        #expect(presetPartMatches(part: "bass guitar", in: "11 - the sword of kings - string bass.pdf"))
+        #expect(presetPartMatches(part: "bass guitar", in: "15 - schubert symphony 5 double bass.pdf"))
+        #expect(presetPartMatches(part: "bass guitar", in: "07 - contrabass.pdf"))
+    }
+
+    @Test func theBassAliasesWorkInBothDirections() {
+        #expect(presetPartMatches(part: "double bass", in: "12 - bass guitar.pdf"))
+        #expect(presetPartMatches(part: "string bass", in: "12 - electric bass.pdf"))
+    }
+
+    /// The group must not swallow other instruments that merely contain "bass".
+    @Test func doesNotMatchOtherBassInstruments() {
+        #expect(!presetPartMatches(part: "bass guitar", in: "04 - bass clarinet.pdf"))
+        #expect(!presetPartMatches(part: "bass guitar", in: "09 - bass trombone.pdf"))
+        #expect(!presetPartMatches(part: "bass guitar", in: "05 - baritone saxophone.pdf"))
+    }
+
+    /// Unchanged by this: the clef-aware euphonium handling still keeps BC and TC apart.
+    @Test func euphoniumClefsStayDistinct() {
+        #expect(presetPartMatches(part: "euphonium tc", in: "15 - baritone t.c..pdf"))
+        #expect(!presetPartMatches(part: "euphonium bc", in: "15 - baritone t.c..pdf"))
+        #expect(presetPartMatches(part: "euphonium", in: "14 - baritone euphonium.pdf"))
+    }
+}
