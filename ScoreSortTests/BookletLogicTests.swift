@@ -153,6 +153,66 @@ struct BookletSpreadsTests {
     }
 }
 
+@Suite("Single-sided booklet output")
+struct BookletSingleSidedTests {
+
+    @Test func aTwoPagePartFitsOneFace() {
+        #expect(bookletFitsOneSheetFace(pageCount: 2, layout: .flat))
+        #expect(bookletFitsOneSheetFace(pageCount: 1, layout: .flat))
+    }
+
+    /// Folded parts always use both sides — even a two-page one, whose cover and inside page
+    /// land on opposite faces.
+    @Test func foldedPartsNeedBothSides() {
+        #expect(!bookletFitsOneSheetFace(pageCount: 2, layout: .folded))
+        #expect(!bookletFitsOneSheetFace(pageCount: 4, layout: .folded))
+        #expect(!bookletFitsOneSheetFace(pageCount: 4, layout: .flat))
+    }
+
+    @Test func omittingBlankBacksHalvesTheFaces() throws {
+        let doc = document(pageCount: 2)
+        let both = try #require(imposedBookletDocument(doc, segments: [0..<2], sheetSize: .doubleSize))
+        #expect(both.doc.pageCount == 2)            // front plus a blank back
+
+        let single = try #require(imposedBookletDocument(doc, segments: [0..<2],
+                                                         sheetSize: .doubleSize,
+                                                         omitBlankFaces: true))
+        #expect(single.doc.pageCount == 1)          // just the front
+    }
+
+    /// The content that survives must be the content that mattered.
+    @Test func theRemainingFaceStillCarriesBothPages() throws {
+        let reference = try #require(GreyReference(pageCount: 2))
+        let single = try #require(imposedBookletDocument(reference.doc, segments: [0..<2],
+                                                         sheetSize: .doubleSize,
+                                                         omitBlankFaces: true)).doc
+        let sheet = try #require(single.page(at: 0))
+        #expect(reference.identify(sheet, atFractionX: 0.25) == 0)
+        #expect(reference.identify(sheet, atFractionX: 0.75) == 1)
+    }
+
+    /// Several parts each keep their own sheet — the whole point is that they're separate.
+    @Test func eachPartStillGetsItsOwnSheet() throws {
+        let doc = document(pageCount: 6)
+        let single = try #require(imposedBookletDocument(doc, segments: [0..<2, 2..<4, 4..<6],
+                                                         sheetSize: .doubleSize,
+                                                         omitBlankFaces: true))
+        #expect(single.doc.pageCount == 3)
+        #expect(single.sheetStarts == [0, 1, 2])
+    }
+
+    /// A folded part keeps both faces even with the flag on, since dropping one would strand the
+    /// half it pairs with. This is why the option is gated on the whole job qualifying.
+    @Test func aFoldedPartKeepsBothFacesRegardless() throws {
+        let doc = document(pageCount: 4)
+        let single = try #require(imposedBookletDocument(doc, segments: [0..<4],
+                                                         sheetSize: .doubleSize,
+                                                         layouts: [.folded],
+                                                         omitBlankFaces: true))
+        #expect(single.doc.pageCount == 2)
+    }
+}
+
 // MARK: - Segments
 
 @Suite("Booklet segments — bookletSegments")

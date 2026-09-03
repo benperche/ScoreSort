@@ -27,6 +27,7 @@ struct CombineView: View {
     /// Stored as whole percent so the stepper and text field agree exactly — a Double would
     /// drift and start showing 102.99999%.
     @AppStorage("combineBookletScalePercent") private var bookletScalePercent = 100
+    @AppStorage("combineSingleSided") private var singleSided = false
     /// Not `@AppStorage`: the answer belongs to the printer, not the app, so it's loaded from
     /// `BookletDuplexDefaults` for whichever printer is currently the default.
     @State private var duplexFlip: BookletDuplexFlip = .longEdge
@@ -555,6 +556,8 @@ struct CombineView: View {
                                                     sheetSize: $bookletSheetSize,
                                                     duplexFlip: $duplexFlip,
                                                     addBlankPages: $addBlankPages,
+                                                    singleSided: $singleSided,
+                                                    canGoSingleSided: canGoSingleSided,
                                                     onSetUpTwoSided: { activeSheet = .duplexSetup(startAtCheck: false) },
                                                     onReviewLayout: { showBookletLayout = true },
                                                     hasFiles: !combineManager.files.isEmpty)
@@ -1030,7 +1033,17 @@ struct CombineView: View {
                              sheetSize: bookletSheetSize,
                              bookletPageScale: Double(bookletScalePercent) / 100,
                              addBlankPages: addBlankPages,
+                             singleSided: singleSided && canGoSingleSided,
                              duplexFlip: duplexFlip)
+    }
+
+    /// True when no part needs the back of its sheet, so the blank backs can be left out without
+    /// stranding a folded part away from the half it pairs with.
+    private var canGoSingleSided: Bool {
+        let parts = combineManager.files.filter { !$0.isBlankPage }
+        return !parts.isEmpty && parts.allSatisfy {
+            bookletFitsOneSheetFace(pageCount: $0.pageCount, layout: $0.effectiveBookletLayout)
+        }
     }
 
     /// Clamped to the same range the imposition enforces, so what the field shows is what
@@ -1478,6 +1491,9 @@ struct CombineOutputMenuButton: View {
     @Binding var sheetSize: BookletSheetSize
     @Binding var duplexFlip: BookletDuplexFlip
     @Binding var addBlankPages: Bool
+    @Binding var singleSided: Bool
+    /// True when no part needs the back of its sheet — see `CombineView.canGoSingleSided`.
+    let canGoSingleSided: Bool
     let onSetUpTwoSided: () -> Void
     let onReviewLayout: () -> Void
     let hasFiles: Bool
@@ -1510,6 +1526,12 @@ struct CombineOutputMenuButton: View {
             }
             .pickerStyle(.inline)
             .disabled(layout != .booklet)
+
+            Toggle("Single-sided \u{2014} leave out the blank backs", isOn: $singleSided)
+                .disabled(layout != .booklet || !canGoSingleSided)
+                .help(canGoSingleSided
+                      ? "Every part fits on one side of a sheet, so the blank backs can be left out."
+                      : "Some parts need both sides of a sheet, so the backs can\u{2019}t be left out.")
 
             Toggle("Blank page after odd-length parts", isOn: $addBlankPages)
                 .disabled(layout == .booklet)  // booklets pad to a whole folded sheet anyway
@@ -2579,6 +2601,9 @@ struct CombineOutputOptions {
     /// half exactly; published music rarely matches A4, so this is the dial for that.
     var bookletPageScale: Double = 1.0
     var addBlankPages = false
+    /// Booklet only — leaves out sheet backs that would be entirely blank, for a job going out
+    /// single-sided. Only safe when no part needs its back; the UI won't offer it otherwise.
+    var singleSided = false
     /// Booklet only — which way the printer turns the paper, so imposition can lay the back
     /// of each sheet out to suit. Not a request to the printer: the print panel resets duplex
     /// from the printer's own preset, so this describes what the printer will do, rather than
@@ -2987,7 +3012,8 @@ class CombineManager: ObservableObject {
                                                     sheetSize: options.sheetSize,
                                                     pageScale: options.bookletPageScale,
                                                     rotateBackFaces: rotateBackFaces,
-                                                    layouts: layouts) {
+                                                    layouts: layouts,
+                                                    omitBlankFaces: options.singleSided) {
                 doc = imposed.doc
                 pageCount = imposed.doc.pageCount
                 // Re-aim each bookmark at the sheet its booklet starts on. Match by looking

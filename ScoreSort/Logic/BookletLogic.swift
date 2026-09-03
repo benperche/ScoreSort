@@ -177,6 +177,17 @@ func bookletSlotOrder(pageCount: Int, layout: BookletPartLayout) -> [Int] {
     }
 }
 
+/// True when everything a part has to print fits on the *front* of its sheet, leaving the back
+/// entirely blank — a two-page part laid flat, or a one-page one.
+///
+/// Derived from the slot order rather than hardcoding "two pages and flat", so it stays true if
+/// the layouts ever change: the back is blank when every slot past the first face is padding.
+func bookletFitsOneSheetFace(pageCount: Int, layout: BookletPartLayout) -> Bool {
+    let order = bookletSlotOrder(pageCount: pageCount, layout: layout)
+    guard order.count > 2 else { return true }
+    return order.dropFirst(2).allSatisfy { $0 >= pageCount }
+}
+
 // MARK: - Segments
 
 /// Reading-page ranges, one per booklet, derived from the first-page index of each part.
@@ -232,7 +243,8 @@ func imposedBookletDocument(_ doc: PDFDocument,
                             sheetSize: BookletSheetSize,
                             pageScale: Double = 1.0,
                             rotateBackFaces: Bool = false,
-                            layouts: [BookletPartLayout] = []) -> (doc: PDFDocument, sheetStarts: [Int])? {
+                            layouts: [BookletPartLayout] = [],
+                            omitBlankFaces: Bool = false) -> (doc: PDFDocument, sheetStarts: [Int])? {
     guard doc.pageCount > 0, !segments.isEmpty else { return nil }
     guard let data = doc.dataRepresentation(),
           let provider = CGDataProvider(data: data as CFData),
@@ -278,6 +290,12 @@ func imposedBookletDocument(_ doc: PDFDocument,
         // Slots run [front-left, front-right, back-left, back-right] per sheet, so each
         // pair of slots is one face of paper.
         for slot in stride(from: 0, to: padded, by: 2) {
+            // A face with nothing on it exists only to keep the next part on a fresh sheet when
+            // printing two-sided. For a job that's going out single-sided it's dead weight in the
+            // file, so it can be left out — but only when the caller has established that *no*
+            // part needs its back, or a folded part would lose the half it pairs with.
+            if omitBlankFaces,
+               order[slot] >= segment.count, order[slot + 1] >= segment.count { continue }
             ctx.beginPage(mediaBox: &sheetBox)
             // Faces alternate front, back, front, back — so every second one is the back of
             // a sheet, and that's the one a long-edge duplexer lands upside down.
