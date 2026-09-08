@@ -7,6 +7,33 @@
         <language>en</language>
 
         <item>
+            <title>Version 1.10.1</title>
+            <sparkle:version>15</sparkle:version>
+            <sparkle:shortVersionString>1.10.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <pubDate>Tue, 08 Sep 2026 11:07:31 +1000</pubDate>
+            <description><![CDATA[
+                <h2>ScoreSort 1.10.1</h2>
+                <p>A follow-up to 1.10.0 with a few booklet and preset improvements.</p>
+                <p><b>🔗 Combine PDFs</b></p>
+                <ul>
+                    <li><b>Single-sided booklets.</b> When every part fits on one side of a sheet — a folder of two-page parts, say — the output no longer carries a blank back for each one.</li>
+                    <li><b>Bass guitar matches the bass part.</b> A preset entry for <i>Bass Guitar</i> now finds a <i>String Bass</i>, <i>Double Bass</i> or <i>Contrabass</i> file, and the other way round — the player reads whichever one is in the folder.</li>
+                    <li><b>Presets divide copies between split parts.</b> If your preset says <i>Trumpet: 7</i> but the music comes as separate 1st and 2nd trumpet files, applying it used to put 7 on each. It now shares the count out (4 and 3), and tints those rows blue so you can see the app made the call and adjust it.</li>
+                </ul>
+                <p><b>🐞 Fixed</b></p>
+                <ul>
+                    <li><b>The combined PDF's contents list lands on the right part.</b> Clicking a name in Preview's sidebar now jumps to the top of the page, as you'd expect.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/benperche/ScoreSort/releases/download/v1.10.1/ScoreSort.dmg"
+                sparkle:edSignature="t3cZy5aXZo1cEU4t8+HfztB0bzTaZfikwPG1pkOFpbpnYAmDtXlMODvSu1Zb8I9XPE68U5QFCxa4jfcgmneXDg=="
+                length="8461923"
+                type="application/octet-stream"/>
+        </item>
+
+        <item>
             <title>Version 1.10.0</title>
             <sparkle:version>14</sparkle:version>
             <sparkle:shortVersionString>1.10.0</sparkle:shortVersionString>
