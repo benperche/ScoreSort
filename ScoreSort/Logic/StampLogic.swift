@@ -566,7 +566,8 @@ func visualPageBox(_ page: CGPDFPage) -> CGRect {
 /// selected or deleted in a viewer. Two consequences worth knowing:
 ///   • page content is rebuilt, so annotations and links on the source pages are dropped;
 ///   • outlines/bookmarks do not survive — callers that want them must build the
-///     `PDFOutline` on the *returned* document (page indices are unchanged).
+///     `PDFOutline` on `outlineReadyDocument(from:)` of the *returned* document, or it
+///     won't be saved (page indices are unchanged).
 func stampedDocument(_ doc: PDFDocument, stamp: Stamp, pageIndices: Set<Int>) -> PDFDocument? {
     guard doc.pageCount > 0, stamp.isDrawable else { return nil }
     guard let data = doc.dataRepresentation(),

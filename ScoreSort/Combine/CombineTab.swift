@@ -3029,6 +3029,11 @@ class CombineManager: ObservableObject {
             }
         }
 
+        // Stamping and imposition return a document PDFKit opened from data, and on macOS 27
+        // an outline set on one of those is dropped when it's saved. Moving the pages into a
+        // fresh document keeps the table of contents in the file. Page indices are unchanged.
+        doc = outlineReadyDocument(from: doc)
+
         let root = PDFOutline()
         for (label, pageIndex) in bookmarks {
             if let page = doc.page(at: pageIndex) {

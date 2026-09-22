@@ -235,7 +235,8 @@ let bookletPageScaleRange: ClosedRange<Double> = 0.5...1.5
 ///
 /// Like `stampedDocument(_:stamp:pageIndices:)`, this rebuilds page content through a
 /// `CGPDFContext`, so annotations, links and outlines on the source pages are dropped —
-/// callers that want an outline must build it on the returned document.
+/// callers that want an outline must build it on `outlineReadyDocument(from:)` of the
+/// returned document, or it won't be saved.
 /// `layouts` is index-aligned with `segments`; anything missing falls back to
 /// `bookletDefaultLayout(pageCount:)` for that segment's length.
 func imposedBookletDocument(_ doc: PDFDocument,
