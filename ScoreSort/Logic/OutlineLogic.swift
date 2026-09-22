@@ -11,11 +11,12 @@ import PDFKit
 /// survive being saved. Use the result in place of `doc`.
 ///
 /// PDFKit on macOS 27.0 (26A428) saves a document it *opened* (`PDFDocument(data:)` or
-/// `PDFDocument(url:)`) from its original structure unless the pages themselves changed, so
-/// an outline assigned afterwards is visible in memory but never reaches the file: no
-/// `/Outlines` is written and a reopened copy has `outlineRoot == nil`. Stamping and booklet
-/// imposition both hand back such a document. A document created with `PDFDocument()` has
-/// no original to fall back on, so saving always writes a fresh catalog, outline included.
+/// `PDFDocument(url:)`) with the outline it was opened with, unless pages were inserted or
+/// removed — so an outline assigned afterwards, or an edit to the existing one, is visible in
+/// memory but never reaches the file: a reopened copy has `outlineRoot == nil`. Only the
+/// outline is affected; page rotation, crop boxes, annotations and document attributes set
+/// on the same document are saved normally. Stamping and booklet imposition both hand back
+/// such a document. One created with `PDFDocument()` writes its outline as expected.
 /// (`.burnInAnnotationsOption` also forces a full rewrite, but it would flatten any links
 /// and markup on the source pages.)
 func outlineReadyDocument(from doc: PDFDocument) -> PDFDocument {
