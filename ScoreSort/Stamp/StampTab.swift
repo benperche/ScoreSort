@@ -15,15 +15,29 @@ import PDFKit
 import UniformTypeIdentifiers
 
 /// One file queued for stamping, with the name it should be written under.
-struct StampFileItem: Identifiable, Equatable {
+struct StampFileItem: Identifiable, Equatable, FollowsMovedFile {
     let id = UUID()
-    let url: URL
+    /// Where the file was last found — see `refreshLocation()`.
+    var url: URL
     /// Output filename without the ".pdf" extension. Editable when saving as new files.
     var outputName: String
+    /// Finds the file again if it's moved or renamed in Finder after being queued.
+    var bookmark: Data?
 
     init(url: URL) {
         self.url = url
         self.outputName = url.deletingPathExtension().lastPathComponent
+        self.bookmark = fileBookmark(for: url)
+    }
+
+    /// Follows a move or rename since the file was queued. A renamed file's output name follows
+    /// too — unless it's been edited, in which case the edit stands.
+    mutating func refreshLocation() {
+        let previousDefault = url.deletingPathExtension().lastPathComponent
+        guard followMove() else { return }
+        if outputName == previousDefault {
+            outputName = url.deletingPathExtension().lastPathComponent
+        }
     }
 }
 
@@ -697,7 +711,13 @@ struct StampView: View {
             previewPage = nil
             return
         }
-        let url = items[fileIndex].url
+        // Follow the file if it's been moved since it was queued, or the preview goes blank.
+        // Written back only when it actually moved: this runs from onChange(of: items), so a
+        // write on every call (a refreshed bookmark, say) would set that off again.
+        var item = items[fileIndex]
+        item.refreshLocation()
+        if item.url != items[fileIndex].url { items[fileIndex] = item }
+        let url = item.url
         guard url != loadedPreviewURL else { return }
         loadedPreviewURL = url
         previewDocument = pdfDocument(forFileAt: url)
@@ -789,7 +809,7 @@ struct StampView: View {
             MenuAction(title: "Next Page", isEnabled: canGoForward, perform: { nextPage() }),
             MenuAction(title: "Show in Finder", key: KeyEquivalent("f"), modifiers: [.command, .shift],
                        isEnabled: items.indices.contains(fileIndex),
-                       perform: { revealInFinder(previewFileURL) }),
+                       perform: { refreshItemLocations(); revealInFinder(previewFileURL) }),
         ]
         appState.tabCommands.slice = slice
     }
@@ -842,7 +862,17 @@ struct StampView: View {
         }
     }
 
+    /// Points every queued file at where it is now. The files are only read when stamping, so
+    /// one moved in Finder since it was queued would otherwise fail — and in Replace mode the
+    /// stamp has to land on the file where it is now, not at its old path.
+    private func refreshItemLocations() {
+        var updated = items
+        for i in updated.indices { updated[i].refreshLocation() }
+        if updated != items { items = updated }
+    }
+
     private func stampFiles() {
+        refreshItemLocations()
         guard let stamp = draft, stamp.isDrawable, !items.isEmpty, outputProblem == nil else { return }
         let job = StampJob(stamp: stamp, scope: scope)
 
@@ -895,18 +925,20 @@ struct StampView: View {
     /// Writes a stamped copy of each queued file to its destination, then reports once.
     private func write(_ destinations: [(item: StampFileItem, destination: URL)], job: StampJob) {
         var written: [String] = []
-        var failed: [String] = []
+        var failed: [String] = []   // "• name: reason" lines
 
         for (item, destination) in destinations {
             guard let doc = pdfDocument(forFileAt: item.url) else {
-                failed.append(item.url.lastPathComponent); continue
+                failed.append("• \(item.url.lastPathComponent): \(unreadableFileReason(item.url)).")
+                continue
             }
             // A standalone file is one "part", so first-page scope means page 1 only.
             let stamped = applyingStamp(job, to: doc, partFirstPages: [0])
-            if stamped.write(to: destination) {
-                written.append(destination.lastPathComponent)
+            if let problem = savePDFDocument(stamped, to: destination) {
+                failed.append("• \(destination.lastPathComponent): "
+                              + problem.replacingOccurrences(of: "\n\n", with: " "))
             } else {
-                failed.append(destination.lastPathComponent)
+                written.append(destination.lastPathComponent)
             }
         }
 
@@ -918,8 +950,8 @@ struct StampView: View {
             // Replacing leaves nothing to do; the queue is done either way.
             items = []
         } else {
-            showNSAlert(title: written.isEmpty ? "Error" : "Partial Success",
-                        message: "Stamped \(written.count) file(s); \(failed.count) failed:\n\(failed.joined(separator: ", "))",
+            showNSAlert(title: written.isEmpty ? "Couldn’t Stamp the Files" : "Some Files Weren’t Stamped",
+                        message: "Stamped \(written.count) file(s); \(failed.count) couldn’t be done:\n\n\(failed.joined(separator: "\n"))",
                         isError: true)
         }
     }

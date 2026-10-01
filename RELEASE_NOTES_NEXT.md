@@ -14,6 +14,8 @@ _Draft for the next release after 1.10.1. Keep adding to this as more changes la
 
 ## 🔖 Stamp
 
+- **Moving files after adding them no longer breaks stamping.** If you move or rename a queued file in Finder, the Stamp tab still finds it — “Replace original files” stamps it where it is now, and a new name carries through to “Save as new files” unless you’ve typed your own. If a file can’t be stamped, ScoreSort now says why.
+
 ## 🐞 Fixed
 
 - **Combine says what went wrong instead of “Failed to create PDF”.** If a file in the list has been deleted or can’t be read since you added it, ScoreSort now names it and says why, rather than giving a one-line error — or, if only some files were affected, quietly leaving those parts out of the PDF. Problems saving to a folder (such as a read-only shared drive) are explained too.

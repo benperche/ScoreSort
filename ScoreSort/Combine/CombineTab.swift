@@ -2554,7 +2554,7 @@ struct CollateGroup: Identifiable, Equatable {
     var copies: Int
 }
 
-struct CombineFile: Identifiable, Equatable {
+struct CombineFile: Identifiable, Equatable, FollowsMovedFile {
     let id = UUID()
     /// Where the file was last found. Kept current by `CombineManager.refreshFileLocations()`,
     /// because the file is read again when the PDF is made, not just when it's added.
@@ -2741,23 +2741,10 @@ class CombineManager: ObservableObject {
     /// can't be found keeps its old path, and the output then reports it by name.
     func refreshFileLocations() {
         var updated = files
-        var changed = false
         for i in updated.indices where !updated[i].isBlankPage {
-            guard let bookmark = updated[i].bookmark,
-                  let found = currentLocation(ofBookmark: bookmark) else { continue }
-            if found.url.standardizedFileURL != updated[i].url.standardizedFileURL {
-                updated[i].url = found.url
-                updated[i].name = found.url.lastPathComponent
-                changed = true
-            }
-            // Stale means the file's identity moved on (e.g. it was re-exported over the old
-            // one); a fresh bookmark keeps the next move followable too.
-            if found.isStale, let fresh = fileBookmark(for: found.url) {
-                updated[i].bookmark = fresh
-                changed = true
-            }
+            if updated[i].followMove() { updated[i].name = updated[i].url.lastPathComponent }
         }
-        if changed { files = updated }
+        if updated != files { files = updated }
     }
 
     func removeFiles(ids: Set<UUID>, undoManager: UndoManager?) {

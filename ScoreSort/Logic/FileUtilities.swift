@@ -147,3 +147,26 @@ func currentLocation(ofBookmark data: Data) -> (url: URL, isStale: Bool)? {
     if components.contains(".Trash") || components.contains(".Trashes") { return nil }
     return (url, isStale)
 }
+
+/// A file held in a list between being added and being read — long enough for someone to move
+/// or rename it in Finder. Combine and the Stamp tab both read their files only when they make
+/// their output, so both hold a bookmark and follow it first.
+protocol FollowsMovedFile {
+    var url: URL { get set }
+    var bookmark: Data? { get set }
+}
+
+extension FollowsMovedFile {
+    /// Points `url` at where the file is now, and returns true if it moved or was renamed. A file
+    /// that can't be found keeps its old path, so whatever reads it next reports it by name.
+    @discardableResult
+    mutating func followMove() -> Bool {
+        guard let bookmark, let found = currentLocation(ofBookmark: bookmark) else { return false }
+        // Stale means the file's identity moved on (re-exported over the old one, say); a fresh
+        // bookmark keeps the next move followable too.
+        if found.isStale, let fresh = fileBookmark(for: found.url) { self.bookmark = fresh }
+        guard found.url.standardizedFileURL != url.standardizedFileURL else { return false }
+        url = found.url
+        return true
+    }
+}
