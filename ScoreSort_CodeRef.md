@@ -991,10 +991,12 @@ Sparkle compares each appcast item's `sparkle:version` (= **CFBundleVersion** / 
 2. Xcode: Product ▸ Archive ▸ Distribute App ▸ **Direct Distribution** (notarizes + staples the `.app`).
 3. Build a `ScoreSort.dmg` containing the notarized app; notarize + `xcrun stapler staple` the DMG.
 4. Sign the DMG: `sign_update ScoreSort.dmg` → copy the `sparkle:edSignature` and `length`.
-5. Add an `<item>` to `docs/appcast.xml` (template is in the file): `title`, `sparkle:version` (build no.), `sparkle:shortVersionString`, `pubDate`, `releaseNotesLink` (the GitHub release tag URL), and `enclosure` (`url` = release asset, `sparkle:edSignature`, `length`).
+5. Add an `<item>` to `docs/appcast.xml` (template is in the file): `title`, `sparkle:version` (build no.), `sparkle:shortVersionString`, `pubDate`, `releaseNotesLink` (the GitHub release tag URL), and `enclosure` (`url` = release asset, `sparkle:edSignature`, `length`). **Carry over the `<link>` + `<sparkle:informationalUpdate><sparkle:belowVersion>9</…>` block** — see below.
 6. Create GitHub Release `vX.X`, attach `ScoreSort.dmg` (asset name must match the enclosure URL).
 7. Commit + push `docs/appcast.xml` → Pages serves the new feed → existing users are offered the update.
 
 **Stable download URL** (for the website's button): `https://github.com/benperche/ScoreSort/releases/latest/download/ScoreSort.dmg` always resolves to the newest release's asset.
+
+**Stranded 1.5 / 1.5.1 installs.** Those two releases (builds 7 and 8) were sandboxed, which stops Sparkle launching its installer ("An error occurred while launching the installer"; the log says *Failed to submit installer job … If your application is sandboxed…*). 1.5.2 (build 9) turned the sandbox off, but the old builds can't install that fix themselves. So the newest appcast item carries `<sparkle:informationalUpdate><sparkle:belowVersion>9</sparkle:belowVersion></sparkle:informationalUpdate>` plus `<link>…/releases/latest</link>`: below build 9 Sparkle shows the update with a link to the download page instead of an install. `belowVersion` compares against **CFBundleVersion** (same comparator as `sparkle:version`), not the marketing version — verified by running the edited feed through Sparkle 2.9.1's own `SUAppcast` parser for builds 7/8/9/14/15. It's honoured only while the feed is **unsigned** (signature status *Skipped*) or validly signed: a feed that fails signature validation drops informational flags and links.
 
 **Gotchas:** keep the asset filename consistent (`ScoreSort.dmg`); an appcast item with a wrong `length`/`edSignature` makes Sparkle reject the update; un-notarized updates still install but re-trigger Gatekeeper's warning on each update.

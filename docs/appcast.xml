@@ -11,6 +11,13 @@
             <sparkle:version>15</sparkle:version>
             <sparkle:shortVersionString>1.10.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <!-- 1.5 and 1.5.1 (builds 7 and 8) were sandboxed and can't launch Sparkle's installer.
+                 Below build 9 this item is informational: they're offered a link to the download
+                 page instead of an install that fails. Keep this block on the newest item. -->
+            <link>https://github.com/benperche/ScoreSort/releases/latest</link>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>9</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
             <pubDate>Tue, 08 Sep 2026 11:07:31 +1000</pubDate>
             <description><![CDATA[
                 <h2>ScoreSort 1.10.1</h2>
@@ -275,6 +282,10 @@
             <sparkle:version>BUILD_NUMBER</sparkle:version>
             <sparkle:shortVersionString>X.X</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+            <link>https://github.com/benperche/ScoreSort/releases/latest</link>
+            <sparkle:informationalUpdate>
+                <sparkle:belowVersion>9</sparkle:belowVersion>
+            </sparkle:informationalUpdate>
             <pubDate>DAY, DD MON YYYY HH:MM:SS +1000</pubDate>
             <sparkle:releaseNotesLink>https://github.com/benperche/ScoreSort/releases/tag/vX.X</sparkle:releaseNotesLink>
             <enclosure
