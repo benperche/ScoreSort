@@ -2940,13 +2940,22 @@ class CombineManager: ObservableObject {
     /// printer. Turning it on makes every second sheet face appear upside down, which is right
     /// on paper but looks broken on screen — so Create PDF and Open in Preview produce upright
     /// reading spreads and only Print (and the test sheet) carry it.
+    /// `unreadable` lists the input files that couldn't be opened this time round (each once,
+    /// in list order). Files are reopened here rather than when they're added, so one that has
+    /// since moved, or that macOS won't let the app read, used to vanish from the output — and if
+    /// every file did, the empty document failed to save with no explanation.
     private func buildDocument(options: CombineOutputOptions, stampJob: StampJob?,
                                rotateBackFaces: Bool = false)
-        -> (doc: PDFDocument, pageCount: Int, bookmarks: [(label: String, pageIndex: Int)]) {
+        -> (doc: PDFDocument, pageCount: Int, bookmarks: [(label: String, pageIndex: Int)],
+            unreadable: [URL]) {
         var doc = PDFDocument()
         var idx = 0
         var bookmarks: [(label: String, pageIndex: Int)] = []
         var partLayouts: [BookletPartLayout] = []
+        var unreadable: [URL] = []
+        func noteUnreadable(_ url: URL) {
+            if !unreadable.contains(url) { unreadable.append(url) }
+        }
 
         func addPages(from file: CombineFile, copyIndex: Int, totalCopies: Int) {
             if file.isBlankPage {
@@ -2961,9 +2970,14 @@ class CombineManager: ObservableObject {
             // came from. One entry per part *per copy*, exactly like the bookmarks.
             partLayouts.append(file.effectiveBookletLayout)
             if ext != "pdf" {
-                for page in pdfPages(fromImageAt: file.url) { doc.insert(page, at: idx); idx += 1 }
+                let pages = pdfPages(fromImageAt: file.url)
+                if pages.isEmpty { noteUnreadable(file.url) }
+                for page in pages { doc.insert(page, at: idx); idx += 1 }
             } else {
-                guard let src = PDFDocument(url: file.url) else { return }
+                guard let src = PDFDocument(url: file.url), src.pageCount > 0 else {
+                    noteUnreadable(file.url)
+                    return
+                }
                 for p in 0..<src.pageCount {
                     if let page = src.page(at: p) { doc.insert(page, at: idx); idx += 1 }
                 }
@@ -3051,25 +3065,36 @@ class CombineManager: ObservableObject {
         }
         doc.outlineRoot = root
 
-        return (doc, pageCount, bookmarks)
+        return (doc, pageCount, bookmarks, unreadable)
     }
 
     func createCombinedPDF(to url: URL, options: CombineOutputOptions,
                            stampJob: StampJob? = nil, completion: PDFAlertHandler) {
         let built = buildDocument(options: options, stampJob: stampJob)
-        if built.doc.write(to: url) {
-            let unit = options.layout == .booklet ? "booklet sheet sides" : "pages"
-            completion("PDF Created Successfully",
-                       "Combined PDF with \(built.pageCount) \(unit) saved to:\n\(url.path)", false)
-        } else {
-            completion("Error", "Failed to create PDF", true)
+        guard built.unreadable.isEmpty else {
+            completion("Couldn’t Read Some Files", unreadableFilesMessage(built.unreadable), true)
+            return
         }
+        if let problem = savePDFDocument(built.doc, to: url) {
+            completion("Couldn’t Save the PDF", problem, true)
+            return
+        }
+        let unit = options.layout == .booklet ? "booklet sheet sides" : "pages"
+        completion("PDF Created Successfully",
+                   "Combined PDF with \(built.pageCount) \(unit) saved to:\n\(url.path)", false)
     }
 
     func openInPreview(options: CombineOutputOptions, stampJob: StampJob? = nil, onError: PDFAlertHandler) {
         let built = buildDocument(options: options, stampJob: stampJob)
+        guard built.unreadable.isEmpty else {
+            onError("Couldn’t Read Some Files", unreadableFilesMessage(built.unreadable), true)
+            return
+        }
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedForPrint.pdf")
-        guard built.doc.write(to: tempURL) else { onError("Error", "Failed to create temporary PDF", true); return }
+        if let problem = savePDFDocument(built.doc, to: tempURL) {
+            onError("Couldn’t Open in Preview", problem, true)
+            return
+        }
         NSWorkspace.shared.open(tempURL)
     }
 
@@ -3080,6 +3105,10 @@ class CombineManager: ObservableObject {
                        in window: NSWindow?, onError: PDFAlertHandler) {
         let built = buildDocument(options: options, stampJob: stampJob,
                                   rotateBackFaces: shouldRotateBackFaces(options))
+        guard built.unreadable.isEmpty else {
+            onError("Couldn’t Read Some Files", unreadableFilesMessage(built.unreadable), true)
+            return
+        }
         printPDFDocument(built.doc,
                          jobName: "ScoreSort \u{2014} Combined",
                          wantsTwoSided: options.layout == .booklet,
