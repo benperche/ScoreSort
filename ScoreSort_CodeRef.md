@@ -114,12 +114,14 @@ Convention: actions are **listed even when unusable** (`isEnabled: false`) rathe
 ```swift
 struct CombineFile: Identifiable, Equatable {
     let id: UUID          // auto-generated
-    let url: URL
-    let name: String      // url.lastPathComponent (includes extension)
+    var url: URL          // where the file was last found — refreshFileLocations() follows moves
+    var name: String      // url.lastPathComponent (includes extension); follows renames too
     let pageCount: Int
     var copies: Int       // ignored when collateGroupId is set
     var collateGroupId: UUID?   // non-nil → file belongs to a collate group
     var isBlankPage: Bool = false  // synthetic blank A4 entry; url is unused
+    var bookletLayout: BookletPartLayout? = nil
+    var bookmark: Data? = nil   // made in addFiles; finds the file after a move/rename in Finder
 }
 
 /// A named set of files whose pages are interleaved when combining.
@@ -143,7 +145,8 @@ struct CollateGroup: Identifiable, Equatable {
 #### File management methods
 | Method | Notes |
 |--------|-------|
-| `addFiles(urls:undoManager:)` | Accepts PDFs and images (JPEG, PNG, TIFF, HEIC, BMP, GIF). PDFs use `PDFDocument.pageCount`; images use `CGImageSourceGetCount` for frame count. Appends `CombineFile` with `copies=1`, no group. |
+| `addFiles(urls:undoManager:)` | Accepts PDFs and images (JPEG, PNG, TIFF, HEIC, BMP, GIF). PDFs use `PDFDocument.pageCount`; images use `CGImageSourceGetCount` for frame count. Appends `CombineFile` with `copies=1`, no group, and a `fileBookmark(for:)`. |
+| `refreshFileLocations()` | Resolves each file's bookmark (`currentLocation(ofBookmark:)`) and, if the file has moved or been renamed since it was added, updates `url` **and** `name` (so the list and TOC match the file). Re-bookmarks a stale one. Called at the top of all three outputs and by `CombineView.createPDF()` before the save panel, so the panel opens in the file's *current* folder. A file it can't find keeps its old path and is then reported by `unreadableFilesMessage`. No undo registration — it's a sync, not an edit. |
 | `addBlankPage(after:undoManager:)` | Inserts a synthetic blank A4 `CombineFile` (`isBlankPage=true`) after the last selected file, or at the end if nothing is selected. |
 | `removeFiles(ids:undoManager:)` | Removes files; auto-dissolves any group that drops below 2 members |
 | `updateCopies(for:copies:undoManager:)` | Clamps to min 1; applies to standalone file only |
@@ -179,7 +182,7 @@ The list is a `ScrollView`/`LazyVStack` (not a `List`), so drag/drop is SwiftUI 
 `totalBookletSheets` mirrors `buildDocument`'s segmentation to count *sheets of paper* for booklet output: every copy of every real file starts a new booklet, blank-page entries join the booklet before them, and each booklet is padded to a multiple of 4 then divided by 4.
 
 #### PDF output
-All three outputs — `createCombinedPDF(to:options:stampJob:completion:)`, `openInPreview(options:stampJob:onError:)` and `printCombined(options:stampJob:in:onError:)` — funnel through the private `buildDocument(options:stampJob:)`, which returns `(doc, pageCount, bookmarks, unreadable)`. **Inputs are reopened here, not when added**, so `unreadable` lists any file that can't be opened now (moved, renamed, deleted, damaged, or refused by macOS since it was added) — each once, in list order. All three outputs stop on a non-empty list with `unreadableFilesMessage`, which re-reads each file to give macOS's own reason; nothing is saved, because a set of parts with one silently missing is worse than no file. Saving goes through `savePDFDocument(_:to:)` (atomic write, then a plain retry for cloud folders that refuse the rename), which returns the real error text instead of `write(to:)`'s bare Bool. `CombineOutputOptions` carries `layout` (`.singlePages` / `.booklet`), `sheetSize`, `addBlankPages` and `twoSidedShortEdge`; the view assembles it from `@AppStorage` in `outputOptions`.
+All three outputs — `createCombinedPDF(to:options:stampJob:completion:)`, `openInPreview(options:stampJob:onError:)` and `printCombined(options:stampJob:in:onError:)` — funnel through the private `buildDocument(options:stampJob:)`, which returns `(doc, pageCount, bookmarks, unreadable)`. **Inputs are reopened here, not when added** — the bug behind a long-running "Failed to create PDF": files dragged in, then moved in Finder, were silently skipped until the document was empty. Moves and renames are now followed by `refreshFileLocations()` (bookmarks) before every output, and `unreadable` lists whatever still can't be opened (deleted, binned, moved and replaced, damaged, or refused by macOS) — each once, in list order. All three outputs stop on a non-empty list with `unreadableFilesMessage`, which re-reads each file to give macOS's own reason; nothing is saved, because a set of parts with one silently missing is worse than no file. Saving goes through `savePDFDocument(_:to:)` (atomic write, then a plain retry for cloud folders that refuse the rename), which returns the real error text instead of `write(to:)`'s bare Bool. `CombineOutputOptions` carries `layout` (`.singlePages` / `.booklet`), `sheetSize`, `addBlankPages` and `twoSidedShortEdge`; the view assembles it from `@AppStorage` in `outputOptions`.
 
 `buildDocument` uses a nested `addPages(from:copyIndex:totalCopies:)` helper and a single `while i < files.count` loop that detects groups:
 - **Standalone:** `for ci in 0..<file.copies { addPages(from: file, copyIndex: ci, totalCopies: file.copies) }`

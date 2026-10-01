@@ -126,3 +126,24 @@ func formatSkippedPageRanges(_ pages: Set<Int>) -> String {
     ranges.append((start, end))
     return ranges.map { s, e in s == e ? "p.\(s+1)" : "pp.\(s+1)–\(e+1)" }.joined(separator: ", ")
 }
+
+// MARK: - Following files that move
+
+/// A bookmark for `url` — what Finder aliases use — so the file can be found again after it's
+/// moved or renamed. `nil` if macOS couldn't make one; callers then fall back to the path.
+func fileBookmark(for url: URL) -> Data? {
+    try? url.bookmarkData(options: [], includingResourceValuesForKeys: nil, relativeTo: nil)
+}
+
+/// Where a bookmarked file is now, or `nil` if it's gone. Measured on macOS 27: a bookmark
+/// follows a move, a rename, or both, and a file re-exported over the same name; it fails for a
+/// deleted file, or one moved and then replaced in its new folder. It *also* follows a file into
+/// the Trash, which is treated as gone — nobody means to print a file they've binned.
+func currentLocation(ofBookmark data: Data) -> (url: URL, isStale: Bool)? {
+    var isStale = false
+    guard let url = try? URL(resolvingBookmarkData: data, options: [.withoutUI, .withoutMounting],
+                             relativeTo: nil, bookmarkDataIsStale: &isStale) else { return nil }
+    let components = url.pathComponents
+    if components.contains(".Trash") || components.contains(".Trashes") { return nil }
+    return (url, isStale)
+}

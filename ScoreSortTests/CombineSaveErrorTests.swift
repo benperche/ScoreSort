@@ -37,7 +37,7 @@ struct CombineSaveErrorTests {
         return result
     }
 
-    @Test func fileMovedAfterAddingIsNamedAndNothingIsSaved() throws {
+    @Test func fileDeletedAfterAddingIsNamedAndNothingIsSaved() throws {
         let (manager, urls) = manager(adding: ["Flute", "Oboe"])
         try FileManager.default.removeItem(at: urls[1])
 
@@ -46,7 +46,7 @@ struct CombineSaveErrorTests {
         #expect(result.isError)
         #expect(result.title == "Couldn’t Read Some Files")
         #expect(result.message.contains("Oboe.pdf"))
-        #expect(result.message.contains("isn’t there any more") || result.message.contains("isn't there any more"))
+        #expect(result.message.contains("can't be found"))
         #expect(!result.message.contains("Flute.pdf"), "a readable file shouldn't be blamed")
         // A set with a part silently missing is worse than no file at all.
         #expect(!FileManager.default.fileExists(atPath: out.path))

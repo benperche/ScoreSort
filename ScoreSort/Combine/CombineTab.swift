@@ -964,6 +964,8 @@ struct CombineView: View {
     private func createPDF() {
         guard let window = NSApp.keyWindow ?? NSApp.mainWindow else { return }
         menuState.isPanelOpen = true
+        // Find moved files first, so the panel opens where the first file is now.
+        combineManager.refreshFileLocations()
         let panel = NSSavePanel()
         panel.allowedContentTypes = [.pdf]
         panel.nameFieldStringValue = "Combined.pdf"
@@ -2554,8 +2556,10 @@ struct CollateGroup: Identifiable, Equatable {
 
 struct CombineFile: Identifiable, Equatable {
     let id = UUID()
-    let url: URL
-    let name: String
+    /// Where the file was last found. Kept current by `CombineManager.refreshFileLocations()`,
+    /// because the file is read again when the PDF is made, not just when it's added.
+    var url: URL
+    var name: String
     let pageCount: Int
     var copies: Int
     /// Non-nil when this file is part of a collate group.
@@ -2566,6 +2570,9 @@ struct CombineFile: Identifiable, Equatable {
     /// `bookletDefaultLayout(pageCount:)` — so a part only carries a value once someone has
     /// deliberately chosen one.
     var bookletLayout: BookletPartLayout? = nil
+    /// Finds the file again if it's moved or renamed in Finder after being added. `nil` for
+    /// blank pages, or if macOS couldn't make one (the path is then all there is).
+    var bookmark: Data? = nil
 
     /// The layout this part will actually print with.
     var effectiveBookletLayout: BookletPartLayout {
@@ -2712,18 +2719,45 @@ class CombineManager: ObservableObject {
             let ext = url.pathExtension.lowercased()
             if ext == "pdf" {
                 guard let document = PDFDocument(url: url) else { continue }
-                files.append(CombineFile(url: url, name: url.lastPathComponent, pageCount: document.pageCount, copies: 1))
+                files.append(CombineFile(url: url, name: url.lastPathComponent, pageCount: document.pageCount,
+                                         copies: 1, bookmark: fileBookmark(for: url)))
             } else {
                 guard let src = CGImageSourceCreateWithURL(url as CFURL, nil) else { continue }
                 let frameCount = CGImageSourceGetCount(src)
                 guard frameCount > 0 else { continue }
-                files.append(CombineFile(url: url, name: url.lastPathComponent, pageCount: frameCount, copies: 1))
+                files.append(CombineFile(url: url, name: url.lastPathComponent, pageCount: frameCount,
+                                         copies: 1, bookmark: fileBookmark(for: url)))
             }
         }
         if files.count != bf.count {
             registerUndo(undoManager: undoManager, actionName: "Add Files",
                          restoringFiles: bf, restoringGroups: bg)
         }
+    }
+
+    /// Points each file at where it is now, following any move or rename since it was added —
+    /// and takes the new name with it, so the list and the table of contents match the file.
+    /// Called before every output, since that's when the files are read again. A file that
+    /// can't be found keeps its old path, and the output then reports it by name.
+    func refreshFileLocations() {
+        var updated = files
+        var changed = false
+        for i in updated.indices where !updated[i].isBlankPage {
+            guard let bookmark = updated[i].bookmark,
+                  let found = currentLocation(ofBookmark: bookmark) else { continue }
+            if found.url.standardizedFileURL != updated[i].url.standardizedFileURL {
+                updated[i].url = found.url
+                updated[i].name = found.url.lastPathComponent
+                changed = true
+            }
+            // Stale means the file's identity moved on (e.g. it was re-exported over the old
+            // one); a fresh bookmark keeps the next move followable too.
+            if found.isStale, let fresh = fileBookmark(for: found.url) {
+                updated[i].bookmark = fresh
+                changed = true
+            }
+        }
+        if changed { files = updated }
     }
 
     func removeFiles(ids: Set<UUID>, undoManager: UndoManager?) {
@@ -3070,6 +3104,7 @@ class CombineManager: ObservableObject {
 
     func createCombinedPDF(to url: URL, options: CombineOutputOptions,
                            stampJob: StampJob? = nil, completion: PDFAlertHandler) {
+        refreshFileLocations()
         let built = buildDocument(options: options, stampJob: stampJob)
         guard built.unreadable.isEmpty else {
             completion("Couldn’t Read Some Files", unreadableFilesMessage(built.unreadable), true)
@@ -3085,6 +3120,7 @@ class CombineManager: ObservableObject {
     }
 
     func openInPreview(options: CombineOutputOptions, stampJob: StampJob? = nil, onError: PDFAlertHandler) {
+        refreshFileLocations()
         let built = buildDocument(options: options, stampJob: stampJob)
         guard built.unreadable.isEmpty else {
             onError("Couldn’t Read Some Files", unreadableFilesMessage(built.unreadable), true)
@@ -3103,6 +3139,7 @@ class CombineManager: ObservableObject {
     @MainActor
     func printCombined(options: CombineOutputOptions, stampJob: StampJob? = nil,
                        in window: NSWindow?, onError: PDFAlertHandler) {
+        refreshFileLocations()
         let built = buildDocument(options: options, stampJob: stampJob,
                                   rotateBackFaces: shouldRotateBackFaces(options))
         guard built.unreadable.isEmpty else {

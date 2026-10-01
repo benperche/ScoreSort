@@ -54,7 +54,7 @@ func unreadableFileReason(_ url: URL) -> String {
     } catch {
         let ns = error as NSError
         if ns.domain == NSCocoaErrorDomain && ns.code == NSFileReadNoSuchFileError {
-            return "it isn't there any more — it may have been moved, renamed or deleted since you added it"
+            return "it can't be found — it may have been deleted, or moved somewhere ScoreSort can't follow, such as another drive"
         }
         if isFilePermissionError(error) {
             return "macOS didn't let ScoreSort read it"
