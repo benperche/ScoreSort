@@ -18,7 +18,7 @@ struct BookmarkOffer: Identifiable {
 
 // MARK: - Bookmark Split Choice View
 
-/// Lists each bookmark beside the file it would produce, so it's clear whether the
+/// Shows the names the bookmarks would give the files, so it's clear whether the
 /// titles are worth using before choosing. Nothing here is final: split points and
 /// names stay editable in Steps 1 and 2.
 struct BookmarkSplitChoiceView: View {
@@ -45,8 +45,36 @@ struct BookmarkSplitChoiceView: View {
         return first == last ? "p. \(first)" : "p. \(first)–\(last)"
     }
 
+    /// Which end to cut when a line is too long. Long titles usually share one end
+    /// ("Composer - Piece - …") and differ at the other, so cut the shared end —
+    /// cutting the middle hid the instrument, the one part worth reading.
+    private func truncation(for texts: [String]) -> Text.TruncationMode {
+        let distinct = texts.filter { !$0.isEmpty }
+        guard let first = distinct.first, distinct.count > 1 else { return .tail }
+        let sharedStart = distinct.reduce(first) { $0.commonPrefix(with: $1) }.count
+        let sharedEnd = distinct.map { String($0.reversed()) }
+            .reduce(String(first.reversed())) { $0.commonPrefix(with: $1) }.count
+        return sharedStart > sharedEnd ? .head : .tail
+    }
+
+    /// One complete file name, its base dimmed so the part that changes from file to
+    /// file stands out. Shown once: the list below gives only that changing part,
+    /// because repeating a long shared piece name on every row buried it.
+    private func exampleFileName(_ names: (baseName: String, suffixes: [String])) -> AttributedString {
+        let index = names.suffixes.firstIndex { !$0.isEmpty } ?? 0
+        let full = splitOutputFileName(base: names.baseName, separator: filenameSeparator,
+                                       suffix: names.suffixes[index], fileIndex: index)
+        let leadCount = names.baseName.isEmpty ? 0 : (names.baseName + filenameSeparator).count
+        var lead = AttributedString(String(full.prefix(leadCount)))
+        lead.swiftUI.foregroundColor = .secondary
+        var rest = AttributedString(String(full.dropFirst(leadCount)))
+        rest.swiftUI.font = .callout.weight(.semibold)
+        return lead + rest
+    }
+
     var body: some View {
         let names = names
+        let nameTruncation = truncation(for: names.suffixes)
         VStack(spacing: 16) {
             VStack(spacing: 6) {
                 Image(systemName: "bookmark.fill")
@@ -68,33 +96,34 @@ struct BookmarkSplitChoiceView: View {
             .pickerStyle(.segmented)
             .fixedSize()
 
+            VStack(spacing: 2) {
+                Text("Files will be named like")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                Text(exampleFileName(names))
+                    .font(.callout)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             ScrollView {
-                Grid(alignment: .leading, horizontalSpacing: 12, verticalSpacing: 6) {
+                Grid(alignment: .leading, horizontalSpacing: 14, verticalSpacing: 6) {
                     ForEach(Array(offer.sections.enumerated()), id: \.offset) { index, section in
                         GridRow {
                             Text(pageRange(section))
                                 .foregroundColor(.secondary)
                                 .monospacedDigit()
                                 .gridColumnAlignment(.trailing)
-                            if section.title.isEmpty {
-                                Text("No bookmark")
+                            if names.suffixes[index].isEmpty {
+                                Text("No bookmark — numbered \(index + 1)")
                                     .italic()
                                     .foregroundColor(.secondary)
                             } else {
-                                Text(section.title)
+                                Text(names.suffixes[index])
+                                    .fontWeight(.medium)
                                     .lineLimit(1)
-                                    .truncationMode(.middle)
+                                    .truncationMode(nameTruncation)
                             }
-                            Image(systemName: "arrow.right")
-                                .font(.caption)
-                                .foregroundColor(.secondary)
-                            Text(splitOutputFileName(base: names.baseName,
-                                                     separator: filenameSeparator,
-                                                     suffix: names.suffixes[index],
-                                                     fileIndex: index))
-                                .fontWeight(.medium)
-                                .lineLimit(1)
-                                .truncationMode(.middle)
                         }
                     }
                 }
@@ -124,6 +153,6 @@ struct BookmarkSplitChoiceView: View {
             .controlSize(.large)
         }
         .padding(28)
-        .frame(width: 640)
+        .frame(width: 540)
     }
 }

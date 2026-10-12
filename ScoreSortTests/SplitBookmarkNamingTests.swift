@@ -78,6 +78,28 @@ struct BookmarkSplitNamesTests {
         #expect(names.suffixes == ["Flute", "Horn - in F"])
     }
 
+    @Test func underscoredTitlesShareComposerAndPiece() {
+        // Titles made from file names, as seen in a real publisher set: the whole
+        // "Composer - Piece" run is shared, and only the instrument should be left.
+        let titles = ["Bernstein_-_Prelude,_Fugue_and_Riffs_-_Score",
+                      "Bernstein_-_Prelude,_Fugue_and_Riffs_-_Alto_saxophone_I",
+                      "Bernstein_-_Prelude,_Fugue_and_Riffs_-_Trumpet_IV"]
+        let names = bookmarkSplitNames(titles: titles, fallbackBaseName: "scan", style: .pieceAndTitle)
+        #expect(names.baseName == "Bernstein - Prelude, Fugue and Riffs")
+        #expect(names.suffixes == ["Score", "Alto saxophone I", "Trumpet IV"])
+
+        let whole = bookmarkSplitNames(titles: titles, fallbackBaseName: "scan", style: .titleOnly)
+        #expect(whole.suffixes[1] == "Bernstein - Prelude, Fugue and Riffs - Alto saxophone I")
+    }
+
+    @Test func sharedSegmentsNeverSwallowThePartName() {
+        // Every title is identical up to its last segment: that segment must survive.
+        let names = bookmarkSplitNames(titles: ["Suite - Horn - 1", "Suite - Horn"],
+                                       fallbackBaseName: "scan", style: .pieceAndTitle)
+        #expect(names.baseName == "Suite")
+        #expect(names.suffixes == ["Horn - 1", "Horn"])
+    }
+
     @Test func agreesWithExtractSplitNamesOnScoreSortLabels() throws {
         let labels = ["00 - Symphony 5 - Score", "01 - Symphony 5 - Flute", "02 - Symphony 5 - Oboe"]
         let expected = try #require(extractSplitNames(from: labels))

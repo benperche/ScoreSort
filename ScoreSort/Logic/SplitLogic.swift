@@ -159,26 +159,33 @@ func fileNameSafe(_ text: String) -> String {
     return s
 }
 
+/// A bookmark title as words. Titles that were made from file names often use "_"
+/// for every space ("Bernstein_-_Prelude,_Fugue_and_Riffs_-_Score"), which hides
+/// the " - " separators and reads badly in a file name.
+func readableBookmarkTitle(_ title: String) -> String {
+    let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+    return trimmed.contains(" ") ? trimmed : trimmed.replacingOccurrences(of: "_", with: " ")
+}
+
 /// Turns bookmark titles into a base name and per-file suffixes, index-aligned with
 /// `titles`. An empty title gives an empty suffix (Step 2 auto-numbers it).
 ///
 /// `.titleOnly` uses each title whole, with no base name. `.pieceAndTitle` reads the
-/// titles as "Piece - Part": a leading score-order number on every title is dropped
-/// (Step 3 adds it back), and a first segment every title shares becomes the base
-/// name. Without one, `fallbackBaseName` (the PDF's own name) is the base and the
+/// titles as " - "-separated segments: a leading score-order number on every title
+/// is dropped (Step 3 adds it back), and the leading segments every title shares
+/// ("Composer - Piece") become the base name, leaving what differs as the suffix.
+/// With nothing shared, `fallbackBaseName` (the PDF's own name) is the base and the
 /// title is the suffix. For ScoreSort's own "NN - Piece - Part" labels this agrees
 /// with `extractSplitNames`.
 func bookmarkSplitNames(titles: [String],
                         fallbackBaseName: String,
                         style: BookmarkNameStyle) -> (baseName: String, suffixes: [String]) {
+    let titles = titles.map(readableBookmarkTitle)
     guard style == .pieceAndTitle else {
         return (baseName: "", suffixes: titles.map(fileNameSafe))
     }
 
-    var parts: [[String]] = titles.map { title in
-        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? [] : trimmed.components(separatedBy: " - ")
-    }
+    var parts: [[String]] = titles.map { $0.isEmpty ? [] : $0.components(separatedBy: " - ") }
     func titled() -> [[String]] { parts.filter { !$0.isEmpty } }
 
     let isNumbered = !titled().isEmpty && titled().allSatisfy {
@@ -186,14 +193,26 @@ func bookmarkSplitNames(titles: [String],
     }
     if isNumbered { parts = parts.map { Array($0.dropFirst()) } }
 
+    // How many leading segments every title shares, always leaving each a part name.
+    let named = titled()
+    var shared = 0
+    if named.count >= 2, let shortest = named.map({ $0.count }).min() {
+        while shared < shortest - 1, named.allSatisfy({ $0[shared] == named[0][shared] }) {
+            shared += 1
+        }
+    } else if isNumbered, let only = named.first, only.count >= 2 {
+        // One title alone isn't evidence of a shared piece name, unless the numbering
+        // already marked it as ScoreSort's own pattern.
+        shared = 1
+    }
+
     var baseName = fallbackBaseName
-    // One title alone isn't evidence of a shared piece name, unless the numbering
-    // already marked it as ScoreSort's own pattern.
-    if let piece = titled().first?.first, !piece.isEmpty,
-       titled().count >= 2 || isNumbered,
-       titled().allSatisfy({ $0.count >= 2 && $0[0] == piece }) {
-        baseName = piece
-        parts = parts.map { Array($0.dropFirst()) }
+    if shared > 0, let first = named.first {
+        let piece = first.prefix(shared).joined(separator: " - ")
+        if !piece.trimmingCharacters(in: .whitespaces).isEmpty {
+            baseName = piece
+            parts = parts.map { Array($0.dropFirst(shared)) }
+        }
     }
 
     return (baseName: fileNameSafe(baseName),
