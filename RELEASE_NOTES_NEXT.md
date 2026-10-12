@@ -12,6 +12,10 @@ _Draft for the next release after 1.10.1. Keep adding to this as more changes la
 
 ## ✂️ Split PDF
 
+- **ScoreSort now asks what to do with a PDF's bookmarks — and can name the files from them.** When you open a PDF that already has bookmarks, a sheet lists each one beside the file it would become. Choose **Split & Name Files** to split at the bookmarks and use their titles as the file names (either "Piece - Flute 1" or just the bookmark title on its own), **Split Only** to keep the split points and name the files yourself, or **Ignore Bookmarks** to start from scratch. Before, the splits appeared without warning and the titles were only used for PDFs made by ScoreSort's own Combine tab. Changed your mind? **Actions ▸ Use Bookmarks…** brings the sheet back.
+- **File names stay with their parts when you add or remove a split.** Names you'd already filled in used to slide onto the wrong files if you changed a split point earlier in the document.
+- **The file list in Step 1 shows the real file names**, with your chosen separator, instead of a rough placeholder.
+
 ## 🔖 Stamp
 
 - **Moving files after adding them no longer breaks stamping.** If you move or rename a queued file in Finder, the Stamp tab still finds it — “Replace original files” stamps it where it is now, and a new name carries through to “Save as new files” unless you’ve typed your own. If a file can’t be stamped, ScoreSort now says why.

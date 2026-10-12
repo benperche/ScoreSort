@@ -49,6 +49,14 @@ struct ViewSmokeTests {
         render(SplitView())
     }
 
+    @Test("Bookmark split sheet renders")
+    func bookmarkSplitSheet() {
+        let offer = BookmarkOffer(sections: [BookmarkSection(startPage: 0, pageCount: 4, title: "Score"),
+                                             BookmarkSection(startPage: 4, pageCount: 2, title: "")],
+                                  sourceName: "First Suite")
+        render(BookmarkSplitChoiceView(offer: offer, onSplitAndName: { _ in }, onSplitOnly: {}, onIgnore: {}))
+    }
+
     @Test("Rotate tab renders")
     func rotateTab() {
         render(RotateView())

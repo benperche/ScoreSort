@@ -73,7 +73,11 @@ struct SplitView: View {
     @State private var redoStack: [SplitSnapshot] = []
     /// Retained reference to the local NSEvent monitor that handles the delete key.
     @State private var splitViewKeyMonitor: Any?
-    @State private var bookmarkNoticeVisible = false
+    /// The loaded document's bookmarks as the files they'd split into; empty when it has none.
+    /// Kept so Actions ▸ Use Bookmarks… can re-open the prompt after "Ignore".
+    @State private var documentBookmarks: [BookmarkSection] = []
+    /// Non-nil when the "this PDF has bookmarks" sheet should be presented.
+    @State private var bookmarkOffer: BookmarkOffer? = nil
     /// Controls the sheet that asks "which half is page 1?" when an A3 doc is detected.
     @State private var showingA3Detection = false
     /// Set before programmatically loading an A3-split document so onChange skips re-detection.
@@ -285,6 +289,8 @@ struct SplitView: View {
                 lastBookletOrder = nil
                 bookletRedoNoticeVisible = false
                 a3HintVisible = false
+                documentBookmarks = []
+                bookmarkOffer = nil
             }
         }
         .onAppear { DispatchQueue.main.async { syncTabCommands() } }
@@ -327,8 +333,24 @@ struct SplitView: View {
                 },
                 onKeepAsIs: {
                     showingA3Detection = false
-                    setupSplitState()
+                    setupSplitState(offerBookmarks: false)
+                    // One sheet at a time — let this one finish dismissing first.
+                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { offerBookmarksIfAny() }
                 }
+            )
+        }
+        .sheet(item: $bookmarkOffer) { offer in
+            BookmarkSplitChoiceView(
+                offer: offer,
+                onSplitAndName: { style in
+                    bookmarkOffer = nil
+                    applyBookmarks(offer.sections, nameStyle: style)
+                },
+                onSplitOnly: {
+                    bookmarkOffer = nil
+                    applyBookmarks(offer.sections, nameStyle: nil)
+                },
+                onIgnore: { bookmarkOffer = nil }
             )
         }
         .sheet(item: $bookletFixRequest) { req in
@@ -420,23 +442,6 @@ struct SplitView: View {
             .background(Color(NSColor.windowBackgroundColor))
 
             Divider()
-
-            if bookmarkNoticeVisible {
-                HStack(spacing: 8) {
-                    Image(systemName: "bookmark.fill")
-                        .foregroundColor(.accentColor)
-                    Text("Split points loaded from bookmarks")
-                        .font(.callout)
-                    Spacer()
-                    Button { withAnimation(.easeInOut(duration: 0.2)) { bookmarkNoticeVisible = false } }
-                        label: { Image(systemName: "xmark").foregroundColor(.secondary) }
-                    .buttonStyle(.plain)
-                }
-                .padding(.horizontal)
-                .padding(.vertical, 6)
-                .background(Color.accentColor.opacity(0.08))
-                .transition(.move(edge: .top).combined(with: .opacity))
-            }
 
             if a3HintVisible {
                 HStack(spacing: 8) {
@@ -847,6 +852,7 @@ struct SplitView: View {
             slice.tabActions = [
                 MenuAction(title: "Split as A3\u{2026}", isEnabled: loaded, perform: { showingA3Detection = true }),
                 MenuAction(title: "Fix Booklet Order", isEnabled: loaded && canFixBookletOrder, perform: { requestBookletFix() }),
+                MenuAction(title: "Use Bookmarks\u{2026}", isEnabled: loaded && !documentBookmarks.isEmpty, perform: { offerBookmarksIfAny() }),
                 MenuAction(title: "Clear All Splits", isEnabled: loaded && !splitMarkers.isEmpty, perform: { clearAllMarkers() }),
             ]
         case .naming:
@@ -925,7 +931,10 @@ struct SplitView: View {
 
     private func toggleSplitAt(page: Int) {
         pushUndo()
-        fileSizes = toggleSplit(in: fileSizes, at: page)
+        let newSizes = toggleSplit(in: fileSizes, at: page)
+        // Names follow the page their file starts on, not its position in the list.
+        customFileNames = remapFileNames(customFileNames, from: fileSizes, to: newSizes)
+        fileSizes = newSizes
     }
 
     /// Toggle skip on all pages of the given file indices.
@@ -1065,13 +1074,8 @@ struct SplitView: View {
             for fileIndex in 0..<fileSizes.count {
                 let fileSize = fileSizes[fileIndex]
                 if !isFileFullySkipped(fileIndex) {
-                    let suffix = customFileNames[fileIndex] ?? ""
-                    let proposed: String
-                    if suffix.isEmpty {
-                        proposed = "\(baseFileName)\(filenameSeparator)\(fileIndex + 1).pdf"
-                    } else {
-                        proposed = "\(baseFileName)\(filenameSeparator)\(suffix).pdf"
-                    }
+                    let proposed = splitOutputFileName(base: baseFileName, separator: filenameSeparator,
+                                                       suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex)
                     let firstPage = document.page(at: pagePos)
                     items.append(PrefixItem(id: fileIndex, proposedName: proposed, page: firstPage))
                 }
@@ -1109,12 +1113,8 @@ struct SplitView: View {
                         var names: [String] = []
                         for i in 0..<fileSizes.count {
                             guard !isFileFullySkipped(i) else { continue }
-                            let sfx = customFileNames[i] ?? ""
-                            if sfx.isEmpty {
-                                names.append("\(baseFileName)\(filenameSeparator)\(i + 1).pdf")
-                            } else {
-                                names.append("\(baseFileName)\(filenameSeparator)\(sfx).pdf")
-                            }
+                            names.append(splitOutputFileName(base: baseFileName, separator: filenameSeparator,
+                                                             suffix: customFileNames[i] ?? "", fileIndex: i))
                         }
                         sourceWasTrashed = trashSourceFileIfRequested()
                         pendingFolderURL = folderURL
@@ -1144,30 +1144,44 @@ struct SplitView: View {
         }
     }
 
-    /// Reads bookmarks from the currently loaded document (if any) and initialises
-    /// `fileSizes`, `baseFileName`, and `customFileNames`.  Also shows the bookmark
-    /// notice banner.  Call this whenever a new (non-A3) document finishes loading.
-    private func setupSplitState() {
-        let bookmarkData = pdfManager.pdfDocument.flatMap { splitSizesFromBookmarks($0) }
-        if let data = bookmarkData {
-            fileSizes = data.sizes
-            if let names = extractSplitNames(from: data.labels) {
-                baseFileName = names.baseName
-                for (i, suffix) in names.suffixes.enumerated() {
-                    customFileNames[i] = suffix
-                }
-            } else {
-                baseFileName = pdfManager.currentFileName ?? ""
-            }
-            withAnimation(.easeInOut(duration: 0.2)) { bookmarkNoticeVisible = true }
-            DispatchQueue.main.asyncAfter(deadline: .now() + 4) {
-                withAnimation(.easeInOut(duration: 0.2)) { bookmarkNoticeVisible = false }
-            }
-        } else {
-            fileSizes = totalPages > 0 ? [totalPages] : []
-            baseFileName = pdfManager.currentFileName ?? ""
-        }
+    /// Initialises the split state for a newly loaded (non-A3) document: one file, named
+    /// after the PDF. If the document has bookmarks, asks what to do with them rather
+    /// than applying them unannounced.
+    private func setupSplitState(offerBookmarks: Bool = true) {
+        fileSizes = totalPages > 0 ? [totalPages] : []
+        baseFileName = pdfManager.currentFileName ?? ""
+        documentBookmarks = pdfManager.pdfDocument.flatMap { bookmarkSections(in: $0) } ?? []
         if splitStage != .split { splitStage = .split }
+        if offerBookmarks { offerBookmarksIfAny() }
+    }
+
+    /// Presents the bookmark sheet when the loaded document has usable bookmarks.
+    private func offerBookmarksIfAny() {
+        guard pdfManager.pdfDocument != nil, !documentBookmarks.isEmpty else { return }
+        bookmarkOffer = BookmarkOffer(sections: documentBookmarks,
+                                      sourceName: pdfManager.currentFileName ?? "")
+    }
+
+    /// Splits at the bookmarks; with a `nameStyle`, also names the files from their titles.
+    /// Replaces the split state like a fresh load would, so it starts a new undo history.
+    private func applyBookmarks(_ sections: [BookmarkSection], nameStyle: BookmarkNameStyle?) {
+        guard sections.reduce(0, { $0 + $1.pageCount }) == totalPages else { return }
+        fileSizes = sections.map { $0.pageCount }
+        customFileNames.removeAll()
+        baseFileName = pdfManager.currentFileName ?? ""
+        if let nameStyle {
+            let names = bookmarkSplitNames(titles: sections.map { $0.title },
+                                           fallbackBaseName: baseFileName,
+                                           style: nameStyle)
+            baseFileName = names.baseName
+            for (i, suffix) in names.suffixes.enumerated() where !suffix.isEmpty {
+                customFileNames[i] = suffix
+            }
+        }
+        skippedPages = []
+        selectedFileIndices = []
+        undoStack = []
+        redoStack = []
     }
 
     /// True when the current file segment has ≥ 4 pages and a count divisible by 4,

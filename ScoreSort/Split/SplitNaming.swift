@@ -32,6 +32,8 @@ struct FilePreviewCard: View {
     /// Non-nil when a previous booklet order exists and matches this file's page count.
     var onRedoBookletOrder: (() -> Void)? = nil
 
+    @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
+
     var pagesInFile: [Int] {
         pageToFileMapping.filter { $0.value == fileIndex }.keys.sorted()
     }
@@ -42,11 +44,8 @@ struct FilePreviewCard: View {
     }
 
     var fileName: String {
-        if let customSuffix = customFileNames[fileIndex], !customSuffix.isEmpty {
-            return "\(baseFileName)\(customSuffix).pdf"
-        } else {
-            return "\(baseFileName)_\(fileIndex + 1).pdf"
-        }
+        splitOutputFileName(base: baseFileName, separator: filenameSeparator,
+                            suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex)
     }
 
     /// Background fill colour reflecting skip / selection / active state.
@@ -307,7 +306,9 @@ struct SplitNamingStageView: View {
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 380)
 
-                    Text("Example: \(baseFileName.isEmpty ? "basename" : baseFileName)\(filenameSeparator)Flute.pdf  ·  Leave blank for auto-numbering: \(baseFileName.isEmpty ? "basename" : baseFileName)\(filenameSeparator)1.pdf")
+                    Text(baseFileName.isEmpty
+                         ? "No base name — each file is named by its suffix alone, e.g. Flute.pdf"
+                         : "Example: \(baseFileName)\(filenameSeparator)Flute.pdf  ·  Leave a suffix blank for auto-numbering: \(baseFileName)\(filenameSeparator)1.pdf")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
@@ -535,9 +536,7 @@ struct SplitFileNamingRow: View {
     @State private var committedTypedText: String = ""
 
     private var finalFileName: String {
-        suffix.isEmpty
-            ? "\(baseFileName)\(filenameSeparator)\(fileIndex + 1).pdf"
-            : "\(baseFileName)\(filenameSeparator)\(suffix).pdf"
+        splitOutputFileName(base: baseFileName, separator: filenameSeparator, suffix: suffix, fileIndex: fileIndex)
     }
 
     // ── Pan overlay ─────────────────────────────────────────────────────────
@@ -813,9 +812,11 @@ struct SplitFileNamingRow: View {
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 4) {
-                    Text(baseFileName.isEmpty ? "basename" : baseFileName)
-                        .foregroundColor(.secondary)
-                        .font(.system(.body, design: .monospaced))
+                    if !baseFileName.isEmpty {
+                        Text(baseFileName)
+                            .foregroundColor(.secondary)
+                            .font(.system(.body, design: .monospaced))
+                    }
                     TextField("Flute", text: $suffix)
                         .textFieldStyle(.roundedBorder)
                         .frame(maxWidth: 220)

@@ -54,10 +54,22 @@ func splitSizes(totalPages: Int, stride: Int) -> [Int] {
     return sizes
 }
 
-/// Reads the top-level PDF outline and returns fileSizes (page counts per section)
-/// and the corresponding bookmark labels, both ordered by page position.
-/// Returns nil if the document has fewer than two usable top-level bookmarks.
-func splitSizesFromBookmarks(_ document: PDFDocument) -> (sizes: [Int], labels: [String])? {
+/// One output file a document's bookmarks would produce: where it starts, how long
+/// it is, and the bookmark's title. `title` is empty for pages ahead of the first
+/// bookmark, which belong to no bookmark but still need a file.
+struct BookmarkSection: Equatable {
+    let startPage: Int
+    let pageCount: Int
+    let title: String
+}
+
+/// Reads the top-level PDF outline as the files it would split into, in page order.
+/// Returns nil unless the bookmarks divide the document into at least two sections.
+///
+/// Real-world outlines are untidy, so: entries are sorted by page, two bookmarks on
+/// the same page count once (the first title wins — a second would make a zero-page
+/// file), and a first bookmark that isn't on page 1 leaves an untitled leading section.
+func bookmarkSections(in document: PDFDocument) -> [BookmarkSection]? {
     let totalPages = document.pageCount
     guard totalPages > 0,
           let root = document.outlineRoot,
@@ -66,24 +78,38 @@ func splitSizesFromBookmarks(_ document: PDFDocument) -> (sizes: [Int], labels: 
     var entries: [(pageIndex: Int, label: String)] = []
     for i in 0..<root.numberOfChildren {
         guard let item = root.child(at: i),
-              let page = item.destination?.page else { continue }
+              let page = item.destination?.page
+                ?? (item.action as? PDFActionGoTo)?.destination.page else { continue }
         let idx = document.index(for: page)
-        guard idx < totalPages else { continue }
+        guard idx >= 0, idx < totalPages else { continue }
         entries.append((pageIndex: idx, label: item.label ?? ""))
     }
-    entries.sort { $0.pageIndex < $1.pageIndex }
+    // Stable, so of two bookmarks on one page the earlier outline entry is kept.
+    let sorted = entries.enumerated()
+        .sorted { ($0.element.pageIndex, $0.offset) < ($1.element.pageIndex, $1.offset) }
+        .map { $0.element }
 
-    let markers = entries.compactMap { $0.pageIndex > 0 ? $0.pageIndex : nil }
-    guard !markers.isEmpty else { return nil }
-
-    var sizes: [Int] = []
-    var prev = 0
-    for marker in markers {
-        sizes.append(marker - prev)
-        prev = marker
+    var starts: [(page: Int, title: String)] = []
+    for entry in sorted where starts.last?.page != entry.pageIndex {
+        starts.append((page: entry.pageIndex, title: entry.label))
     }
-    sizes.append(totalPages - prev)
-    return (sizes: sizes, labels: entries.map { $0.label })
+    if let first = starts.first, first.page > 0 {
+        starts.insert((page: 0, title: ""), at: 0)
+    }
+    guard starts.count >= 2 else { return nil }
+
+    return starts.enumerated().map { i, start in
+        let end = i + 1 < starts.count ? starts[i + 1].page : totalPages
+        return BookmarkSection(startPage: start.page, pageCount: end - start.page, title: start.title)
+    }
+}
+
+/// Reads the top-level PDF outline and returns fileSizes (page counts per section)
+/// and the corresponding bookmark labels, index-aligned and ordered by page position.
+/// Returns nil if the bookmarks don't divide the document into at least two sections.
+func splitSizesFromBookmarks(_ document: PDFDocument) -> (sizes: [Int], labels: [String])? {
+    guard let sections = bookmarkSections(in: document) else { return nil }
+    return (sizes: sections.map { $0.pageCount }, labels: sections.map { $0.title })
 }
 
 /// Parses bookmark labels of the form "NN - Piecename - Partname" and extracts
@@ -108,6 +134,97 @@ func extractSplitNames(from labels: [String]) -> (baseName: String, suffixes: [S
     }
     guard let baseName = pieceName, !baseName.isEmpty else { return nil }
     return (baseName: baseName, suffixes: suffixes)
+}
+
+/// How bookmark titles become file names when splitting at bookmarks.
+enum BookmarkNameStyle: String, CaseIterable {
+    /// "Piece - Title.pdf" — the title is the part, under a shared piece name.
+    case pieceAndTitle
+    /// "Title.pdf" — the title is already the whole name (a book of separate pieces).
+    case titleOnly
+}
+
+/// `text` made safe to use in a file name: path characters replaced, line breaks and
+/// repeated spaces collapsed, and a trailing ".pdf" dropped. Bookmark titles are free
+/// text, and a "/" or ":" in one would otherwise block saving in Step 2.
+func fileNameSafe(_ text: String) -> String {
+    var s = text.replacingOccurrences(of: ": ", with: " - ")
+    s = String(s.unicodeScalars.map { scalar -> Character in
+        if "/:\\".unicodeScalars.contains(scalar) { return "-" }
+        if CharacterSet.controlCharacters.contains(scalar) || CharacterSet.newlines.contains(scalar) { return " " }
+        return Character(scalar)
+    })
+    s = s.split(whereSeparator: { $0 == " " }).joined(separator: " ")
+    if s.lowercased().hasSuffix(".pdf") { s = String(s.dropLast(4)).trimmingCharacters(in: .whitespaces) }
+    return s
+}
+
+/// Turns bookmark titles into a base name and per-file suffixes, index-aligned with
+/// `titles`. An empty title gives an empty suffix (Step 2 auto-numbers it).
+///
+/// `.titleOnly` uses each title whole, with no base name. `.pieceAndTitle` reads the
+/// titles as "Piece - Part": a leading score-order number on every title is dropped
+/// (Step 3 adds it back), and a first segment every title shares becomes the base
+/// name. Without one, `fallbackBaseName` (the PDF's own name) is the base and the
+/// title is the suffix. For ScoreSort's own "NN - Piece - Part" labels this agrees
+/// with `extractSplitNames`.
+func bookmarkSplitNames(titles: [String],
+                        fallbackBaseName: String,
+                        style: BookmarkNameStyle) -> (baseName: String, suffixes: [String]) {
+    guard style == .pieceAndTitle else {
+        return (baseName: "", suffixes: titles.map(fileNameSafe))
+    }
+
+    var parts: [[String]] = titles.map { title in
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? [] : trimmed.components(separatedBy: " - ")
+    }
+    func titled() -> [[String]] { parts.filter { !$0.isEmpty } }
+
+    let isNumbered = !titled().isEmpty && titled().allSatisfy {
+        $0.count >= 2 && !$0[0].isEmpty && $0[0].allSatisfy { $0.isNumber }
+    }
+    if isNumbered { parts = parts.map { Array($0.dropFirst()) } }
+
+    var baseName = fallbackBaseName
+    // One title alone isn't evidence of a shared piece name, unless the numbering
+    // already marked it as ScoreSort's own pattern.
+    if let piece = titled().first?.first, !piece.isEmpty,
+       titled().count >= 2 || isNumbered,
+       titled().allSatisfy({ $0.count >= 2 && $0[0] == piece }) {
+        baseName = piece
+        parts = parts.map { Array($0.dropFirst()) }
+    }
+
+    return (baseName: fileNameSafe(baseName),
+            suffixes: parts.map { fileNameSafe($0.joined(separator: " - ")) })
+}
+
+/// The name a split file is saved under, extension included. An empty suffix
+/// auto-numbers from the file's position; an empty base name leaves the suffix to
+/// stand alone rather than starting the name with a separator.
+func splitOutputFileName(base: String, separator: String, suffix: String, fileIndex: Int) -> String {
+    let part = suffix.isEmpty ? "\(fileIndex + 1)" : suffix
+    return base.isEmpty ? "\(part).pdf" : "\(base)\(separator)\(part).pdf"
+}
+
+/// Carries per-file names across a change of split points: a file keeps its name
+/// when it still starts on the same page. Without this, adding or removing one split
+/// slid every later name onto the wrong file.
+func remapFileNames(_ names: [Int: String], from oldSizes: [Int], to newSizes: [Int]) -> [Int: String] {
+    func startPages(_ sizes: [Int]) -> [Int] {
+        var pos = 0
+        return sizes.map { size in defer { pos += size }; return pos }
+    }
+    var nameAtStart: [Int: String] = [:]
+    for (index, start) in startPages(oldSizes).enumerated() {
+        if let name = names[index] { nameAtStart[start] = name }
+    }
+    var result: [Int: String] = [:]
+    for (index, start) in startPages(newSizes).enumerated() {
+        if let name = nameAtStart[start] { result[index] = name }
+    }
+    return result
 }
 
 /// Returns true if every checked page in `doc` looks like A3 landscape

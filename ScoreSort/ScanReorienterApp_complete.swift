@@ -1801,12 +1801,8 @@ class PDFManager: ObservableObject {
             // Each output file is one "part", so first-page scope means its page 1.
             let doc = applyingStamp(stampJob, to: assembled, partFirstPages: [0])
 
-            let fileName: String
-            if let customSuffix = customFileNames[fileIndex], !customSuffix.isEmpty {
-                fileName = "\(baseFileName)\(separator)\(customSuffix).pdf"
-            } else {
-                fileName = "\(baseFileName)\(separator)\(fileIndex + 1).pdf"
-            }
+            let fileName = splitOutputFileName(base: baseFileName, separator: separator,
+                                               suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex)
 
             let fileURL = folderURL.appendingPathComponent(fileName)
 
