@@ -292,7 +292,7 @@ final class UpdaterViewModel: ObservableObject {
 }
 
 // MARK: - Main App
-@main
+// Started by `ScoreSortEntry` (CLI/Entry.swift), which first checks for a command-line verb.
 struct ScoreSortApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
     @StateObject private var appState = AppState()

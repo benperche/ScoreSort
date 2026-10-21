@@ -156,6 +156,25 @@ nonisolated func renderScan(_ source: ScanRenderSource, width: Int) -> CGImage? 
     return ctx.makeImage()
 }
 
+/// `renderScan` for many pages at once, in parallel; `nil` where a page couldn't be rendered.
+/// `width` gives each page's pixel width.
+nonisolated func renderScans(_ sources: [ScanRenderSource], width: (ScanRenderSource) -> Int) -> [CGImage?] {
+    final class Box: @unchecked Sendable {
+        var images: [CGImage?]
+        let lock = NSLock()
+        init(count: Int) { images = Array(repeating: nil, count: count) }
+    }
+    let box = Box(count: sources.count)
+    let widths = sources.map(width)
+    DispatchQueue.concurrentPerform(iterations: sources.count) { i in
+        let image = renderScan(sources[i], width: widths[i])
+        box.lock.lock()
+        box.images[i] = image
+        box.lock.unlock()
+    }
+    return box.images
+}
+
 // MARK: - Column profile
 
 nonisolated struct ColumnStat: Equatable, Sendable {
