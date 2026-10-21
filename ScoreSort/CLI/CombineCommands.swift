@@ -72,7 +72,7 @@ extension ScoreSortCLI {
 
     static func runStamp(files: [URL], stamp: String, scope: StampScope, out: String,
                          dryRun: Bool, overwrite: Bool) throws -> CommandResult {
-        let folder = try outputFolder(out)
+        let folder = try outputFolder(out, create: !dryRun)
         let targets = files.map { folder.appendingPathComponent($0.deletingPathExtension().lastPathComponent + ".pdf") }
         if Set(targets.map(\.lastPathComponent)).count != targets.count {
             throw CommandError("Two of the files would be saved under the same name in \(folder.path).")
@@ -298,6 +298,7 @@ extension ScoreSortCLI {
 
         var problem: String? = nil
         if !dryRun {
+            try? FileManager.default.createDirectory(at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             manager.createCombinedPDF(to: outURL, options: options, stampJob: job) { title, message, isError in
                 if isError { problem = "\(title): \(message)" }
             }

@@ -124,7 +124,7 @@ extension ScoreSortCLI {
 
     static func runSplit(file: URL, options: SplitOptions) throws -> CommandResult {
         let doc = try openPDFDocument(file)
-        let folder = try outputFolder(options.out)
+        let folder = try outputFolder(options.out, create: !options.dryRun)
         let separator = options.separator
             ?? UserDefaults.standard.string(forKey: "filenameSeparator") ?? " - "
         var warnings: [String] = []
@@ -402,7 +402,10 @@ extension ScoreSortCLI {
 
         let suggestedSkip = dropBlanks ? [] : blankOutputPages.sorted()
         var problem: String? = nil
-        if !dryRun, let reason = savePDFDocument(split, to: outURL) { problem = reason }
+        if !dryRun {
+            try? FileManager.default.createDirectory(at: outURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            if let reason = savePDFDocument(split, to: outURL) { problem = reason }
+        }
 
         let ok = problem == nil
         var json: [String: Any] = ["ok": ok, "dryRun": dryRun, "file": outURL.path, "scans": scanEntries,

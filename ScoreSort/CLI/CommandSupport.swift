@@ -168,13 +168,14 @@ func existingFile(_ path: String) throws -> URL {
     return url
 }
 
-/// A folder to write into, created if it doesn't exist yet.
-func outputFolder(_ path: String) throws -> URL {
+/// A folder to write into, created if it doesn't exist yet (unless `create` is false — a
+/// dry run touches nothing).
+func outputFolder(_ path: String, create: Bool = true) throws -> URL {
     let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true).standardizedFileURL
     var isDir: ObjCBool = false
     if FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir) {
         guard isDir.boolValue else { throw CommandError("\(url.path) is a file, not a folder.") }
-    } else {
+    } else if create {
         do {
             try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
         } catch {
