@@ -1770,56 +1770,23 @@ class PDFManager: ObservableObject {
     func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], skippedPages: Set<Int> = [], separator: String = "_", stampJob: StampJob? = nil, completion: PDFAlertHandler) {
         guard let document = pdfDocument else { return }
 
-        let numberOfFiles = (pageToFileMapping.values.max() ?? 0) + 1
-        var fileDocuments: [Int: PDFDocument] = [:]
-
-        // Initialize PDF documents for each file
-        for fileIndex in 0..<numberOfFiles {
-            fileDocuments[fileIndex] = PDFDocument()
+        // The writing itself is shared with the command line (`writeSplitFiles`,
+        // Logic/SplitLogic.swift), so both produce identical files.
+        let plans = splitFilePlans(pageToFile: pageToFileMapping, pageCount: document.pageCount,
+                                   skippedPages: skippedPages) { fileIndex in
+            splitOutputFileName(base: baseFileName, separator: separator,
+                                suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex)
         }
+        let report = writeSplitFiles(plans, from: document, to: folderURL, stampJob: stampJob)
 
-        // Distribute pages to files, skipping any pages in skippedPages
-        for pageIndex in 0..<document.pageCount {
-            guard !skippedPages.contains(pageIndex),
-                  let page = document.page(at: pageIndex),
-                  let fileIndex = pageToFileMapping[pageIndex],
-                  let targetDoc = fileDocuments[fileIndex] else {
-                continue
-            }
-
-            targetDoc.insert(page, at: targetDoc.pageCount)
-        }
-
-        // Save each file (skip files that ended up with zero pages after skipping)
-        var savedFiles: [String] = []
-        var errors: [String] = []
-
-        for fileIndex in 0..<numberOfFiles {
-            guard let assembled = fileDocuments[fileIndex],
-                  assembled.pageCount > 0 else { continue }
-
-            // Each output file is one "part", so first-page scope means its page 1.
-            let doc = applyingStamp(stampJob, to: assembled, partFirstPages: [0])
-
-            let fileName = splitOutputFileName(base: baseFileName, separator: separator,
-                                               suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex)
-
-            let fileURL = folderURL.appendingPathComponent(fileName)
-
-            if doc.write(to: fileURL) {
-                savedFiles.append(fileName)
-            } else {
-                errors.append(fileName)
-            }
-        }
-
-        if errors.isEmpty {
+        if report.failures.isEmpty {
             completion("PDF Split Successfully",
-                       "Created \(savedFiles.count) file(s) in:\n\(folderURL.path)",
+                       "Created \(report.written.count) file(s) in:\n\(folderURL.path)",
                        false)
         } else {
-            completion("Partial Success",
-                       "Created \(savedFiles.count) file(s), but \(errors.count) failed:\n\(errors.joined(separator: ", "))",
+            let reasons = report.failures.map { "\($0.name): \($0.reason)" }.joined(separator: "\n")
+            completion(report.written.isEmpty ? "Save Failed" : "Partial Success",
+                       "Created \(report.written.count) file(s), but \(report.failures.count) failed:\n\(reasons)",
                        true)
         }
     }

@@ -14,21 +14,7 @@ import Combine
 
 // MARK: - Prefix Order Step
 
-/// A single item flowing through the Prefix Order step.
-/// For the Splitter, `originalURL` is nil (file not on disk yet).
-/// For Bulk Rename, `originalURL` is the current URL of the file to rename.
-struct PrefixItem: Identifiable {
-    let id: Int              // original zero-based index (stable across reordering)
-    let proposedName: String // full filename incl. .pdf, e.g. "Beethoven - Flute.pdf"
-    let page: PDFPage?
-    var originalURL: URL? = nil
-    /// True when the proposed name matched the score (instrument rank 0) — pinned to "00".
-    var isScore: Bool = false
-    /// Forced number (renamer-style override). Reserved, so auto-numbered items reflow around it.
-    var manualNumber: Int? = nil
-    /// Excluded from output and from numbering.
-    var isSkipped: Bool = false
-}
+// `PrefixItem` lives in Logic/RenameLogic.swift, shared with the command line.
 
 /// One row in PrefixOrderStepView — shows position, thumbnail, proposed name → final name.
 private struct PrefixOrderRow: View {
@@ -163,29 +149,14 @@ struct PrefixOrderStepView: View {
 
     // MARK: Auto-sort helpers
 
-    /// Returns items sorted by instrument order.
-    /// Score (rank 0) is pinned first → gets prefix "00".
-    /// Other matched items follow in instrument order.
-    /// Unmatched items go last (highlighted orange) so they don't displace the score.
+    /// Items sorted into score order — see `scoreOrderSorted(_:by:)` (Logic/RenameLogic.swift).
     static func autoSorted(_ items: [PrefixItem], by order: [String]) -> [PrefixItem] {
-        var score:     [PrefixItem] = []
-        var matched:   [(rank: Int, item: PrefixItem)] = []
-        var unmatched: [PrefixItem] = []
-        for var item in items {
-            if let rank = matchInstrumentOrder(in: item.proposedName, order: order) {
-                if rank == 0 { item.isScore = true; score.append(item) }
-                else { item.isScore = false; matched.append((rank, item)) }
-            } else {
-                item.isScore = false
-                unmatched.append(item)
-            }
-        }
-        return score + matched.sorted { $0.rank < $1.rank }.map(\.item) + unmatched
+        scoreOrderSorted(items, by: order)
     }
 
-    /// Returns the set of item IDs whose proposed names don't match any instrument in `order`.
+    /// IDs of items whose names match no instrument — see `scoreOrderUnmatchedIds(_:by:)`.
     static func computeUnmatchedIds(_ items: [PrefixItem], by order: [String]) -> Set<Int> {
-        Set(items.filter { matchInstrumentOrder(in: $0.proposedName, order: order) == nil }.map(\.id))
+        scoreOrderUnmatchedIds(items, by: order)
     }
 
     /// id → assigned number for the current ordering (score=0, instruments 1+, skipped omitted).

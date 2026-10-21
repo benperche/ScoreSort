@@ -303,6 +303,60 @@ func splitA3Pages(_ doc: PDFDocument, leftFirst: Bool) -> PDFDocument {
                leftFirst: leftFirst)
 }
 
+// MARK: - Writing split files
+
+/// One file a split will write: its name (with `.pdf`) and the pages (0-based, in order)
+/// that go into it.
+struct SplitFilePlan: Equatable {
+    let name: String
+    let pages: [Int]
+}
+
+/// The files a page → file mapping produces (the Split tab's model), in file order:
+/// skipped pages left out, files left with no pages dropped. `fileName` names file *i*.
+func splitFilePlans(pageToFile: [Int: Int], pageCount: Int, skippedPages: Set<Int>,
+                    fileName: (Int) -> String) -> [SplitFilePlan] {
+    var pagesByFile: [Int: [Int]] = [:]
+    for page in 0..<pageCount where !skippedPages.contains(page) {
+        guard let file = pageToFile[page] else { continue }
+        pagesByFile[file, default: []].append(page)
+    }
+    return pagesByFile.keys.sorted().map { SplitFilePlan(name: fileName($0), pages: pagesByFile[$0]!) }
+}
+
+/// What writing a split did: the files written, and the ones that failed with the reason.
+struct SplitWriteReport {
+    var written: [String] = []
+    var failures: [(name: String, reason: String)] = []
+}
+
+/// Writes each planned file into `folder`, stamping each one's first page (or every page)
+/// as `stampJob` says — each output file is one part. Existing files are replaced.
+/// Shared by the Split tab and the command line, so both produce the same files.
+func writeSplitFiles(_ plans: [SplitFilePlan], from document: PDFDocument, to folder: URL,
+                     stampJob: StampJob?) -> SplitWriteReport {
+    var report = SplitWriteReport()
+    for plan in plans {
+        let assembled = PDFDocument()
+        for pageIndex in plan.pages {
+            // A copy, so the source document is left as it was.
+            guard let page = document.page(at: pageIndex)?.copy() as? PDFPage else { continue }
+            assembled.insert(page, at: assembled.pageCount)
+        }
+        guard assembled.pageCount > 0 else {
+            report.failures.append((plan.name, "None of its pages could be read."))
+            continue
+        }
+        let doc = applyingStamp(stampJob, to: assembled, partFirstPages: [0])
+        if let reason = savePDFDocument(doc, to: folder.appendingPathComponent(plan.name)) {
+            report.failures.append((plan.name, reason))
+        } else {
+            report.written.append(plan.name)
+        }
+    }
+    return report
+}
+
 // MARK: - Booklet deimposition
 
 /// Saddle-stitch booklet deimposition: outer cover scanned first, front face of each

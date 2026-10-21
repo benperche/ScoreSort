@@ -149,3 +149,169 @@ struct CLIInspectTests {
         #expect(abs(rep.pixelsHigh - Int(300 * 842 / 595 / 3)) <= 1)
     }
 }
+
+@Suite("Split writing (shared by the Split tab and the command line)")
+struct SplitWritingTests {
+
+    @Test("Plans follow the page → file mapping, leaving out skipped pages and empty files")
+    func plansFromMapping() {
+        let plans = splitFilePlans(pageToFile: [0: 0, 1: 0, 2: 1, 3: 2], pageCount: 4, skippedPages: [3]) { "F\($0).pdf" }
+        #expect(plans == [SplitFilePlan(name: "F0.pdf", pages: [0, 1]), SplitFilePlan(name: "F1.pdf", pages: [2])])
+    }
+
+    @Test("Writes each planned file with its pages, leaving the source alone")
+    func writes() throws {
+        let folder = temporaryFolder()
+        let source = folder.appendingPathComponent("in.pdf")
+        writeDrawnPDF(pages: 5, to: source)
+        let doc = try #require(PDFDocument(url: source))
+        let report = writeSplitFiles([SplitFilePlan(name: "A.pdf", pages: [0, 4]), SplitFilePlan(name: "B.pdf", pages: [2])],
+                                     from: doc, to: folder, stampJob: nil)
+        #expect(report.written == ["A.pdf", "B.pdf"])
+        #expect(report.failures.isEmpty)
+        #expect(PDFDocument(url: folder.appendingPathComponent("A.pdf"))?.pageCount == 2)
+        #expect(doc.pageCount == 5)
+    }
+
+    @Test("Score-order file names: two-digit numbers, the separator, skipped items left out")
+    func scoreOrderNames() {
+        var items = [PrefixItem(id: 0, proposedName: "Suite - Score.pdf", page: nil, isScore: true),
+                     PrefixItem(id: 1, proposedName: "Suite - Flute.pdf", page: nil),
+                     PrefixItem(id: 2, proposedName: "Suite - Oboe.pdf", page: nil)]
+        items[2].isSkipped = true
+        #expect(scoreOrderFileNames(forOrderedItems: items, separator: "_") ==
+                [0: "00_Suite - Score.pdf", 1: "01_Suite - Flute.pdf"])
+    }
+}
+
+@Suite("Command: split")
+struct CLISplitTests {
+
+    private func fixture(pages: Int = 8) -> (URL, URL) {
+        let folder = temporaryFolder()
+        let url = folder.appendingPathComponent("Band.pdf")
+        writeDrawnPDF(pages: pages, to: url)
+        return (url, folder.appendingPathComponent("out"))
+    }
+
+    private func options(_ out: URL, _ parts: [(String, String)]) -> ScoreSortCLI.SplitOptions {
+        var o = ScoreSortCLI.SplitOptions(out: out.path)
+        o.parts = parts.map { (pages: $0.0, name: $0.1) }
+        o.separator = " - "
+        o.prefixSeparator = " - "
+        return o
+    }
+
+    private func names(in folder: URL) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: folder.path)) ?? []).filter { $0.hasSuffix(".pdf") }.sorted()
+    }
+
+    @Test("Parts become files named base + separator + part, with their pages")
+    func namedParts() throws {
+        let (file, out) = fixture()
+        var o = options(out, [("1-2", "Flute 1"), ("3,5", "Clarinet 1"), ("6-8", "Trumpet 1")])
+        o.base = "Holst - First Suite"
+        let result = try ScoreSortCLI.runSplit(file: file, options: o)
+        #expect(result.exitCode == 0)
+        #expect(names(in: out) == ["Holst - First Suite - Clarinet 1.pdf", "Holst - First Suite - Flute 1.pdf",
+                                   "Holst - First Suite - Trumpet 1.pdf"])
+        #expect(PDFDocument(url: out.appendingPathComponent("Holst - First Suite - Clarinet 1.pdf"))?.pageCount == 2)
+        let warnings = try #require(result.json["warnings"] as? [String])
+        #expect(warnings.contains { $0.contains("Pages 4 aren't in any part") })
+    }
+
+    @Test("--score-order numbers the files as Step 3 would: score 00, then instrument order")
+    func scoreOrder() throws {
+        let (file, out) = fixture()
+        var o = options(out, [("1-2", "Trumpet 1"), ("3-4", "Full Score"), ("5-6", "Flute"), ("7-8", "Kazoo")])
+        o.scoreOrder = .band
+        let result = try ScoreSortCLI.runSplit(file: file, options: o)
+        #expect(result.exitCode == 0)
+        #expect(names(in: out) == ["00 - Full Score.pdf", "01 - Flute.pdf", "02 - Trumpet 1.pdf", "03 - Kazoo.pdf"])
+        let warnings = try #require(result.json["warnings"] as? [String])
+        #expect(warnings.contains { $0.contains("Kazoo") })
+    }
+
+    @Test("A dry run writes nothing")
+    func dryRun() throws {
+        let (file, out) = fixture()
+        var o = options(out, [("1-8", "Flute")])
+        o.dryRun = true
+        let result = try ScoreSortCLI.runSplit(file: file, options: o)
+        #expect(result.json["dryRun"] as? Bool == true)
+        #expect(names(in: out).isEmpty)
+    }
+
+    @Test("Existing files stop the split unless --overwrite")
+    func noSilentOverwrite() throws {
+        let (file, out) = fixture()
+        _ = try ScoreSortCLI.runSplit(file: file, options: options(out, [("1-8", "Flute")]))
+        #expect(throws: CommandError.self) {
+            try ScoreSortCLI.runSplit(file: file, options: options(out, [("1-8", "Flute")]))
+        }
+        var o = options(out, [("1-8", "Flute")])
+        o.overwrite = true
+        #expect(try ScoreSortCLI.runSplit(file: file, options: o).exitCode == 0)
+    }
+
+    @Test("Two parts with one name are refused")
+    func duplicateNames() {
+        let (file, out) = fixture()
+        #expect(throws: CommandError.self) {
+            try ScoreSortCLI.runSplit(file: file, options: options(out, [("1-2", "Flute"), ("3-4", "flute")]))
+        }
+    }
+
+    @Test("Skipped pages are left out of their part")
+    func skips() throws {
+        let (file, out) = fixture()
+        var o = options(out, [("1-8", "Flute")])
+        o.skip = "2,7-8"
+        _ = try ScoreSortCLI.runSplit(file: file, options: o)
+        #expect(PDFDocument(url: out.appendingPathComponent("Flute.pdf"))?.pageCount == 5)
+    }
+}
+
+@Suite("Command: split-scans")
+struct CLISplitScansTests {
+
+    @Test("Identical A3 sheets are all cut down the middle")
+    func uniformSheets() throws {
+        let folder = temporaryFolder()
+        let file = folder.appendingPathComponent("A3.pdf")
+        writeDrawnPDF(pages: 3, size: CGSize(width: 1191, height: 842), to: file)
+        let out = folder.appendingPathComponent("pages.pdf")
+        let result = try ScoreSortCLI.runSplitScans(file: file, out: out.path, mode: .automatic, leftFirst: true,
+                                                    dropBlanks: false, dryRun: false, overwrite: false)
+        #expect(result.json["sameCut"] as? Double == 0.5)
+        let split = try #require(PDFDocument(url: out))
+        #expect(split.pageCount == 6)
+        #expect(abs((split.page(at: 0)?.bounds(for: .cropBox).width ?? 0) - 595.5) < 0.5)
+    }
+
+    @Test("Empty halves are reported for skipping, or dropped")
+    func blanks() throws {
+        let folder = temporaryFolder()
+        let file = folder.appendingPathComponent("A3.pdf")
+        writeDrawnPDF(pages: 2, size: CGSize(width: 1191, height: 842), to: file)   // the right half of each is empty
+        let kept = try ScoreSortCLI.runSplitScans(file: file, out: folder.appendingPathComponent("a.pdf").path,
+                                                  mode: .automatic, leftFirst: true, dropBlanks: false,
+                                                  dryRun: false, overwrite: false)
+        #expect(kept.json["suggestedSkip"] as? String == "2, 4")
+        let dropped = try ScoreSortCLI.runSplitScans(file: file, out: folder.appendingPathComponent("b.pdf").path,
+                                                     mode: .automatic, leftFirst: true, dropBlanks: true,
+                                                     dryRun: false, overwrite: false)
+        #expect(dropped.json["pageCount"] as? Int == 2)
+    }
+
+    @Test("Never writes over the scan itself")
+    func notOverInput() {
+        let folder = temporaryFolder()
+        let file = folder.appendingPathComponent("A3.pdf")
+        writeDrawnPDF(pages: 1, size: CGSize(width: 1191, height: 842), to: file)
+        #expect(throws: CommandError.self) {
+            try ScoreSortCLI.runSplitScans(file: file, out: file.path, mode: .automatic, leftFirst: true,
+                                           dropBlanks: false, dryRun: false, overwrite: true)
+        }
+    }
+}

@@ -9,6 +9,7 @@
 //
 
 import Foundation
+import PDFKit
 
 // MARK: - Renamable files & folder-job expansion
 
@@ -86,6 +87,60 @@ func qualifiedFolderName(for url: URL, among all: [URL]) -> String {
 }
 
 // MARK: - Score-order numbering
+
+/// A single item flowing through the Prefix Order step.
+/// For the Splitter, `originalURL` is nil (file not on disk yet).
+/// For Bulk Rename, `originalURL` is the current URL of the file to rename.
+struct PrefixItem: Identifiable {
+    let id: Int              // original zero-based index (stable across reordering)
+    let proposedName: String // full filename incl. .pdf, e.g. "Beethoven - Flute.pdf"
+    let page: PDFPage?
+    var originalURL: URL? = nil
+    /// True when the proposed name matched the score (instrument rank 0) — pinned to "00".
+    var isScore: Bool = false
+    /// Forced number (renamer-style override). Reserved, so auto-numbered items reflow around it.
+    var manualNumber: Int? = nil
+    /// Excluded from output and from numbering.
+    var isSkipped: Bool = false
+}
+
+/// Items sorted into score order, as Step 3 (and the command line's `--score-order`) shows
+/// them: the score (instrument rank 0) pinned first so it gets 00, then matched parts in
+/// instrument order, then anything unrecognised last — left for the user to place, never
+/// displacing the score.
+func scoreOrderSorted(_ items: [PrefixItem], by order: [String]) -> [PrefixItem] {
+    var score:     [PrefixItem] = []
+    var matched:   [(rank: Int, item: PrefixItem)] = []
+    var unmatched: [PrefixItem] = []
+    for var item in items {
+        if let rank = matchInstrumentOrder(in: item.proposedName, order: order) {
+            if rank == 0 { item.isScore = true; score.append(item) }
+            else { item.isScore = false; matched.append((rank, item)) }
+        } else {
+            item.isScore = false
+            unmatched.append(item)
+        }
+    }
+    return score + matched.sorted { $0.rank < $1.rank }.map(\.item) + unmatched
+}
+
+/// IDs of items whose proposed names don't match any instrument in `order`.
+func scoreOrderUnmatchedIds(_ items: [PrefixItem], by order: [String]) -> Set<Int> {
+    Set(items.filter { matchInstrumentOrder(in: $0.proposedName, order: order) == nil }.map(\.id))
+}
+
+/// The final file names for ordered items — `"01 - Piece - Flute.pdf"` — keyed by item id.
+/// Skipped items get none. The one place a score-order prefix is put on a split file's name.
+func scoreOrderFileNames(forOrderedItems items: [PrefixItem], separator: String) -> [Int: String] {
+    let numbers = scoreOrderNumbers(forOrderedItems: items)
+    var names: [Int: String] = [:]
+    for item in items {
+        guard let number = numbers[item.id] else { continue }
+        names[item.id] = "\(String(format: "%02d", number))\(separator)\(item.proposedName)"
+    }
+    return names
+}
+
 
 /// Score-order numbers for an ordered item list, mirroring the Score Order Sorter
 /// (`scanFolder`): the score → 0, manually-numbered items keep their number (reserved),

@@ -101,22 +101,17 @@ final class ScanSplitModel: ObservableObject {
 
     /// Thumbnail width in pixels: two points per pixel for cards about 220 points wide.
     nonisolated private static func renderWidth(aspect: CGFloat) -> Int {
-        aspect >= 1 ? 440 : 300
+        scanAnalysisWidth(aspect: aspect)
     }
 
     nonisolated private static func analyse(index: Int, source: ScanRenderSource) -> Result? {
-        let size = source.visualSize
-        guard size.height > 0,
-              let image = renderScan(source, width: renderWidth(aspect: size.width / size.height)),
-              let gray = GrayImage(image) else { return nil }
-        return analyse(index: index, image: image, gray: gray)
+        guard let scan = analyseScanSource(source) else { return nil }
+        return Result(index: index, image: scan.image, gray: scan.gray, analysis: scan.analysis, blanks: scan.blanks)
     }
 
     nonisolated private static func analyse(index: Int, image: CGImage, gray: GrayImage) -> Result {
-        let analysis = analyseScan(profile: columnProfile(gray),
-                                   aspect: Double(gray.width) / Double(max(1, gray.height)))
-        return Result(index: index, image: image, gray: gray, analysis: analysis,
-                      blanks: blankPieces(gray, layout: analysis.layout))
+        let scan = analyseScanImage(image, gray: gray)
+        return Result(index: index, image: scan.image, gray: scan.gray, analysis: scan.analysis, blanks: scan.blanks)
     }
 
     /// Renders and analyses every scan, several at once, publishing each as it finishes.

@@ -353,6 +353,56 @@ nonisolated func blankPieces(_ img: GrayImage, layout: ScanLayout) -> [BlankKind
     }
 }
 
+// MARK: - One scan, start to finish
+
+/// Thumbnail/analysis width in pixels: 440 for a wide scan, 300 for a tall one — enough
+/// for the detection, and two pixels per point for the review sheet's cards.
+nonisolated func scanAnalysisWidth(aspect: CGFloat) -> Int {
+    aspect >= 1 ? 440 : 300
+}
+
+/// A rendered and analysed scan: the suggested layout and each piece's blankness.
+nonisolated struct AnalysedScan: @unchecked Sendable {
+    let image: CGImage
+    let gray: GrayImage
+    let analysis: ScanAnalysis
+    let blanks: [BlankKind?]
+}
+
+/// Detection on an already-rendered scan.
+nonisolated func analyseScanImage(_ image: CGImage, gray: GrayImage) -> AnalysedScan {
+    let analysis = analyseScan(profile: columnProfile(gray),
+                               aspect: Double(gray.width) / Double(max(1, gray.height)))
+    return AnalysedScan(image: image, gray: gray, analysis: analysis,
+                        blanks: blankPieces(gray, layout: analysis.layout))
+}
+
+/// Renders and analyses one scan — what the review sheet and `ScoreSort split-scans` both do.
+nonisolated func analyseScanSource(_ source: ScanRenderSource) -> AnalysedScan? {
+    let size = source.visualSize
+    guard size.height > 0,
+          let image = renderScan(source, width: scanAnalysisWidth(aspect: size.width / size.height)),
+          let gray = GrayImage(image) else { return nil }
+    return analyseScanImage(image, gray: gray)
+}
+
+/// `analyseScanSource` for many scans at once, in parallel.
+nonisolated func analyseScanSources(_ sources: [ScanRenderSource]) -> [AnalysedScan?] {
+    final class Box: @unchecked Sendable {
+        var scans: [AnalysedScan?]
+        let lock = NSLock()
+        init(count: Int) { scans = Array(repeating: nil, count: count) }
+    }
+    let box = Box(count: sources.count)
+    DispatchQueue.concurrentPerform(iterations: sources.count) { i in
+        let scan = analyseScanSource(sources[i])
+        box.lock.lock()
+        box.scans[i] = scan
+        box.lock.unlock()
+    }
+    return box.scans
+}
+
 // MARK: - Which documents to offer this for
 
 /// True when a document looks like it came off a scanner as double pages: a good share of

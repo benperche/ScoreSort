@@ -1348,26 +1348,21 @@ struct SplitView: View {
     private func applyPrefixToFolder(_ folderURL: URL, orderedItems: [PrefixItem]) {
         let sep = UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - "
 
-        // Build customFileNames keyed by original fileIndex.
-        // saveSplitPDF writes: "\(baseFileName)\(separator)\(suffix).pdf"
-        // We pass baseFileName="" separator="" so the suffix IS the complete filename (without .pdf).
-        // Same numbering the user saw in Step 3 — so the saved names match the preview.
-        let numbers = scoreOrderNumbers(forOrderedItems: orderedItems)
+        // Same numbering and names the user saw in Step 3 (shared with the command line).
+        // saveSplitPDF composes "\(base)\(separator)\(suffix).pdf", so with an empty base and
+        // separator the suffix is the whole name, minus ".pdf".
+        let fullNames = scoreOrderFileNames(forOrderedItems: orderedItems, separator: sep)
         var finalCustomNames: [Int: String] = [:]
         var finalNamesForSummary: [String] = []
         var omittedPages = skippedPages   // Step-1 skips, plus any Step-3 skips below
 
         for item in orderedItems {
-            guard let number = numbers[item.id] else {
+            guard let fullName = fullNames[item.id] else {
                 // Skipped in Step 3 → drop this segment's pages so the file isn't written.
                 omittedPages.formUnion(pagesForFile(item.id))
                 continue
             }
-            let fullName = "\(String(format: "%02d", number))\(sep)\(item.proposedName)"  // e.g. "01 - Beethoven - Flute.pdf"
-            let nameWithoutPdf = fullName.hasSuffix(".pdf")
-                ? String(fullName.dropLast(4))
-                : fullName
-            finalCustomNames[item.id] = nameWithoutPdf
+            finalCustomNames[item.id] = fullName.hasSuffix(".pdf") ? String(fullName.dropLast(4)) : fullName
             finalNamesForSummary.append(fullName)
         }
 
@@ -1380,11 +1375,9 @@ struct SplitView: View {
             skippedPages: omittedPages,
             separator: "",
             stampJob: activeStampJob
-        ) { _, _, isError in
+        ) { title, message, isError in
             if isError {
-                showNSAlert(title: "Save Failed",
-                            message: "Could not write one or more files to \(folderURL.path).",
-                            isError: true)
+                showNSAlert(title: title, message: message, isError: true)
             } else {
                 sourceWasTrashed = trashSourceFileIfRequested()
                 pendingFolderURL = folderURL   // stored here so summary can offer "Show in Finder"
