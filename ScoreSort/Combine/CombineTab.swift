@@ -1181,87 +1181,15 @@ struct CombineView: View {
     @discardableResult
     private func applyPreset(parts: [PresetPart], stampId: UUID? = nil) -> (matched: Int, unmatched: Int, unmatchedPartNames: Set<String>) {
         applyPresetStamp(stampId)
-        // Sort longest-name-first so "Bass Clarinet" wins over "Clarinet"
-        let sortedParts = parts.sorted { $0.name.count > $1.name.count }
-        var newUnmatched: Set<UUID> = []
-        var matched = 0
-        var matchedPartNames: Set<String> = []
-
-        // ── Phase 1: direct match (with roman-numeral normalisation) ──────────
-        // Matches are gathered per *part* before any copies are set, because one preset entry
-        // can match several files — a single "Trumpet: 7" against both Trumpet 1 and Trumpet 2.
-        // Applying its full count to each would print two players' worth of paper for every one
-        // the preset asked for.
-        var filesForPart: [String: [UUID]] = [:]
-        var partsByName: [String: PresetPart] = [:]
-        for file in combineManager.files {
-            let filename = normalizeRomanNumerals(file.name.lowercased())
-            if let match = sortedParts.first(where: {
-                presetPartMatches(part: normalizeRomanNumerals($0.name.lowercased()), in: filename)
-            }) {
-                filesForPart[match.name, default: []].append(file.id)
-                partsByName[match.name] = match
-                matchedPartNames.insert(match.name)
-            } else {
-                newUnmatched.insert(file.id)
-            }
+        // The matching is shared with the command line (Logic/PresetMatching.swift).
+        let result = matchPreset(parts: parts, files: combineManager.files.map { ($0.id, $0.name) })
+        for (fileId, copies) in result.copies {
+            combineManager.updateCopies(for: fileId, copies: copies, undoManager: undoManager)
         }
-
-        var newSplit: Set<UUID> = []
-        for (name, ids) in filesForPart {
-            guard let part = partsByName[name] else { continue }
-            matched += ids.count
-            guard ids.count > 1 else {
-                combineManager.updateCopies(for: ids[0], copies: part.copies, undoManager: undoManager)
-                continue
-            }
-            // Spread the entry's copies over the files it matched. Files were gathered in list
-            // order, so the remainder goes to the lower-numbered parts.
-            let shares = splitPresetCopies(part.copies, across: ids.count)
-            for (offset, id) in ids.enumerated() {
-                combineManager.updateCopies(for: id, copies: shares[offset], undoManager: undoManager)
-                newSplit.insert(id)
-            }
-        }
-
-        // ── Phase 2: consolidation ────────────────────────────────────────────
-        // When ALL numbered siblings of a base name went unmatched AND exactly
-        // one file contains that base name, sum their copies and apply to that file.
-        // (Any more complex situation — 2 files vs 3 parts etc. — stays orange.)
-        let unmatchedParts = parts.filter { !matchedPartNames.contains($0.name) }
-
-        // Group unmatched parts by their (normalised) base name
-        var baseGroups: [String: [PresetPart]] = [:]
-        for part in unmatchedParts {
-            if let base = numberedBase(of: part.name) {
-                baseGroups[base, default: []].append(part)
-            }
-        }
-
-        for (base, group) in baseGroups {
-            // All preset parts with this base must be in the unmatched group
-            let allWithBase = parts.filter { numberedBase(of: $0.name) == base }
-            guard group.count == allWithBase.count else { continue }
-
-            // Find still-unmatched files that contain the base name
-            let candidates = newUnmatched.filter { id in
-                guard let file = combineManager.files.first(where: { $0.id == id }) else { return false }
-                return presetPartMatches(part: base, in: normalizeRomanNumerals(file.name.lowercased()))
-            }
-            guard candidates.count == 1, let fileId = candidates.first else { continue }
-
-            // Apply summed copies and mark everything resolved
-            let total = group.reduce(0) { $0 + $1.copies }
-            combineManager.updateCopies(for: fileId, copies: total, undoManager: undoManager)
-            newUnmatched.remove(fileId)
-            matched += 1
-            for part in group { matchedPartNames.insert(part.name) }
-        }
-
-        unmatchedFileIds = newUnmatched
-        splitCopyFileIds = newSplit
-        let unmatchedPartNames = Set(parts.map(\.name)).subtracting(matchedPartNames)
-        return (matched: matched, unmatched: newUnmatched.count, unmatchedPartNames: unmatchedPartNames)
+        unmatchedFileIds = result.unmatchedFileIds
+        splitCopyFileIds = result.splitFileIds
+        return (matched: result.matchedCount, unmatched: result.unmatchedFileIds.count,
+                unmatchedPartNames: result.unmatchedPartNames)
     }
 }
 

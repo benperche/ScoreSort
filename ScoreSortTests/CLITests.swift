@@ -383,3 +383,109 @@ struct CLIRenameTests {
         #expect(contents(dir) == ["01 - Flute 1.pdf", "02 - Trumpet 1.pdf"])
     }
 }
+
+@Suite("Preset matching (shared by the Combine tab and the command line)")
+struct PresetMatchingTests {
+
+    private func files(_ names: [String]) -> [(id: UUID, name: String)] { names.map { (UUID(), $0) } }
+
+    @Test("Each file takes the longest part name it contains")
+    func longestWins() {
+        let f = files(["Bass Clarinet.pdf", "Clarinet 1.pdf"])
+        let result = matchPreset(parts: [PresetPart(name: "Clarinet 1", copies: 6), PresetPart(name: "Bass Clarinet", copies: 1)],
+                                 files: f)
+        let copies = Dictionary(uniqueKeysWithValues: result.copies.map { ($0.fileId, $0.copies) })
+        #expect(copies[f[0].id] == 1)
+        #expect(copies[f[1].id] == 6)
+        #expect(result.unmatchedFileIds.isEmpty)
+    }
+
+    @Test("One entry matching several files has its copies shared, not repeated")
+    func sharedEntry() {
+        let f = files(["Trumpet 1.pdf", "Trumpet 2.pdf"])
+        let result = matchPreset(parts: [PresetPart(name: "Trumpet", copies: 7)], files: f)
+        #expect(result.copies.map(\.copies).reduce(0, +) == 7)
+        #expect(result.splitFileIds == Set(f.map(\.id)))
+    }
+
+    @Test("Numbered parts with one combined file are summed onto it")
+    func consolidation() {
+        let f = files(["Horns.pdf"])
+        let result = matchPreset(parts: [PresetPart(name: "Horn 1", copies: 2), PresetPart(name: "Horn 2", copies: 3)], files: f)
+        #expect(result.copies.first?.copies == 5)
+        #expect(result.unmatchedPartNames.isEmpty)
+    }
+
+    @Test("Unmatched files and parts are reported")
+    func unmatched() {
+        let f = files(["Kazoo.pdf", "Flute.pdf"])
+        let result = matchPreset(parts: [PresetPart(name: "Flute", copies: 4), PresetPart(name: "Oboe", copies: 2)], files: f)
+        #expect(result.unmatchedFileIds == [f[0].id])
+        #expect(result.unmatchedPartNames == ["Oboe"])
+        #expect(result.matchedCount == 1)
+    }
+}
+
+@Suite("Command: combine and stamp")
+@MainActor
+struct CLICombineTests {
+
+    private func parts(_ names: [String], pages: Int = 2) -> URL {
+        let dir = temporaryFolder("combine")
+        for name in names { writeDrawnPDF(pages: pages, to: dir.appendingPathComponent(name)) }
+        return dir
+    }
+
+    @Test("Combines a folder in name order, with copies, and a bookmark per copy")
+    func combine() throws {
+        let dir = parts(["01 - Flute.pdf", "02 - Trumpet.pdf"])
+        let out = dir.appendingPathComponent("out/All.pdf")
+        try FileManager.default.createDirectory(at: out.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let result = try ScoreSortCLI.runCombine(paths: [dir.path], out: out.path, preset: nil, copies: ["Trumpet=3"],
+                                                 options: CombineOutputOptions(), stamp: nil, stampScope: .everyPage,
+                                                 dryRun: false, overwrite: false)
+        #expect(result.exitCode == 0)
+        let doc = try #require(PDFDocument(url: out))
+        #expect(doc.pageCount == 8)
+        #expect(bookmarkSections(in: doc)?.count == 4)
+    }
+
+    @Test("A dry run writes nothing; an existing output needs --overwrite")
+    func safety() throws {
+        let dir = parts(["Flute.pdf"])
+        let out = dir.appendingPathComponent("All.pdf")
+        let dry = try ScoreSortCLI.runCombine(paths: [dir.path], out: out.path, preset: nil, copies: [],
+                                              options: CombineOutputOptions(), stamp: nil, stampScope: .everyPage,
+                                              dryRun: true, overwrite: false)
+        #expect(dry.json["readingPages"] as? Int == 2)
+        #expect(!FileManager.default.fileExists(atPath: out.path))
+        writePDF(pages: 1, to: out)
+        #expect(throws: CommandError.self) {
+            try ScoreSortCLI.runCombine(paths: [dir.appendingPathComponent("Flute.pdf").path], out: out.path, preset: nil,
+                                        copies: [], options: CombineOutputOptions(), stamp: nil, stampScope: .everyPage,
+                                        dryRun: false, overwrite: false)
+        }
+    }
+
+    @Test("--copies that matches several files asks for more of the name")
+    func ambiguousCopies() {
+        let dir = parts(["Flute 1.pdf", "Flute 2.pdf"])
+        #expect(throws: CommandError.self) {
+            try ScoreSortCLI.runCombine(paths: [dir.path], out: dir.appendingPathComponent("x.pdf").path, preset: nil,
+                                        copies: ["Flute=2"], options: CombineOutputOptions(), stamp: nil,
+                                        stampScope: .everyPage, dryRun: true, overwrite: false)
+        }
+    }
+
+    @Test("stamp never writes over the original, even with --overwrite")
+    func stampKeepsOriginal() throws {
+        let dir = parts(["Flute.pdf"])
+        do {
+            _ = try ScoreSortCLI.runStamp(files: [dir.appendingPathComponent("Flute.pdf")], stamp: "any",
+                                          scope: .everyPage, out: dir.path, dryRun: false, overwrite: true)
+            Issue.record("Expected an error")
+        } catch let error as CommandError {
+            #expect(error.message.contains("would replace it"))
+        }
+    }
+}

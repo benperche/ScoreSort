@@ -61,7 +61,10 @@ extension ScoreSortCLI {
                          + (rotation == 0 ? "" : ", rotated \(rotation)°"))
         }
 
-        let doublePages = isA3Landscape(doc) || looksLikeDoublePageScan(doc)
+        // Scans never carry bookmarks; a landscape PDF that has them is most likely a booklet
+        // ScoreSort's Combine tab made for printing, whose pages aren't in reading order.
+        let hasBookmarks = bookmarkSections(in: doc) != nil
+        let doublePages = !hasBookmarks && (isA3Landscape(doc) || looksLikeDoublePageScan(doc))
         let uniform = isUniformSheetScan(doc)
         var json: [String: Any] = [
             "ok": true,
@@ -100,7 +103,10 @@ extension ScoreSortCLI {
                 ? "Every page is the same landscape sheet (e.g. A3 with two pages side by side): run `split-scans --same-cut` to cut them all down the middle."
                 : "This looks like a scan of double pages: run `split-scans` first to cut them into single pages.")
         }
-        if bookmarkSections(in: doc) != nil {
+        if hasBookmarks {
+            if isUniformSheetScan(doc) {
+                hints.append("Its pages are landscape sheets with bookmarks — probably booklets imposed for printing, so splitting them won't give pages in reading order.")
+            }
             hints.append("It has bookmarks: `split --bookmarks` splits and names the parts from them.")
         } else {
             hints.append("To find the parts, look at the tops of the pages: `preview --top`.")
