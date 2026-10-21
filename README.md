@@ -83,6 +83,13 @@ Mark parts as your ensemble's — "Property of Example School Band" — the way 
 - **Or stamp as you go** from the Combine and Split tabs, on every page or just the first page of each part
 - **Burned into the page**, so it prints everywhere and can't be deleted out of the PDF
 
+### 🤖 Use it from an AI assistant
+
+- **Ask an AI to do the job** — "split this scan into parts, name them and number them in score order" — and it uses ScoreSort to do it, with the same results as the app
+- **Command line** for AI tools with a terminal (Claude Code, Codex and the like) and for scripts
+- **MCP server** for AI chat apps (e.g. the Claude desktop app)
+- See [Using ScoreSort with AI](#using-scoresort-with-ai)
+
 ## Screenshots
 
 ![Combine PDFs](screenshots/combiner.png)
@@ -357,6 +364,53 @@ A Combine preset can carry its ensemble's stamp, so applying the preset arms the
 | `↑` / `↓` | Previous / next file |
 | `⌘B` / `⌘I` | Bold / italic the selected text |
 | `⌘N` / `⌘D` | New / duplicate stamp |
+
+### Using ScoreSort with AI
+
+ScoreSort's own functions can be run by an AI assistant (or a script) without opening the window. The AI does what it's good at — looking at the pages and reading the part names — and ScoreSort does the PDF work, exactly as the app would.
+
+**With an AI that has a terminal** (Claude Code, Codex, …), the app is also a command-line tool:
+
+```bash
+/Applications/ScoreSort.app/Contents/MacOS/ScoreSort help
+```
+
+To type just `scoresort`, put a two-line script on your PATH (a script rather than a symlink, so the app's frameworks still load):
+
+```bash
+printf '#!/bin/sh\nexec /Applications/ScoreSort.app/Contents/MacOS/ScoreSort "$@"\n' > /usr/local/bin/scoresort && chmod +x /usr/local/bin/scoresort
+```
+
+(If `/usr/local/bin` doesn't exist or isn't writable, use any folder on your PATH.)
+
+Then ask, for example: *"Use scoresort to split ~/Scans/Holst.pdf into parts, named and numbered in band score order, in ~/Scans/Holst Parts."* The AI should start with `scoresort help ai`, a short guide to the recipes.
+
+| Command | Does |
+|---|---|
+| `info` | Pages, sizes, bookmarks, and whether it's a scan of double pages |
+| `preview` | Page images — `--top --sheet` gives every page's top in one labelled image, for reading part names |
+| `split-scans` | Split Double Pages: cut two-page scans into single pages |
+| `split` | Split into named parts (`--part "1-2=Flute 1"` …), with `--score-order`, `--skip`, `--stamp` |
+| `rename` | Score Order Sorter on a folder (plans until `--apply`) |
+| `combine` | Combine parts with copies (`--preset`, `--copies`), booklets and stamp |
+| `presets`, `stamps`, `stamp` | Your saved presets and stamps; stamp copies of files |
+
+Every command takes `--json`. Nothing is overwritten without `--overwrite`, and everything that writes takes `--dry-run`.
+
+**With an AI chat app** (Claude's desktop app, or another app that supports MCP), add ScoreSort as an MCP server. For Claude, in *Settings ▸ Developer ▸ Edit Config* (`claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "scoresort": {
+      "command": "/Applications/ScoreSort.app/Contents/MacOS/ScoreSort",
+      "args": ["mcp"]
+    }
+  }
+}
+```
+
+Restart the app, and the ScoreSort tools appear (`scoresort_split`, `scoresort_preview`, …). Page previews come back as images, so the chat can see which part each page is. Give it full paths to your files.
 
 ---
 

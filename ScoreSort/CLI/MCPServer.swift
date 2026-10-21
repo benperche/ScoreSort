@@ -339,4 +339,74 @@ enum ScoreSortMCPServer {
 }
 
 /// The guide `help ai` prints, and `scoresort_guide` returns.
-let aiGuideText = "Run `ScoreSort help` for the commands."
+let aiGuideText = """
+ScoreSort for AI assistants
+===========================
+
+ScoreSort prepares music parts as PDFs: splitting a PDF into one file per part, cutting
+two-page scans into single pages, numbering parts in score order, combining parts with
+copies for each player, and stamping. These are the app's own functions, so the results
+are the same as using its window.
+
+Over MCP, the commands below are the scoresort_* tools (scoresort_split, …) with the same
+options as JSON fields (dryRun, scoreOrder, parts: [{pages, name}], …).
+
+Ground rules
+  • Use absolute paths.
+  • ScoreSort can't read text on pages. You read part names yourself, from `preview` images.
+  • Every command that writes has --dry-run. Nothing is overwritten without --overwrite.
+    `rename` only plans until --apply. Dry-run first, read the warnings, then run it.
+  • Add --json for structured output.
+
+1. Split a PDF of several parts into one file per part
+   a. ScoreSort info <pdf>
+        Page count, bookmarks, and whether it's a scan of double pages.
+        • Bookmarks with sensible titles? `split --bookmarks` may be all you need.
+        • A double-page scan? Do recipe 2 first, then carry on with its output.
+   b. ScoreSort preview <pdf> --top --sheet --out <temp folder>     (then look at the images)
+        The tops of all the pages side by side, labelled p1, p2, …. A new part starts where
+        the instrument name at the top-left changes — usually a page with the piece's title
+        on it. Black or empty pages are scanner background or blank pages: skip them.
+        Unsure about a page? Preview it whole: --pages 7 (without --top or --sheet).
+   c. Decide each part's pages and name. Name parts by instrument, the way players do:
+        "Flute 1", "Clarinet 2", "Alto Saxophone 1", "Trumpet 3", "Horn in F 2", "Trombone 1",
+        "Percussion", "Piano", "Score". Number parts that share an instrument (1, 2, 3).
+        A score is "Score" or "Full Score". The base is usually "Composer - Piece".
+   d. ScoreSort split <pdf> --out <folder> --base "Composer - Piece" \
+          --part "1-4=Score" --part "5-6=Flute 1" … [--skip 9,14] [--score-order band] --dry-run
+        Check the warnings: pages in no part, pages in two parts, names the score order
+        doesn't recognise (they'd be numbered last — rename the part, e.g. "Bari Sax" →
+        "Baritone Saxophone"). --score-order is band, jazz or orchestra.
+   e. Run the same command without --dry-run.
+
+2. Scans with two pages side by side (A3 sheets, or a book scanner)
+   ScoreSort split-scans <scan.pdf> --out <scan pages.pdf> --json
+     Each two-page scan is cut at the gap between its pages; single pages stay whole;
+     identical sheets are all cut down the middle. "suggestedSkip" lists the black or empty
+     pages: pass it to `split --skip`, or rerun with --drop-blanks to leave them out.
+     Preview the result to check the cuts, then do recipe 1 on it.
+
+3. Number a folder of parts in score order
+   ScoreSort rename <folder> --ensemble band|jazz|orchestra
+     Shows the plan: "Flute 1.pdf → 01 - Flute 1.pdf", the score as 00. Files it doesn't
+     recognise are left alone: rename them to include an instrument, or place them with
+     --number "FILE=NN". Then run again with --apply.
+
+4. Combine parts to print
+   ScoreSort presets                                         (ensembles: parts and copies)
+   ScoreSort combine <folder> --preset "NAME" --out <file.pdf> --dry-run
+     Each part repeated for its players, with a bookmark per copy. Check the warnings:
+     files not in the preset get 1 copy; correct them with --copies "Flute 1=3".
+     --booklet makes fold-and-staple booklets. Then run without --dry-run.
+
+5. Stamp a school or ensemble name onto parts
+   ScoreSort stamps
+   ScoreSort stamp <files…> --stamp "NAME" --out <folder>      (stamped copies; originals untouched)
+   (`split` and `combine` also take --stamp.)
+
+Ask the person when
+  • a page's instrument can't be read, or two parts look the same;
+  • you don't know the ensemble (band, jazz or orchestra) for score order;
+  • copies or a preset are uncertain;
+  • anything would be overwritten.
+"""
