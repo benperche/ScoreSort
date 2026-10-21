@@ -30,7 +30,7 @@ enum ScoreSortCLI {
 
     /// Every command, in the order `help` lists them.
     static var commands: [CommandSpec] {
-        [infoCommand, previewCommand, splitScansCommand, splitCommand]
+        [infoCommand, previewCommand, splitScansCommand, splitCommand, renameCommand]
     }
 
     static func command(named name: String) -> CommandSpec? {

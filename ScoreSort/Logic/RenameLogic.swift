@@ -165,3 +165,204 @@ func scoreOrderNumbers(forOrderedItems items: [PrefixItem]) -> [Int: Int] {
     }
     return result
 }
+
+// MARK: - Score Order Sorter (the Rename tab), shared with the command line
+
+/// The renamable files in `folder`, sorted by name: its immediate children, or everything
+/// inside it with `recursive`.
+func renamableFiles(in folder: URL, recursive: Bool) -> [URL] {
+    let fileManager = FileManager.default
+    var files: [URL] = []
+    if recursive {
+        guard let enumerator = fileManager.enumerator(at: folder, includingPropertiesForKeys: [.isRegularFileKey]) else {
+            return []
+        }
+        for case let fileURL as URL in enumerator where isRenamableFile(fileURL) { files.append(fileURL) }
+    } else {
+        let contents = (try? fileManager.contentsOfDirectory(at: folder, includingPropertiesForKeys: [.isRegularFileKey],
+                                                             options: [.skipsHiddenFiles])) ?? []
+        files = contents.filter(isRenamableFile)
+    }
+    return files.sorted { $0.lastPathComponent < $1.lastPathComponent }
+}
+
+/// The instrument a file name names, as (its position in `order`, the instrument): the
+/// *leftmost* match, longest names tried first so "bass clarinet" beats "clarinet".
+func detectScoreOrderInstrument(in filename: String, order: [String]) -> (Int, String)? {
+    let lowerFilename = filename.lowercased()
+    let sortedInstruments = order.enumerated().map { ($0.offset, $0.element) }.sorted { $0.1.count > $1.1.count }
+    var matches: [(index: Int, instrument: String, position: Int)] = []
+    for (originalIndex, instrument) in sortedInstruments {
+        if let range = lowerFilename.range(of: instrument.lowercased()) {
+            let position = lowerFilename.distance(from: lowerFilename.startIndex, to: range.lowerBound)
+            matches.append((originalIndex, instrument, position))
+        }
+    }
+    // Leftmost wins: "Baritone BC Bassoon" is a baritone, not a bassoon.
+    guard let first = matches.min(by: { $0.position < $1.position }) else { return nil }
+    return (first.index, first.instrument)
+}
+
+/// In rescan mode, an existing `NN - ` / `NN_` / `NN ` prefix split off: the clean name and
+/// the old two-digit prefix. Otherwise the name unchanged and no prefix.
+func stripScoreOrderPrefix(from filename: String, rescan: Bool) -> (clean: String, oldPrefix: String?) {
+    if rescan, let match = filename.range(of: "^(\\d{2})", options: .regularExpression) {
+        let oldPrefix = String(filename[match])
+        let clean = String(filename[match.upperBound...])
+            .replacingOccurrences(of: "^[-_\\s]+", with: "", options: .regularExpression)
+        return (clean, oldPrefix)
+    }
+    return (filename, nil)
+}
+
+/// The Score Order Sorter's plan for `files`: the score → 00, recognised parts 01, 02… in
+/// `order`, manual numbers kept (and skipped over by the auto numbers), unrecognised files
+/// left alone and listed first, excluded files last. A rename whose target already exists
+/// is skipped ("Target exists"). With `rescan`, existing prefixes are re-done and only
+/// wrong ones change. Nothing is touched on disk.
+func planScoreOrderRename(files: [URL], order: [String], separator: String, rescan: Bool = false,
+                          manualOverrides: [String: Int] = [:], excluded: Set<String> = []) -> [RenameOperation] {
+    var operations: [RenameOperation] = []
+    var detectedFiles: [(order: Int, url: URL, originalName: String)] = []
+    var scoreFiles: [(url: URL, originalName: String)] = []
+    var undetectedFiles: [(url: URL, originalName: String)] = []
+    var manuallyAssigned: [(number: Int, url: URL, originalName: String)] = []
+
+    for fileURL in files {
+        let filename = fileURL.lastPathComponent
+
+        if excluded.contains(filename) {
+            operations.append(RenameOperation(originalURL: fileURL, originalName: filename, newName: "", type: .excluded))
+            continue
+        }
+
+        let filenameWithoutPrefix: String
+        if rescan, let match = filename.range(of: "^\\d{2}[-_\\s]", options: .regularExpression) {
+            filenameWithoutPrefix = String(filename[match.upperBound...])
+        } else {
+            filenameWithoutPrefix = filename
+        }
+
+        // Already numbered: left alone outside rescan mode.
+        if !rescan, filename.range(of: "^\\d{2}[-_\\s]", options: .regularExpression) != nil {
+            operations.append(RenameOperation(originalURL: fileURL, originalName: filename, newName: "", type: .alreadyPrefixed))
+            continue
+        }
+
+        if let manualNumber = manualOverrides[filename] {
+            manuallyAssigned.append((manualNumber, fileURL, filename))
+            continue
+        }
+
+        if let (rank, instrument) = detectScoreOrderInstrument(in: filenameWithoutPrefix, order: order) {
+            if instrument == "score" {
+                scoreFiles.append((fileURL, filename))
+            } else {
+                detectedFiles.append((rank, fileURL, filename))
+            }
+        } else {
+            undetectedFiles.append((fileURL, filename))
+        }
+    }
+
+    detectedFiles.sort { $0.order < $1.order }
+    let fileManager = FileManager.default
+
+    /// One numbered rename, or a skip when it's already right or the target is taken.
+    func numbered(_ url: URL, _ originalName: String, prefix: String) -> RenameOperation {
+        let (cleanName, oldPrefix) = stripScoreOrderPrefix(from: originalName, rescan: rescan)
+        let newFilename = "\(prefix)\(separator)\(cleanName)"
+        let newURL = url.deletingLastPathComponent().appendingPathComponent(newFilename)
+        if oldPrefix == prefix {
+            return RenameOperation(originalURL: url, originalName: originalName, newName: "", type: .skip)
+        } else if fileManager.fileExists(atPath: newURL.path) && newURL != url {
+            return RenameOperation(originalURL: url, originalName: originalName, newName: newFilename,
+                                   type: .skip, statusOverride: "Target exists")
+        } else {
+            return RenameOperation(originalURL: url, originalName: originalName, newName: newFilename, newURL: newURL,
+                                   type: oldPrefix != nil ? .correct : .rename, oldPrefix: oldPrefix)
+        }
+    }
+
+    // The score (every score file) gets 00.
+    for (url, originalName) in scoreFiles {
+        operations.append(numbered(url, originalName, prefix: "00"))
+    }
+
+    // Recognised parts from 01, skipping numbers reserved by manual overrides.
+    let reservedNumbers = Set(manualOverrides.values)
+    var nextNumber = 1
+    for (_, url, originalName) in detectedFiles {
+        while reservedNumbers.contains(nextNumber) && nextNumber < 100 { nextNumber += 1 }
+        let prefix = String(format: "%02d", nextNumber)
+        nextNumber += 1
+        operations.append(numbered(url, originalName, prefix: prefix))
+    }
+
+    // Manual numbers, as given.
+    manuallyAssigned.sort { $0.number < $1.number }
+    for (number, url, originalName) in manuallyAssigned {
+        let prefix = String(format: "%02d", number)
+        let (cleanName, _) = stripScoreOrderPrefix(from: originalName, rescan: rescan)
+        let newFilename = "\(prefix)\(separator)\(cleanName)"
+        let newURL = url.deletingLastPathComponent().appendingPathComponent(newFilename)
+        if fileManager.fileExists(atPath: newURL.path) && newURL != url {
+            operations.append(RenameOperation(originalURL: url, originalName: originalName, newName: newFilename,
+                                              type: .skip, statusOverride: "Target exists"))
+        } else {
+            operations.append(RenameOperation(originalURL: url, originalName: originalName, newName: newFilename,
+                                              newURL: newURL, type: .manual))
+        }
+    }
+
+    for (url, originalName) in undetectedFiles {
+        operations.append(RenameOperation(originalURL: url, originalName: originalName, newName: "", type: .undetected))
+    }
+
+    // Excluded last, unrecognised first (so they're seen), then by new name.
+    operations.sort { op1, op2 in
+        let e1 = op1.type == .excluded, e2 = op2.type == .excluded
+        if e1 && !e2 { return false }
+        if !e1 && e2 { return true }
+        let u1 = op1.type == .undetected, u2 = op2.type == .undetected
+        if u1 && !u2 { return true }
+        if !u1 && u2 { return false }
+        if op1.newName.isEmpty && op2.newName.isEmpty { return op1.originalName < op2.originalName }
+        if op1.newName.isEmpty { return false }
+        if op2.newName.isEmpty { return true }
+        return op1.newName < op2.newName
+    }
+    return operations
+}
+
+/// What renaming did.
+struct RenameReport {
+    var renamed: [(from: URL, to: URL)] = []
+    var errors: [String] = []
+    var sawPermissionError = false
+    /// Nothing was tried: the folder is read-only (a cloud-sync placeholder, locked, or a
+    /// read-only volume), where every move would fail.
+    var blockedReadOnly = false
+}
+
+/// Carries out the planned renames that move a file (`.rename`, `.correct`, `.manual`).
+func performRenames(_ operations: [RenameOperation]) -> RenameReport {
+    var report = RenameReport()
+    let toRename = operations.filter { $0.type == .rename || $0.type == .correct || $0.type == .manual }
+    guard !toRename.isEmpty else { return report }
+    if !nonWritableParentDirectories(of: toRename.compactMap { $0.newURL }).isEmpty {
+        report.blockedReadOnly = true
+        return report
+    }
+    for operation in toRename {
+        guard let newURL = operation.newURL else { continue }
+        do {
+            try FileManager.default.moveItem(at: operation.originalURL, to: newURL)
+            report.renamed.append((operation.originalURL, newURL))
+        } catch {
+            if isFilePermissionError(error) { report.sawPermissionError = true }
+            report.errors.append("\(operation.originalName): \(error.localizedDescription)")
+        }
+    }
+    return report
+}

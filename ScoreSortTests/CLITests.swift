@@ -315,3 +315,71 @@ struct CLISplitScansTests {
         }
     }
 }
+
+@Suite("Command: rename")
+@MainActor
+struct CLIRenameTests {
+
+    private func folder(with names: [String]) -> URL {
+        let dir = temporaryFolder("rename")
+        for name in names { writePDF(pages: 1, to: dir.appendingPathComponent(name)) }
+        return dir
+    }
+
+    private func contents(_ dir: URL) -> [String] {
+        ((try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []).filter { $0.hasSuffix(".pdf") }.sorted()
+    }
+
+    @Test("The command line plans a folder exactly as the Rename tab does")
+    func sameAsRenameTab() {
+        InstrumentOrders.setup()
+        let dir = folder(with: ["Flute 1.pdf", "Score.pdf", "Trumpet 2.pdf", "Clarinet 1.pdf", "Kazoo.pdf", "01 - Oboe.pdf"])
+        let manager = RenamerManager()   // (its separator is the user's setting — read, never set, here)
+        manager.loadFolder(url: dir)
+        let planned = planScoreOrderRename(files: renamableFiles(in: dir, recursive: false),
+                                           order: manager.customInstrumentOrder, separator: manager.prefixSeparator)
+        #expect(planned.map(\.originalName) == manager.operations.map(\.originalName))
+        #expect(planned.map(\.newName) == manager.operations.map(\.newName))
+        #expect(planned.map(\.type) == manager.operations.map(\.type))
+    }
+
+    @Test("Without --apply nothing is renamed")
+    func planOnly() throws {
+        let dir = folder(with: ["Flute 1.pdf", "Score.pdf"])
+        let result = try ScoreSortCLI.runRename(paths: [dir.path], ensemble: .band, separator: " - ", apply: false)
+        #expect(result.json["applied"] as? Bool == false)
+        #expect(contents(dir) == ["Flute 1.pdf", "Score.pdf"])
+    }
+
+    @Test("--apply renames into score order; --number places an unrecognised part")
+    func apply() throws {
+        let dir = folder(with: ["Flute 1.pdf", "Score.pdf", "Trumpet 2.pdf", "Kazoo.pdf"])
+        let result = try ScoreSortCLI.runRename(paths: [dir.path], ensemble: .band, overrides: ["Kazoo.pdf": 9],
+                                                separator: " - ", apply: true)
+        #expect(result.exitCode == 0)
+        #expect(contents(dir) == ["00 - Score.pdf", "01 - Flute 1.pdf", "02 - Trumpet 2.pdf", "09 - Kazoo.pdf"])
+    }
+
+    @Test("Unrecognised files are reported and left alone")
+    func unrecognised() throws {
+        let dir = folder(with: ["Flute 1.pdf", "Kazoo.pdf"])
+        let result = try ScoreSortCLI.runRename(paths: [dir.path], ensemble: .band, separator: " - ", apply: true)
+        #expect(result.json["unrecognised"] as? [String] == ["Kazoo.pdf"])
+        #expect(contents(dir) == ["01 - Flute 1.pdf", "Kazoo.pdf"])
+    }
+
+    @Test("--number or --exclude for a file that isn't there is an error")
+    func unknownFile() {
+        let dir = folder(with: ["Flute 1.pdf"])
+        #expect(throws: CommandError.self) {
+            try ScoreSortCLI.runRename(paths: [dir.path], ensemble: .band, overrides: ["Flute.pdf": 3], apply: false)
+        }
+    }
+
+    @Test("--rescan re-numbers files that already have numbers")
+    func rescan() throws {
+        let dir = folder(with: ["02 - Flute 1.pdf", "01 - Trumpet 1.pdf"])
+        _ = try ScoreSortCLI.runRename(paths: [dir.path], ensemble: .band, rescan: true, separator: " - ", apply: true)
+        #expect(contents(dir) == ["01 - Flute 1.pdf", "02 - Trumpet 1.pdf"])
+    }
+}

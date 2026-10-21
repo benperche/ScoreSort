@@ -1,0 +1,152 @@
+//
+//  RenameCommands.swift
+//  ScoreSort
+//
+//  `rename` — the Rename tab's Score Order Sorter: number a folder of parts in score
+//  order ("00 - Score.pdf", "01 - Flute 1.pdf", …). Plans by default; `--apply` renames.
+//  Same planner and same file moves as the app (Logic/RenameLogic.swift).
+//
+
+import Foundation
+
+extension ScoreSortCLI {
+
+    static var renameCommand: CommandSpec {
+        CommandSpec(
+            name: "rename",
+            summary: "Number a folder of parts in score order (00 - Score, 01 - Flute…); plans unless --apply",
+            help: """
+            Usage: ScoreSort rename <folder | files…> --ensemble band|jazz|orchestra
+                                    [--number "FILE=NN"]… [--exclude FILE]… [--recursive]
+                                    [--rescan] [--separator TEXT] [--apply] [--json]
+
+            The Rename tab's Score Order Sorter. Each file's name is checked for an
+            instrument from the ensemble's order (your custom order from ScoreSort's
+            settings); the score becomes 00, then 01, 02… in score order, e.g.
+            "Flute 1.pdf" → "01 - Flute 1.pdf". The rest of each name is kept.
+
+            Without --apply nothing is renamed: you get the plan. Check it, then run the
+            same command with --apply.
+
+              --ensemble    band, jazz or orchestra.
+              --number      Give a file a number yourself, e.g. --number "Bass Guitar.pdf=14"
+                            (for parts with no recognisable instrument, or a different
+                            place). Other files are numbered around it.
+              --exclude     Leave a file alone.
+              --recursive   Include files in subfolders.
+              --rescan      Re-number files that already have a number prefix (for
+                            when parts were added or the order changed). Without it,
+                            already-numbered files are left alone.
+              --separator   Between the number and the name (default: the app's setting, " - ").
+              --apply       Rename the files.
+
+            Files whose names contain no instrument are listed as "not recognised" and left
+            alone — rename them so they contain one (e.g. "Trumpet 1"), or use --number.
+
+            Example:
+              ScoreSort rename "Holst Parts" --ensemble band
+              ScoreSort rename "Holst Parts" --ensemble band --number "Euph TC.pdf=12" --apply
+            """,
+            valueOptions: ["ensemble", "number", "exclude", "separator"],
+            flagOptions: ["recursive", "rescan", "apply"],
+            run: { args in
+                guard !args.positionals.isEmpty else { throw CommandError("Give the folder of parts (or the files) to rename.") }
+                var overrides: [String: Int] = [:]
+                for spec in args.all("number") {
+                    guard let eq = spec.lastIndex(of: "="), let n = Int(spec[spec.index(after: eq)...]),
+                          (0...99).contains(n) else {
+                        throw CommandError("--number needs FILE=NN with NN from 0 to 99, e.g. \"Bass Guitar.pdf=14\" (got “\(spec)”).")
+                    }
+                    overrides[String(spec[..<eq])] = n
+                }
+                return try runRename(paths: args.positionals,
+                                     ensemble: parseEnsemble(args.required("ensemble")),
+                                     overrides: overrides,
+                                     excluded: Set(args.all("exclude")),
+                                     recursive: args.has("recursive"),
+                                     rescan: args.has("rescan"),
+                                     separator: args.value("separator"),
+                                     apply: args.has("apply"))
+            })
+    }
+
+    static func runRename(paths: [String], ensemble: EnsembleType, overrides: [String: Int] = [:],
+                          excluded: Set<String> = [], recursive: Bool = false, rescan: Bool = false,
+                          separator: String? = nil, apply: Bool) throws -> CommandResult {
+        // The files: one folder, or files given one by one.
+        let urls = paths.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath).standardizedFileURL }
+        var files: [URL]
+        if urls.count == 1, urlIsDirectory(urls[0]) {
+            files = renamableFiles(in: urls[0], recursive: recursive)
+        } else {
+            for url in urls where !FileManager.default.fileExists(atPath: url.path) {
+                throw CommandError("No file at \(url.path).")
+            }
+            files = urls.filter(isRenamableFile).sorted { $0.lastPathComponent < $1.lastPathComponent }
+        }
+        guard !files.isEmpty else { throw CommandError("No PDFs or images to rename there.") }
+
+        let names = Set(files.map(\.lastPathComponent))
+        for name in Set(overrides.keys).union(excluded) where !names.contains(name) {
+            throw CommandError("“\(name)” isn't one of the files (use the file name exactly, with .pdf).")
+        }
+
+        InstrumentOrders.setup()
+        let operations = planScoreOrderRename(
+            files: files, order: InstrumentOrders.getOrder(for: ensemble),
+            separator: separator ?? UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - ",
+            rescan: rescan, manualOverrides: overrides, excluded: excluded)
+
+        var report = RenameReport()
+        if apply { report = performRenames(operations) }
+        if report.blockedReadOnly {
+            throw CommandError("The files are in a read-only place (a cloud-sync folder, locked, or a read-only drive), so they can't be renamed there. " + readOnlyLocationMessage(folderName: nil))
+        }
+        let renamedFrom = Set(report.renamed.map(\.from.standardizedFileURL))
+
+        func status(_ op: RenameOperation) -> String {
+            switch op.type {
+            case .rename, .manual: return "rename"
+            case .correct: return "correct"
+            case .skip: return op.statusOverride == "Target exists" ? "target exists" : "already correct"
+            case .alreadyPrefixed: return "already numbered"
+            case .undetected: return "not recognised"
+            case .excluded: return "excluded"
+            }
+        }
+        let moves = operations.filter { $0.type == .rename || $0.type == .correct || $0.type == .manual }
+        let entries: [[String: Any]] = operations.map { op in
+            var entry: [String: Any] = ["file": op.originalName, "status": status(op)]
+            if !op.newName.isEmpty { entry["newName"] = op.newName }
+            if apply && op.newURL != nil { entry["renamed"] = renamedFrom.contains(op.originalURL.standardizedFileURL) }
+            return entry
+        }
+        let unrecognised = operations.filter { $0.type == .undetected }.map(\.originalName)
+
+        var lines: [String] = []
+        for op in operations {
+            switch op.type {
+            case .rename, .correct, .manual:
+                lines.append("  \(op.originalName) → \(op.newName)" + (op.type == .manual ? "  (your number)" : ""))
+            case .undetected:
+                lines.append("  \(op.originalName): not recognised — left alone")
+            default:
+                lines.append("  \(op.originalName): \(status(op))" + (op.newName.isEmpty ? "" : " (\(op.newName))"))
+            }
+        }
+        var text = apply
+            ? "Renamed \(report.renamed.count) of \(moves.count) \(moves.count == 1 ? "file" : "files") (\(ensemble.rawValue.lowercased()) order):"
+            : "Plan (\(ensemble.rawValue.lowercased()) order) — nothing renamed yet; add --apply to rename:"
+        text += "\n" + lines.joined(separator: "\n")
+        if !unrecognised.isEmpty {
+            text += "\nNot recognised: rename these to include an instrument, or give each a number with --number \"FILE=NN\"."
+        }
+        if !report.errors.isEmpty { text += "\n" + report.errors.map { "Failed: " + $0 }.joined(separator: "\n") }
+
+        let ok = report.errors.isEmpty
+        return CommandResult(text: text,
+                             json: ["ok": ok, "applied": apply, "ensemble": ensemble.rawValue.lowercased(),
+                                    "files": entries, "unrecognised": unrecognised, "errors": report.errors],
+                             exitCode: ok ? 0 : 1)
+    }
+}
