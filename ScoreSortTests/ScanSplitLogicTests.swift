@@ -241,6 +241,60 @@ struct ScanSplitLayoutTests {
         #expect(model.scans[0].skip == [false, true])
     }
 
+    /// `count` identical A3-landscape pages.
+    private func uniformA3Document(_ count: Int) -> PDFDocument {
+        let doc = PDFDocument()
+        for i in 0..<count {
+            let p = PDFPage()
+            p.setBounds(CGRect(x: 0, y: 0, width: 1191, height: 842), for: .mediaBox)
+            doc.insert(p, at: i)
+        }
+        return doc
+    }
+
+    @Test("Uniform A3 sheets start with the same cut, down the middle, on every page")
+    @MainActor
+    func uniformSheetsShareCut() {
+        let model = ScanSplitModel(document: uniformA3Document(3))
+        #expect(model.sameCutForAll)
+        #expect(model.layouts == Array(repeating: .split(at: 0.5), count: 3))
+    }
+
+    @Test("A book scanner's mixed scans start with a cut per scan")
+    @MainActor
+    func mixedScansDontShareCut() {
+        let doc = uniformA3Document(2)
+        doc.page(at: 1)?.setBounds(CGRect(x: 0, y: 0, width: 600, height: 842), for: .mediaBox)
+        #expect(!ScanSplitModel(document: doc).sameCutForAll)
+    }
+
+    @Test("With the same cut on every page, moving one moves them all")
+    @MainActor
+    func sharedCutMovesAll() {
+        let model = ScanSplitModel(document: uniformA3Document(3))
+        for i in 0..<3 { model.scans[i].gray = drawnScan(music: [0.04...0.46, 0.54...0.96]) }
+        model.scans[2].gray = drawnScan(music: [0.04...0.46])   // right page empty
+        model.moveCut(to: 0.52, scan: 1, final: true)
+        #expect(model.sharedCut == 0.52)
+        #expect(model.layouts == Array(repeating: .split(at: 0.52), count: 3))
+        #expect(model.scans[2].skip == [false, true])
+        // One/Two Pages is off while they're linked.
+        model.setTwoPages(false, scan: 0)
+        #expect(model.scans[0].layout == .split(at: 0.52))
+    }
+
+    @Test("Turning the same cut off goes back to each scan's own suggestion")
+    @MainActor
+    func sharedCutOff() {
+        let model = ScanSplitModel(document: uniformA3Document(2))
+        model.scans[0].suggested = .split(at: 0.47)
+        model.scans[1].suggested = .single
+        model.setSameCutForAll(false)
+        #expect(model.layouts == [.split(at: 0.47), .single])
+        model.setSameCutForAll(true)
+        #expect(model.layouts == [.split(at: 0.5), .split(at: 0.5)])
+    }
+
     @Test("A scan detected as one page splits down the middle when switched")
     @MainActor
     func switchSingleToTwo() {
@@ -407,6 +461,14 @@ struct ScanSplitRenderingTests {
     func notOfferedForPortrait() {
         #expect(!looksLikeDoublePageScan(document(sizes: [(595, 842), (595, 842), (595, 842)])))
         #expect(!looksLikeDoublePageScan(document(sizes: [(876, 1216), (842, 1240), (865, 1223)])))
+    }
+
+    @Test("Identical landscape sheets are a uniform-sheet scan")
+    func uniformSheets() {
+        #expect(isUniformSheetScan(document(sizes: [(1191, 842), (1191, 842), (1190, 843)])))
+        #expect(!isUniformSheetScan(document(sizes: [(1191, 842), (1300, 860)])))      // sizes vary
+        #expect(!isUniformSheetScan(document(sizes: [(595, 842), (595, 842)])))         // portrait
+        #expect(!isUniformSheetScan(PDFDocument()))
     }
 
     @Test("Not offered for a document of identical landscape pages")

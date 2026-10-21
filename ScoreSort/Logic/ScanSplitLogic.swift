@@ -356,6 +356,26 @@ func looksLikeDoublePageScan(_ doc: PDFDocument) -> Bool {
     return sizes.count > 1 && wide * 4 >= doc.pageCount
 }
 
+/// True when every page is the same landscape sheet — a flatbed scan of A3 (or any
+/// uniform two-up) sheets, where one cut in the same place on every page is what's
+/// wanted, rather than hunting for each scan's gutter. Sizes may differ by a point or two.
+func isUniformSheetScan(_ doc: PDFDocument) -> Bool {
+    guard doc.pageCount > 0 else { return false }
+    var first: CGSize? = nil
+    for i in 0..<doc.pageCount {
+        guard let page = doc.page(at: i) else { return false }
+        let b = page.bounds(for: .cropBox)
+        let size = page.rotation % 180 == 0 ? b.size : CGSize(width: b.height, height: b.width)
+        guard size.height > 0, size.width / size.height >= 1.2 else { return false }
+        if let first {
+            if abs(size.width - first.width) > 2 || abs(size.height - first.height) > 2 { return false }
+        } else {
+            first = size
+        }
+    }
+    return true
+}
+
 // MARK: - Splitting
 
 /// The page index each piece will have in the split document, scan by scan, with each

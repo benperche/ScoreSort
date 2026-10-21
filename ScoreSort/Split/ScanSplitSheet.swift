@@ -58,6 +58,10 @@ final class ScanSplitModel: ObservableObject {
     @Published var scans: [Scan]
     @Published private(set) var analysedCount = 0
     @Published var leftFirst = true
+    /// Every scan cut in two at `sharedCut`; dragging any cut moves them all. On by default
+    /// for uniform sheets (a flatbed A3 scan), where each page should be split the same way.
+    @Published private(set) var sameCutForAll: Bool
+    @Published private(set) var sharedCut: Double = 0.5
 
     private let document: PDFDocument
     private let cancelled = CancelFlag()
@@ -74,6 +78,13 @@ final class ScanSplitModel: ObservableObject {
                 if size.height > 0 { aspect = size.width / size.height }
             }
             return Scan(id: i, aspect: aspect)
+        }
+        sameCutForAll = isUniformSheetScan(document)
+        if sameCutForAll {
+            for i in scans.indices {
+                scans[i].layout = .split(at: sharedCut)
+                scans[i].skip = [false, false]
+            }
         }
     }
 
@@ -162,8 +173,14 @@ final class ScanSplitModel: ObservableObject {
             scans[index].image = result.image
             scans[index].gray = result.gray
             scans[index].suggested = result.analysis.layout
-            scans[index].layout = result.analysis.layout
-            scans[index].skip = result.blanks.map { $0 != nil }
+            if sameCutForAll {
+                // Keep the shared cut; only the blank check comes from the analysis.
+                scans[index].layout = .split(at: sharedCut)
+                refreshSkips(scan: index)
+            } else {
+                scans[index].layout = result.analysis.layout
+                scans[index].skip = result.blanks.map { $0 != nil }
+            }
         }
         // A scan that couldn't be rendered stays whole and unskipped.
         scans[index].analysed = true
@@ -172,9 +189,22 @@ final class ScanSplitModel: ObservableObject {
 
     // MARK: Editing
 
+    /// Switches between one cut shared by every scan and each scan's own suggestion.
+    /// Skips are re-suggested either way, since every piece may have changed.
+    func setSameCutForAll(_ on: Bool) {
+        guard on != sameCutForAll else { return }
+        sameCutForAll = on
+        for i in scans.indices {
+            scans[i].layout = on ? .split(at: sharedCut) : scans[i].suggested
+            scans[i].skipEdited = false
+            refreshSkips(scan: i)
+        }
+    }
+
     /// Keep a scan whole, or cut it in two (where detection suggested, else down the middle).
+    /// Not available while every scan shares one cut.
     func setTwoPages(_ two: Bool, scan id: Int) {
-        guard scans.indices.contains(id) else { return }
+        guard scans.indices.contains(id), !sameCutForAll else { return }
         if two {
             if case .split = scans[id].layout { return }
             if case .split = scans[id].suggested {
@@ -190,10 +220,20 @@ final class ScanSplitModel: ObservableObject {
     }
 
     /// Moves a scan's cut. Pass `final: true` when the drag ends, to re-check for blanks.
+    /// With the same cut for all, moving any scan's cut moves every one.
     func moveCut(to fraction: Double, scan id: Int, final: Bool) {
         guard scans.indices.contains(id) else { return }
-        scans[id].layout = .split(at: min(max(fraction, 0.03), 0.97))
-        if final { refreshSkips(scan: id) }
+        let f = min(max(fraction, 0.03), 0.97)
+        if sameCutForAll {
+            sharedCut = f
+            for i in scans.indices {
+                scans[i].layout = .split(at: f)
+                if final { refreshSkips(scan: i) }
+            }
+        } else {
+            scans[id].layout = .split(at: f)
+            if final { refreshSkips(scan: id) }
+        }
     }
 
     func toggleSkip(piece: Int, scan id: Int) {
@@ -294,6 +334,12 @@ struct ScanSplitSheet: View {
                     .font(.title2)
                     .fontWeight(.semibold)
                 Spacer()
+                Toggle("Same cut on every page", isOn: Binding(
+                    get: { model.sameCutForAll },
+                    set: { model.setSameCutForAll($0) }))
+                    .toggleStyle(.checkbox)
+                    .help("Cut every scan in two at the same place — for scans of identical sheets, such as A3")
+                    .padding(.trailing, 12)
                 Picker("First page:", selection: $model.leftFirst) {
                     Text("Left").tag(true)
                     Text("Right").tag(false)
@@ -302,12 +348,15 @@ struct ScanSplitSheet: View {
                 .fixedSize()
                 .help("Which side of a two-page scan comes first")
             }
-            Text("ScoreSort has cut each two-page scan at the gap between its pages, and marked black or empty pages to skip. Drag a cut line to move it, or click a page to skip or keep it. Skipped pages stay in Step 1, greyed out, in case you need one back.")
+            Text(model.sameCutForAll
+                 ? "Every scan is cut in two at the same place — down the middle unless you drag a cut line, which moves them all. Black or empty pages are marked to skip; click a page to skip or keep it. Skipped pages stay in Step 1, greyed out, in case you need one back."
+                 : "ScoreSort has cut each two-page scan at the gap between its pages, and marked black or empty pages to skip. Drag a cut line to move it, or click a page to skip or keep it. Skipped pages stay in Step 1, greyed out, in case you need one back.")
                 .foregroundColor(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 18)
+        .background(Color(NSColor.windowBackgroundColor))
     }
 
     private var footer: some View {
@@ -334,6 +383,7 @@ struct ScanSplitSheet: View {
         .controlSize(.large)
         .padding(.horizontal, 24)
         .padding(.vertical, 14)
+        .background(Color(NSColor.windowBackgroundColor))
     }
 
     private var summary: String {
@@ -381,7 +431,7 @@ private struct ScanSplitCard: View {
                 .labelsHidden()
                 .fixedSize()
                 .controlSize(.small)
-                .disabled(!scan.analysed)
+                .disabled(!scan.analysed || model.sameCutForAll)
             }
         }
         .padding(10)
