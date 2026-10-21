@@ -3,7 +3,8 @@
 //  ScoreSort
 //
 //  Split PDF tab — Step 1 (SplitView) plus its Step-1 machinery: booklet-reorder
-//  UI, A3 split-choice, the booklet-order sheet and the split controls section.
+//  UI, the booklet-order sheet and the split controls section. The "Split Double
+//  Pages" sheet is in ScanSplitSheet.swift.
 //  Pure split maths live in Logic/SplitLogic.swift.
 //
 
@@ -78,18 +79,22 @@ struct SplitView: View {
     @State private var documentBookmarks: [BookmarkSection] = []
     /// Non-nil when the "this PDF has bookmarks" sheet should be presented.
     @State private var bookmarkOffer: BookmarkOffer? = nil
-    /// Controls the sheet that asks "which half is page 1?" when an A3 doc is detected.
-    @State private var showingA3Detection = false
+    /// Non-nil when the "Split Double Pages" sheet should be presented — offered on opening
+    /// a scan of double pages (A3 sheets, or an overhead scanner's mix of spreads and
+    /// single pages), or chosen from the menu.
+    @State private var scanSplitRequest: ScanSplitRequest? = nil
+    /// The pages to skip in a just-split document, applied once `onChange` has reset the
+    /// split state for it (the reset would otherwise clear them).
+    @State private var pendingScanSplitSkips: Set<Int>? = nil
     /// Set before programmatically loading an A3-split document so onChange skips re-detection.
     @State private var suppressNextA3Detection = false
     /// Set before swapping pages so onChange skips the full state-reset (preserving split markers).
     @State private var suppressDocumentReset = false
-    /// True while background A3 splitting is in progress; shows a loading overlay.
-    @State private var isProcessingA3 = false
     /// Shows a gentle hint banner when a PDF looks like an A3 scan but didn't trigger auto-detection.
     @State private var a3HintVisible = false
-    /// Shows a brief tip banner after an A3 split loads into Step 1.
+    /// Shows a brief tip banner after a scan's double pages are split.
     @State private var a3SplitNoticeVisible = false
+    @State private var scanSplitNotice: AttributedString = ""
     /// Shows a brief tip banner after the first booklet fix, pointing to the per-card redo icon.
     @State private var bookletRedoNoticeVisible = false
     /// Whether Delete / the Skip button targets the current page or the whole file.
@@ -255,19 +260,29 @@ struct SplitView: View {
                 undoStack = []
                 redoStack = []
 
-                // Detect A3 landscape — pause and ask the user which half is page 1,
-                // unless this load was triggered by our own A3 processing pipeline.
-                if !suppressNextA3Detection && isA3Landscape(doc) {
-                    showingA3Detection = true
+                // A scan of double pages (A3 sheets, or a book scanner's spreads) — offer to
+                // split them, unless this load is the result of doing exactly that. The
+                // split state is set up first so Step 1 is consistent behind the sheet;
+                // the bookmark offer waits until the sheet is answered.
+                if !suppressNextA3Detection && (isA3Landscape(doc) || looksLikeDoublePageScan(doc)) {
+                    setupSplitState(offerBookmarks: false)
+                    scanSplitRequest = ScanSplitRequest(document: doc, fromLoad: true)
                     return
                 }
-                // If the page proportions look A3-like but the strict check didn't fire
+                // If the page proportions look A3-like but the checks above didn't fire
                 // (e.g. unusual scanner DPI), show a gentle hint banner instead.
                 if !suppressNextA3Detection && looksLikeA3Landscape(doc) {
                     withAnimation { a3HintVisible = true }
                 }
                 suppressNextA3Detection = false
                 setupSplitState()
+                // A just-split scan: skip the pieces the sheet marked (after the reset
+                // above, which clears skips), and make Delete act on single pages.
+                if let skips = pendingScanSplitSkips {
+                    pendingScanSplitSkips = nil
+                    skippedPages = skips.filter { $0 < totalPages }
+                    skipMode = .page
+                }
             } else {
                 // PDF cleared — reset all split flow state so nothing bleeds
                 // into the next session regardless of which stage we were on.
@@ -299,43 +314,20 @@ struct SplitView: View {
         .onChange(of: fileSizes)                { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: skippedPages)             { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: pdfManager.pdfDocument)   { DispatchQueue.main.async { syncTabCommands() } }
-        .sheet(isPresented: $showingA3Detection) {
-            A3SplitChoiceView(
-                firstPage: pdfManager.pdfDocument?.page(at: 0),
-                onChoose: { leftFirst in
-                    guard let original = pdfManager.pdfDocument else { return }
-                    showingA3Detection = false
-                    isProcessingA3 = true
-                    // Run the crop-box splitting on a background thread so the
-                    // UI stays responsive on large documents.
-                    // SAFETY: original is not touched on the main thread again until
-                    // the async block completes and posts back via DispatchQueue.main.async.
-                    // No mutations inside this block — read-only pass to splitA3Pages.
-                    let uncheckedOriginal = Unchecked(original)
-                    DispatchQueue.global(qos: .userInitiated).async {
-                        let splitDoc = splitA3Pages(uncheckedOriginal.value, leftFirst: leftFirst)
-                        DispatchQueue.main.async {
-                            isProcessingA3 = false
-                            // Switch to page-skip mode so Delete skips individual pages,
-                            // which is more useful after an A3 split where blank pages
-                            // often need to be removed one at a time.
-                            skipMode = .page
-                            suppressNextA3Detection = true
-                            pdfManager.pdfDocument = splitDoc
-                            // onChange fires, skips A3 re-detection, calls setupSplitState().
-                            // Show a brief tip so the user knows about Swap.
-                            withAnimation(.easeInOut(duration: 0.2)) { a3SplitNoticeVisible = true }
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 6) {
-                                withAnimation(.easeInOut(duration: 0.2)) { a3SplitNoticeVisible = false }
-                            }
-                        }
-                    }
+        .sheet(item: $scanSplitRequest) { request in
+            ScanSplitSheet(
+                request: request,
+                onSplit: { choice in
+                    scanSplitRequest = nil
+                    applyScanSplit(choice, to: request.document)
                 },
-                onKeepAsIs: {
-                    showingA3Detection = false
-                    setupSplitState(offerBookmarks: false)
-                    // One sheet at a time — let this one finish dismissing first.
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { offerBookmarksIfAny() }
+                onCancel: {
+                    scanSplitRequest = nil
+                    // Offered on opening: carry on to the bookmark prompt, one sheet at a
+                    // time — let this one finish dismissing first.
+                    if request.fromLoad {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { offerBookmarksIfAny() }
+                    }
                 }
             )
         }
@@ -370,30 +362,6 @@ struct SplitView: View {
                 onCancel: { bookletFixRequest = nil }
             )
         }
-        .overlay {
-            if isProcessingA3 {
-                ZStack {
-                    Color(NSColor.windowBackgroundColor).opacity(0.7)
-                    VStack(spacing: 16) {
-                        ProgressView()
-                            .progressViewStyle(.circular)
-                            .scaleEffect(1.3)
-                        Text("Splitting A3 pages…")
-                            .font(.headline)
-                        Text("Cutting each page down the middle.")
-                            .font(.caption)
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(32)
-                    .background(
-                        RoundedRectangle(cornerRadius: 12)
-                            .fill(Color(NSColor.controlBackgroundColor))
-                            .shadow(radius: 20)
-                    )
-                }
-                .ignoresSafeArea()
-            }
-        }
     }
 
     @ViewBuilder
@@ -423,14 +391,14 @@ struct SplitView: View {
                     // Both of these correct how a scan came in, and both are occasional, so
                     // they share one pull-down instead of two permanent buttons.
                     Menu {
-                        Button("Split as A3\u{2026}") { showingA3Detection = true }
+                        Button("Split Double Pages\u{2026}") { requestScanSplit() }
                         Button("Fix Booklet Order") { requestBookletFix() }
                             .disabled(!canFixBookletOrder)
                     } label: {
                         Label("Fix Scan", systemImage: "wrench.and.screwdriver")
                     }
                     .fixedSize()
-                    .help("Split A3 spreads into pages, or correct booklet scanning order")
+                    .help("Cut two-page scans into single pages, or correct booklet scanning order")
 
                     Button(action: { pdfManager.clearPDF() }) {
                         Label("Clear File", systemImage: "xmark.circle.fill")
@@ -447,12 +415,12 @@ struct SplitView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "rectangle.split.2x1")
                         .foregroundColor(.secondary)
-                    Text("This looks like it might be an A3 scan — each page may contain two A4 halves.")
+                    Text("This looks like it might be a scan of double pages — two pages side by side.")
                         .font(.callout)
                         .foregroundColor(.secondary)
-                    Button("Split as A3…") {
+                    Button("Split Double Pages…") {
                         withAnimation { a3HintVisible = false }
-                        showingA3Detection = true
+                        requestScanSplit()
                     }
                     .buttonStyle(.borderless)
                     .font(.callout)
@@ -472,7 +440,7 @@ struct SplitView: View {
                 HStack(spacing: 8) {
                     Image(systemName: "scissors")
                         .foregroundColor(.orange)
-                    Text("A3 pages split in half — use **Swap with Next** (S) to fix page order if needed")
+                    Text(scanSplitNotice)
                         .font(.callout)
                     Spacer()
                     Button { withAnimation(.easeInOut(duration: 0.2)) { a3SplitNoticeVisible = false } }
@@ -850,7 +818,7 @@ struct SplitView: View {
             // Always list the actions (disabled until a PDF is loaded) so the menu
             // shows what's possible even in the empty state.
             slice.tabActions = [
-                MenuAction(title: "Split as A3\u{2026}", isEnabled: loaded, perform: { showingA3Detection = true }),
+                MenuAction(title: "Split Double Pages\u{2026}", isEnabled: loaded, perform: { requestScanSplit() }),
                 MenuAction(title: "Fix Booklet Order", isEnabled: loaded && canFixBookletOrder, perform: { requestBookletFix() }),
                 MenuAction(title: "Use Bookmarks\u{2026}", isEnabled: loaded && !documentBookmarks.isEmpty, perform: { offerBookmarksIfAny() }),
                 MenuAction(title: "Clear All Splits", isEnabled: loaded && !splitMarkers.isEmpty, perform: { clearAllMarkers() }),
@@ -1155,6 +1123,38 @@ struct SplitView: View {
         if offerBookmarks { offerBookmarksIfAny() }
     }
 
+    /// Opens "Split Double Pages" for the current document.
+    private func requestScanSplit() {
+        guard let doc = pdfManager.pdfDocument else { return }
+        scanSplitRequest = ScanSplitRequest(document: doc, fromLoad: false)
+    }
+
+    /// Replaces the document with its split pages. The new document goes through the
+    /// normal new-PDF reset in `onChange` (page count and every index change), which then
+    /// applies `pendingScanSplitSkips`.
+    private func applyScanSplit(_ choice: ScanSplitChoice, to source: PDFDocument) {
+        let split = splitScans(source, layouts: choice.layouts, leftFirst: choice.leftFirst)
+        guard split.pageCount > 0 else { return }
+        // Nothing was cut and nothing skipped: leave the document (and any split points) alone.
+        if split.pageCount == source.pageCount && choice.skippedPages.isEmpty { return }
+
+        pendingScanSplitSkips = choice.skippedPages
+        suppressNextA3Detection = true
+        pdfManager.pdfDocument = split
+
+        let skipped = choice.skippedPages.count
+        var notice = try! AttributedString(markdown: "Split into \(split.pageCount) pages")
+        if skipped > 0 {
+            notice += try! AttributedString(markdown: " — \(skipped) black or empty \(skipped == 1 ? "page is" : "pages are") skipped (press **Delete** on one to keep it)")
+        }
+        notice += try! AttributedString(markdown: ". Use **Swap with Next** (S) to fix page order if needed.")
+        scanSplitNotice = notice
+        withAnimation(.easeInOut(duration: 0.2)) { a3SplitNoticeVisible = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 8) {
+            withAnimation(.easeInOut(duration: 0.2)) { a3SplitNoticeVisible = false }
+        }
+    }
+
     /// Presents the bookmark sheet when the loaded document has usable bookmarks.
     private func offerBookmarksIfAny() {
         guard pdfManager.pdfDocument != nil, !documentBookmarks.isEmpty else { return }
@@ -1394,142 +1394,6 @@ struct SplitView: View {
         }
     }
 }
-
-// MARK: - A3 Split Choice View
-
-/// Sheet shown when an A3-landscape PDF is detected.  The user picks which half
-/// is page 1 (left-first or right-first), or dismisses without splitting.
-struct A3SplitChoiceView: View {
-    /// The detected A3 page, used to render a real preview behind the left/right markers.
-    let firstPage: PDFPage?
-    /// Called with `true` for left-first, `false` for right-first.
-    let onChoose: (Bool) -> Void
-    let onKeepAsIs: () -> Void
-
-    /// Rendered thumbnail of `firstPage` (in its display orientation, so rotation is honoured).
-    @State private var pageImage: NSImage?
-
-    /// Aspect ratio of the rendered page; falls back to A3-landscape (√2) before the image loads.
-    private var previewAspect: CGFloat {
-        guard let img = pageImage, img.size.height > 0 else { return 1.414 }
-        return img.size.width / img.size.height
-    }
-
-    /// One half-page marker (number badge + caption) on a legible material backing.
-    private func halfMarker(symbol: String, text: String, prominent: Bool) -> some View {
-        VStack(spacing: 6) {
-            Image(systemName: symbol)
-                .font(.title)
-                .foregroundColor(prominent ? .accentColor : .secondary)
-            Text(text)
-                .font(.caption)
-                .foregroundColor(.secondary)
-        }
-        .padding(8)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 8))
-    }
-
-    var body: some View {
-        VStack(spacing: 24) {
-            Text("A3 Landscape Detected")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            Text("This document looks like an A3 sheet with two A4 pages side by side.\nWhich half should become the first page?")
-                .multilineTextAlignment(.center)
-                .foregroundColor(.secondary)
-                .frame(maxWidth: 380)
-
-            // Visual diagram — left/right markers overlaid on a preview of the actual page.
-            ZStack {
-                if let img = pageImage {
-                    Image(nsImage: img)
-                        .resizable()
-                        .scaledToFit()
-                } else {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color(NSColor.controlBackgroundColor))
-                }
-
-                // Left half tinted to signal it's page 1 by default.
-                HStack(spacing: 0) {
-                    Color.accentColor.opacity(0.18)
-                    Color.clear
-                }
-
-                HStack(spacing: 0) {
-                    halfMarker(symbol: "1.circle.fill", text: "Left half", prominent: true)
-                        .frame(maxWidth: .infinity)
-                    halfMarker(symbol: "2.circle", text: "Right half", prominent: false)
-                        .frame(maxWidth: .infinity)
-                }
-            }
-            .aspectRatio(previewAspect, contentMode: .fit)
-            .frame(maxWidth: 300, maxHeight: 200)
-            // Centre divider showing where the sheet will be cut.
-            .overlay(
-                Rectangle()
-                    .fill(Color.white.opacity(0.7))
-                    .frame(width: 1.5)
-                    .shadow(color: .black.opacity(0.4), radius: 1)
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 6))
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(Color.secondary.opacity(0.3), lineWidth: 1)
-            )
-            .padding(14)
-            .onAppear {
-                guard pageImage == nil, let page = firstPage else { return }
-                // thumbnail(of:for:) preserves the page's display aspect within the box,
-                // so a square bounding size yields a correctly-proportioned image.
-                pageImage = page.thumbnail(of: NSSize(width: 600, height: 600), for: .cropBox)
-            }
-
-            // Choice buttons
-            HStack(spacing: 16) {
-                Button {
-                    onChoose(true)
-                } label: {
-                    HStack {
-                        Image(systemName: "arrow.left.to.line")
-                        Text("Left half first")
-                    }
-                    .frame(width: 150)
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.large)
-
-                Button {
-                    onChoose(false)
-                } label: {
-                    HStack {
-                        Image(systemName: "arrow.right.to.line")
-                        Text("Right half first")
-                    }
-                    .frame(width: 150)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.large)
-            }
-
-            Text("For saddle-stitch booklets, pages come out in sheet order — use the reorder step to fix the sequence.")
-                .font(.caption)
-                .foregroundColor(.secondary)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 380)
-
-            Button("Keep as-is — don't split pages") {
-                onKeepAsIs()
-            }
-            .buttonStyle(.plain)
-            .foregroundColor(.secondary)
-        }
-        .padding(36)
-        .frame(minWidth: 480)
-    }
-}
-
 
 // MARK: - Booklet Order Sheet
 

@@ -693,7 +693,7 @@ struct WelcomeTourPage {
             bodyParagraphs: [
                 "Drop the PDF and use **← →** to move through pages. Press **Space** to toggle a split marker, and **↑ ↓** to jump to the first page of each output file. Equally-spaced markers can be placed automatically using the **stride** control. Once you have entered your split markers, you can also choose to skip certain sections of the PDF in the output using your **Delete** key.",
                 "In Step 2, name each output file — the same flow as Rename Files. Toggle **Prefix score order** to add score-order numbers automatically in Step 3.",
-                "**A3 & booklet scans:** Drop an A3 scan (two A4 pages side-by-side) and ScoreSort offers to split every sheet down the middle into separate pages. If a booklet was scanned out of reading order, put each booklet in its own split, then use **Fix Booklet Order** to restore the page order automatically — or **Swap with Next (S)** to nudge individual pages."
+                "**Two-page & booklet scans:** Drop a scan with two pages side by side — A3 sheets, or a book scanner's mix of spreads and single pages — and ScoreSort offers to cut each one into separate pages, finding the gap between the pages and setting aside black or empty ones. If a booklet was scanned out of reading order, put each booklet in its own split, then use **Fix Booklet Order** to restore the page order automatically — or **Swap with Next (S)** to nudge individual pages."
             ],
             tipText: "Space toggles a split marker · S swaps a page with the next · Delete skips a page or file · ⌘← / ⌘→ jumps to first / last page",
             imageName: "tour-splitter"

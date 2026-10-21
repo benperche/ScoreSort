@@ -294,69 +294,13 @@ func looksLikeA3Landscape(_ doc: PDFDocument) -> Bool {
 /// PDFDocument with twice as many pages.  The crop/media box of each copy is
 /// set to cover only its half so viewers render the correct region.
 /// `leftFirst == true` → left half precedes right half (normal reading order).
+///
+/// The everything-down-the-middle case of `splitScans` (Logic/ScanSplitLogic.swift),
+/// which handles page rotation and uneven cuts.
 func splitA3Pages(_ doc: PDFDocument, leftFirst: Bool) -> PDFDocument {
-    let result = PDFDocument()
-    for i in 0..<doc.pageCount {
-        guard let page = doc.page(at: i) else { continue }
-        let media = page.bounds(for: .mediaBox)
-        let rot = ((page.rotation % 360) + 360) % 360
-
-        // When a page carries a rotation flag, the mediaBox is in *native* coordinates
-        // (the unrotated space). We must split along the native axis that corresponds
-        // to the visual horizontal divide.
-        //
-        //   0°  → landscape stored as landscape: split on native X axis
-        //  90°  → portrait native, rotated 90° CCW to look landscape:
-        //          visual left = native TOP half  (high Y)
-        // 180°  → landscape stored upside-down:  visual left = native RIGHT half
-        // 270°  → portrait native, rotated 270° CW to look landscape:
-        //          visual left = native BOTTOM half (low Y)
-
-        let nativeFirstBox: CGRect
-        let nativeSecondBox: CGRect
-
-        switch rot {
-        case 90:
-            // PDF rotation is clockwise. 90° CW: native top → visual right,
-            // so visual left = native BOTTOM half (low y).
-            let halfH = media.height / 2.0
-            let nativeTop    = CGRect(x: media.minX, y: media.minY + halfH, width: media.width, height: halfH)
-            let nativeBottom = CGRect(x: media.minX, y: media.minY,         width: media.width, height: halfH)
-            nativeFirstBox  = leftFirst ? nativeBottom : nativeTop
-            nativeSecondBox = leftFirst ? nativeTop    : nativeBottom
-        case 270:
-            // 270° CW (= 90° CCW): native top → visual left,
-            // so visual left = native TOP half (high y).
-            let halfH = media.height / 2.0
-            let nativeTop    = CGRect(x: media.minX, y: media.minY + halfH, width: media.width, height: halfH)
-            let nativeBottom = CGRect(x: media.minX, y: media.minY,         width: media.width, height: halfH)
-            nativeFirstBox  = leftFirst ? nativeTop    : nativeBottom
-            nativeSecondBox = leftFirst ? nativeBottom : nativeTop
-        case 180:
-            let halfW = media.width / 2.0
-            let nativeLeft  = CGRect(x: media.minX,         y: media.minY, width: halfW, height: media.height)
-            let nativeRight = CGRect(x: media.minX + halfW, y: media.minY, width: halfW, height: media.height)
-            // 180°: visual left → native right half
-            nativeFirstBox  = leftFirst ? nativeRight : nativeLeft
-            nativeSecondBox = leftFirst ? nativeLeft  : nativeRight
-        default: // 0° — standard landscape
-            let halfW = media.width / 2.0
-            let nativeLeft  = CGRect(x: media.minX,         y: media.minY, width: halfW, height: media.height)
-            let nativeRight = CGRect(x: media.minX + halfW, y: media.minY, width: halfW, height: media.height)
-            nativeFirstBox  = leftFirst ? nativeLeft  : nativeRight
-            nativeSecondBox = leftFirst ? nativeRight : nativeLeft
-        }
-
-        guard let firstPage  = page.copy() as? PDFPage,
-              let secondPage = page.copy() as? PDFPage else { continue }
-        firstPage.setBounds(nativeFirstBox,   for: .mediaBox)
-        firstPage.setBounds(nativeFirstBox,   for: .cropBox)
-        secondPage.setBounds(nativeSecondBox, for: .mediaBox)
-        secondPage.setBounds(nativeSecondBox, for: .cropBox)
-        result.insert(firstPage,  at: result.pageCount)
-        result.insert(secondPage, at: result.pageCount)
-    }
-    return result
+    splitScans(doc,
+               layouts: Array(repeating: .split(at: 0.5), count: doc.pageCount),
+               leftFirst: leftFirst)
 }
 
 // MARK: - Booklet deimposition

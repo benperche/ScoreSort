@@ -12,6 +12,7 @@
 import Testing
 import SwiftUI
 import AppKit
+import PDFKit
 @testable import ScoreSort
 
 @MainActor
@@ -55,6 +56,14 @@ struct ViewSmokeTests {
                                              BookmarkSection(startPage: 4, pageCount: 2, title: "")],
                                   sourceName: "First Suite")
         render(BookmarkSplitChoiceView(offer: offer, onSplitAndName: { _ in }, onSplitOnly: {}, onIgnore: {}))
+    }
+
+    @Test("Split double pages sheet renders")
+    func scanSplitSheet() {
+        let doc = PDFDocument()
+        for i in 0..<3 { doc.insert(PDFPage(), at: i) }
+        render(ScanSplitSheet(request: ScanSplitRequest(document: doc, fromLoad: true),
+                              onSplit: { _ in }, onCancel: {}))
     }
 
     @Test("Rotate tab renders")
