@@ -397,9 +397,28 @@ private struct ScanSplitCard: View {
     let pageNumbers: [Int]
     @ObservedObject var model: ScanSplitModel
 
-    private var isTwoPages: Binding<Bool> {
-        Binding(get: { scan.layout.pieceCount == 2 },
-                set: { model.setTwoPages($0, scan: scan.id) })
+    private var isTwoPages: Bool { scan.layout.pieceCount == 2 }
+
+    private func layoutButton(two: Bool, symbol: String, help: String) -> some View {
+        let selected = isTwoPages == two
+        return Button {
+            model.setTwoPages(two, scan: scan.id)
+        } label: {
+            Image(systemName: symbol)
+                .font(.system(size: 11, weight: .medium))
+                .frame(width: 26, height: 18)
+                .foregroundColor(selected ? .primary : .secondary)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(selected ? Color(NSColor.controlColor) : Color.clear)
+                        .shadow(color: .black.opacity(selected ? 0.18 : 0), radius: 0.5, y: 0.5)
+                )
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(help)
+        .accessibilityLabel(two ? "Two pages" : "One page")
+        .accessibilityAddTraits(selected ? .isSelected : [])
     }
 
     var body: some View {
@@ -414,19 +433,20 @@ private struct ScanSplitCard: View {
                     .foregroundColor(.secondary)
                     .monospacedDigit()
                 Spacer()
-                Picker("", selection: isTwoPages) {
-                    Image(systemName: "rectangle.portrait")
-                        .help("One page — keep this scan whole")
-                        .tag(false)
-                    Image(systemName: "rectangle.split.2x1")
-                        .help("Two pages — cut this scan in two")
-                        .tag(true)
+                // Two plain buttons drawn as a segmented switch. Not a segmented Picker: an
+                // NSSegmentedControl in every card of this lazy grid crashed inside AppKit
+                // (-[NSSegmentedCell _segmentsDeselectedBySegment:]) as the grid recycled cards.
+                let locked = !scan.analysed || model.sameCutForAll
+                HStack(spacing: 1) {
+                    layoutButton(two: false, symbol: "rectangle.portrait",
+                                 help: "One page — keep this scan whole")
+                    layoutButton(two: true, symbol: "rectangle.split.2x1",
+                                 help: "Two pages — cut this scan in two")
                 }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                .controlSize(.small)
-                .disabled(!scan.analysed || model.sameCutForAll)
+                .padding(2)
+                .background(RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.14)))
+                .disabled(locked)
+                .opacity(locked ? 0.5 : 1)
             }
         }
         .padding(10)
