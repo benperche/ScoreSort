@@ -797,7 +797,7 @@ Because a plain wind-band list (flute first, no strings) triggers neither rule, 
 
 Controls: `baseRotation: RotationAngle` (all pages) + `additionalRotationMode: RotationMode` (odd/even/none) + `additionalRotationAngle`.
 
-Preview: `PDFPageView: NSViewRepresentable` wrapping `PDFView`. Renders page to `NSImage` first (via `renderFullImage`) to avoid mutating shared page state, then sets `clonedPage.rotation`.
+Preview: `PDFPageView` — a SwiftUI view showing the page as an image (rendered at 2×, never touching the shared page), with the extra rotation applied to the image itself. **Not a `PDFView`**: on recent macOS a `PDFView` showing an image-only page runs Live Text recognition on it, which spammed the console with TextRecognition "Unable to find a valid E5" warnings on every preview update.
 
 Keyboard navigation: `←` / `→` (previous/next); `⌘←` / `⌘→` (first/last). Shared with Split tab Step 1.
 
@@ -831,7 +831,7 @@ A reusable **text stamp** ("Example School Band", "Property of XYZ") burned onto
 | `stampedDocument(_:stamp:pageIndices:)` | The flattener (below). Returns nil for an empty doc or a blank stamp. |
 | `applyingStamp(_:to:partFirstPages:)` | The call-site helper: applies a `StampJob?` inline, returning the document **unchanged** when there's nothing to stamp or the flatten fails. This is what every export path calls. |
 | `stampPagePreviewImage(page:maxDimension:)` | Bitmap of page 1 (or a blank A4 sheet) **without** any stamp — the preview's cached background layer. |
-| `imageWithStamp(_:stamp:)` | Composites the stamp into an already-rendered page image, for **static** previews. `PDFPageView` uses it so the Split tab can show its stamp; compositing rather than overlaying a view means it lines up however `PDFView` scales and centres the page. A focused `NSImage` context is y-up, so no flip is needed. |
+| `imageWithStamp(_:stamp:)` | Composites the stamp into an already-rendered page image, for **static** previews. `PDFPageView` uses it so the Split tab can show its stamp; compositing rather than overlaying a view means it lines up however the preview scales and centres the page. A focused `NSImage` context is y-up, so no flip is needed. |
 | `visualPageBox(for page: PDFPage?)` | The origin-normalised, rotation-swapped crop box (A4 when nil) — shared by the preview and the drag maths so both agree with the flattener. |
 | `nsColor(fromHex:)` / `hexString(from:)` | `#RRGGBB` round trip for storage and the `ColorPicker` binding. |
 
@@ -909,7 +909,7 @@ The Rotate tab is deliberately excluded — it works in rotation *metadata*, whi
 
 Wired into `RenamerManager.executeRename` (Score Order Sorter), `BulkRenameView.executeRename`, and `applyPrefixAndRenameBulk` (Bulk Renamer): each pre-flights with `nonWritableParentDirectories` and aborts with the friendly message; if moves still fail and *all* failures were permission errors, it shows the friendly message instead of the raw "Partial Success" dump.
 
-**`PDFPageView: NSViewRepresentable`** — safe preview clone via `renderFullImage(from:)`.
+**`PDFPageView`** — a page as a fitted image on white (Split Step 1, Rotate before/after, booklet thumbnails). Re-renders only when its page, rotation or stamp changes (`.task(id:)`), keeping the previous image up meanwhile. Deliberately not a `PDFView` (automatic Live Text OCR on image pages — see the Rotate section).
 
 ---
 

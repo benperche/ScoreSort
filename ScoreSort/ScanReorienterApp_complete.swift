@@ -1633,66 +1633,81 @@ struct DropZoneView: View {
     }
 }
 
-// MARK: - PDF Page View using native PDFView
-struct PDFPageView: NSViewRepresentable {
+// MARK: - PDF Page View
+/// A page shown as a picture, fitted to the space on white — the Split and Rotate previews.
+///
+/// Deliberately not a `PDFView`. The preview is an image anyway (it can carry a stamp and a
+/// rotation without touching the real page), and on recent macOS a `PDFView` showing a page
+/// that's only an image runs Live Text recognition on it — every time the preview updated —
+/// costing CPU and flooding the console with TextRecognition "Unable to find a valid E5"
+/// warnings. An image view does none of that.
+struct PDFPageView: View {
     let page: PDFPage?
+    /// Extra clockwise rotation to show, in degrees (PDF convention), on top of the page's own.
     let rotation: Int
     /// Drawn into the preview image when set, so the Split tab can show what its output will
-    /// look like. Nil elsewhere. It's composited into the page image rather than overlaid as
-    /// a view because PDFView scales and centres its page itself.
+    /// look like. Nil elsewhere.
     var stamp: Stamp? = nil
 
-    func makeNSView(context: Context) -> PDFView {
-        let pdfView = PDFView()
-        pdfView.autoScales = true
-        pdfView.displayMode = .singlePage
-        pdfView.displayDirection = .vertical
-        pdfView.backgroundColor = NSColor.white
-        return pdfView
+    /// What the picture depends on — re-rendered only when one of these changes.
+    private struct Key: Equatable {
+        let page: ObjectIdentifier?
+        let rotation: Int
+        let stamp: Stamp?
     }
-    
-    func updateNSView(_ pdfView: PDFView, context: Context) {
-        guard let page = page else {
-            pdfView.document = nil
-            return
-        }
-        
-        let document = PDFDocument()
-        if var image = renderFullImage(from: page) {
-            if let stamp { image = imageWithStamp(image, stamp: stamp) }
-            guard let clonedPage = PDFPage(image: image) else {
-                document.insert(page, at: 0)
-                pdfView.document = document
-                return
+
+    @State private var image: NSImage?
+
+    var body: some View {
+        ZStack {
+            Color.white
+            if page != nil, let image {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+                    .padding(4)
             }
-            clonedPage.rotation = rotation
-            document.insert(clonedPage, at: 0)
-        } else {
-            // Fallback: insert original page without rotation to avoid mutating shared state
-            document.insert(page, at: 0)
         }
-        pdfView.document = document
-        if let first = document.page(at: 0) {
-            pdfView.go(to: first)
+        // Renders when the page, rotation or stamp changes; the previous picture stays up
+        // until the new one is ready, so stepping through pages doesn't flash blank.
+        .task(id: Key(page: page.map(ObjectIdentifier.init), rotation: rotation, stamp: stamp)) {
+            guard let page else { image = nil; return }
+            image = Self.render(page, rotation: rotation, stamp: stamp)
         }
     }
-    
-    // Render the full PDF page into an NSImage for safe preview cloning.
-    // Uses page.thumbnail(of:for:) which correctly accounts for the page's
-    // rotation property — pages stored as landscape+rotation render portrait.
-    private func renderFullImage(from page: PDFPage) -> NSImage? {
+
+    /// The page as it reads (its own rotation applied), at 2× for a sharp preview, with the
+    /// stamp drawn in and any extra rotation applied.
+    private static func render(_ page: PDFPage, rotation: Int, stamp: Stamp?) -> NSImage? {
         let mediaBox = page.bounds(for: .mediaBox)
-        let rotation = ((page.rotation % 360) + 360) % 360
+        let own = ((page.rotation % 360) + 360) % 360
+        let size = own == 90 || own == 270
+            ? NSSize(width: mediaBox.height, height: mediaBox.width)
+            : NSSize(width: mediaBox.width, height: mediaBox.height)
+        guard size.width > 0, size.height > 0 else { return nil }
+        var image = page.thumbnail(of: NSSize(width: size.width * 2, height: size.height * 2), for: .mediaBox)
+        image.size = size   // points, so a stamp lands where it does on the real page
+        if let stamp { image = imageWithStamp(image, stamp: stamp) }
+        return rotated(image, clockwise: rotation)
+    }
 
-        // For 90°/270° rotated pages the visual size is the media box transposed
-        let displaySize: NSSize
-        if rotation == 90 || rotation == 270 {
-            displaySize = NSSize(width: mediaBox.height, height: mediaBox.width)
-        } else {
-            displaySize = NSSize(width: mediaBox.width, height: mediaBox.height)
-        }
-
-        return page.thumbnail(of: displaySize, for: .mediaBox)
+    /// `image` turned clockwise by a multiple of 90°.
+    private static func rotated(_ image: NSImage, clockwise degrees: Int) -> NSImage {
+        let turns = ((degrees % 360) + 360) % 360 / 90
+        guard turns != 0, let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
+        let w = cg.width, h = cg.height
+        let (outW, outH) = turns % 2 == 0 ? (w, h) : (h, w)
+        guard let ctx = CGContext(data: nil, width: outW, height: outH, bitsPerComponent: 8, bytesPerRow: 0,
+                                  space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return image }
+        // Core Graphics is y-up, so a clockwise turn on screen is a negative angle here.
+        ctx.translateBy(x: CGFloat(outW) / 2, y: CGFloat(outH) / 2)
+        ctx.rotate(by: -CGFloat(turns) * .pi / 2)
+        ctx.draw(cg, in: CGRect(x: -CGFloat(w) / 2, y: -CGFloat(h) / 2, width: CGFloat(w), height: CGFloat(h)))
+        guard let out = ctx.makeImage() else { return image }
+        let pointSize = turns % 2 == 0 ? image.size : NSSize(width: image.size.height, height: image.size.width)
+        return NSImage(cgImage: out, size: pointSize)
     }
 }
 
