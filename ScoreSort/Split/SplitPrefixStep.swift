@@ -481,42 +481,66 @@ struct RenameSummaryView: View {
 }
 
 // MARK: - Page Instrument Preview
+
+/// The page's size as the reader sees it (rotation applied), in PDF points.
+func instrumentPreviewPageSize(_ page: PDFPage) -> CGSize {
+    let mediaBox = page.bounds(for: .mediaBox)
+    let rotation = ((page.rotation % 360) + 360) % 360
+    return rotation == 90 || rotation == 270
+        ? CGSize(width: mediaBox.height, height: mediaBox.width)
+        : mediaBox.size
+}
+
+/// The part of the page (PDF points) the Step 2 preview strip shows. The zoom is set by a
+/// window of up to 200 × 100 pt from the page's top-left (where the part name is); the strip
+/// is usually far wider than 2:1, so it shows that window's full width and as much height as
+/// its own shape allows. The preview, the minimap's rectangle and the panning limits all use
+/// this, so the minimap marks exactly what's on screen. (They used to take the whole
+/// 200 × 100 window, of which a wide strip showed only the top third.)
+func instrumentPreviewCrop(pageSize: CGSize, stripSize: CGSize) -> CGSize {
+    let baseW = min(pageSize.width * 0.4, 200)
+    let baseH = min(100, pageSize.height)
+    guard stripSize.width > 0, stripSize.height > 0 else { return CGSize(width: baseW, height: baseH) }
+    let aspect = stripSize.width / stripSize.height
+    return CGSize(width: min(baseW, baseH * aspect), height: min(baseH, baseW / aspect))
+}
+
+/// Top-left of the shown area, in PDF points from the page's top-left, for a pan `offset`
+/// (x right, y up — negative y is further down the page), clamped so it stays on the page.
+func instrumentPreviewOrigin(offset: CGPoint, pageSize: CGSize, crop: CGSize) -> CGPoint {
+    CGPoint(x: min(max(offset.x, 0), max(0, pageSize.width - crop.width)),
+            y: min(max(-offset.y, 0), max(0, pageSize.height - crop.height)))
+}
+
 struct PageInstrumentPreview: View {
     let page: PDFPage
     /// Pan offset in PDF points from the default top-left position.
     /// Positive y = up the page; negative y = down; positive x = right; negative x = left.
     var offset: CGPoint = .zero
 
-    // Two-phase rendering for performance:
-    //   1. Full page rendered ONCE async on appear (expensive PDF draw, background thread).
-    //   2. Panning crops from the cached image instantly — no re-render needed.
+    /// The full page, rendered once in the background at 2×; panning just moves it.
     @State private var cachedPageImage: NSImage?
-    @State private var displayImage: NSImage?
 
     var body: some View {
-        // GeometryReader + top alignment: the crop strip is wider than it is tall, so a
-        // plain `.fill` clips the *vertical centre* — cutting the instrument name off the
-        // top of the page. Aligning the filled image to the top keeps the page top visible.
         GeometryReader { geo in
-            if let img = displayImage {
+            let pageSize = instrumentPreviewPageSize(page)
+            let crop = instrumentPreviewCrop(pageSize: pageSize, stripSize: geo.size)
+            if let img = cachedPageImage, crop.width > 0, geo.size.width > 0 {
+                // The shown area exactly fills the strip, so nothing is hidden by clipping
+                // that the minimap would still claim is visible.
+                let scale = geo.size.width / crop.width
+                let origin = instrumentPreviewOrigin(offset: offset, pageSize: pageSize, crop: crop)
                 Image(nsImage: img)
                     .resizable()
-                    .aspectRatio(contentMode: .fill)
-                    .frame(width: geo.size.width, height: geo.size.height, alignment: .top)
-                    .clipped()
+                    .frame(width: pageSize.width * scale, height: pageSize.height * scale)
+                    .offset(x: -origin.x * scale, y: -origin.y * scale)
             } else {
                 Color.gray.opacity(0.08)
             }
         }
+        .clipped()
         .task {
-            // Render the full page once on a background thread, then extract initial crop.
-            let full = await Self.renderFullPageAsync(page: page)
-            cachedPageImage = full
-            displayImage = Self.cropToStrip(from: full, page: page, offset: .zero)
-        }
-        .onChange(of: offset) { _, newOffset in
-            // Fast path: crop from the cached image — no PDF re-render required.
-            displayImage = Self.cropToStrip(from: cachedPageImage, page: page, offset: newOffset)
+            cachedPageImage = await Self.renderFullPageAsync(page: page)
         }
     }
 
@@ -538,39 +562,6 @@ struct PageInstrumentPreview: View {
             }
         }
     }
-
-    // Crop a strip from the cached full-page image.
-    // CGImage origin is top-left; PDF origin is bottom-left — Y axis flipped in conversion.
-    private static func cropToStrip(from pageImage: NSImage?, page: PDFPage, offset: CGPoint) -> NSImage? {
-        guard let pageImage,
-              let cg = pageImage.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return nil }
-
-        let mediaBox = page.bounds(for: .mediaBox)
-        let rotation  = ((page.rotation % 360) + 360) % 360
-        let pageW = rotation == 90 || rotation == 270 ? mediaBox.height : mediaBox.width
-        let pageH = rotation == 90 || rotation == 270 ? mediaBox.width  : mediaBox.height
-
-        let cropH: CGFloat = 100
-        let cropW = min(pageW * 0.4, 200)
-
-        // Default anchor: top-left of the page (PDF y = pageH - cropH from the bottom edge).
-        let defaultY = pageH - cropH
-        let clampedX = min(max(offset.x, 0), pageW - cropW)
-        let clampedY = min(max(defaultY + offset.y, 0), defaultY)
-
-        // Convert PDF rect → CGImage pixel rect (flip Y: CGImage y=0 is top of page).
-        let sX = CGFloat(cg.width)  / pageW
-        let sY = CGFloat(cg.height) / pageH
-        let pixRect = CGRect(
-            x: (clampedX * sX).rounded(),
-            y: ((pageH - clampedY - cropH) * sY).rounded(),
-            width:  (cropW * sX).rounded(),
-            height: (cropH * sY).rounded()
-        )
-
-        guard let cropped = cg.cropping(to: pixRect) else { return nil }
-        return NSImage(cgImage: cropped, size: CGSize(width: cropW, height: cropH))
-    }
 }
 
 // MARK: - Page Crop Overview (minimap)
@@ -580,32 +571,35 @@ struct PageInstrumentPreview: View {
 struct PageCropOverview: View {
     let page: PDFPage
     var offset: CGPoint = .zero
+    /// The area the preview strip shows, in PDF points (`instrumentPreviewCrop`).
+    var visibleSize: CGSize? = nil
     /// When set, the minimap is draggable: reports an incremental PDF-point delta to add
     /// to the shared pan offset (direct manipulation — drag the indicator where you want it).
     var onPanBy: ((CGSize) -> Void)? = nil
 
-    /// Fixed display size for the minimap thumbnail.
-    private let thumbWidth: CGFloat  = 52
-    private let thumbHeight: CGFloat = 70
+    /// The box the minimap fits into; the thumbnail keeps the page's own proportions.
+    private let boxWidth: CGFloat  = 52
+    private let boxHeight: CGFloat = 70
 
     @State private var thumbnailImage: NSImage?
     @State private var lastDrag: CGSize = .zero
 
-    /// (pageW, pageH) in PDF points, honouring rotation.
-    private var pageDims: (w: CGFloat, h: CGFloat) {
-        let mediaBox = page.bounds(for: .mediaBox)
-        let rotation = ((page.rotation % 360) + 360) % 360
-        return rotation == 90 || rotation == 270
-            ? (mediaBox.height, mediaBox.width)
-            : (mediaBox.width,  mediaBox.height)
+    private var pageDims: CGSize { instrumentPreviewPageSize(page) }
+
+    /// The thumbnail's size: the whole page, fitted into the box.
+    private var thumbSize: CGSize {
+        let page = pageDims
+        guard page.width > 0, page.height > 0 else { return CGSize(width: boxWidth, height: boxHeight) }
+        let scale = min(boxWidth / page.width, boxHeight / page.height)
+        return CGSize(width: page.width * scale, height: page.height * scale)
     }
 
     private var dragGesture: some Gesture {
         DragGesture(minimumDistance: 1)
             .onChanged { value in
-                let dims = pageDims
-                let dx = (value.translation.width  - lastDrag.width)  * (dims.w / thumbWidth)
-                let dy = (value.translation.height - lastDrag.height) * (dims.h / thumbHeight)
+                let dims = pageDims, thumb = thumbSize
+                let dx = (value.translation.width  - lastDrag.width)  * (dims.width / thumb.width)
+                let dy = (value.translation.height - lastDrag.height) * (dims.height / thumb.height)
                 lastDrag = value.translation
                 // Drag the indicator: right → window right (+x); down → window down (−y).
                 onPanBy?(CGSize(width: dx, height: -dy))
@@ -614,18 +608,17 @@ struct PageCropOverview: View {
     }
 
     var body: some View {
+        let thumb = thumbSize
         ZStack(alignment: .topLeading) {
             // Full-page thumbnail
             Group {
                 if let img = thumbnailImage {
                     Image(nsImage: img)
                         .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: thumbWidth, height: thumbHeight)
-                        .clipped()
+                        .frame(width: thumb.width, height: thumb.height)
                 } else {
                     Color.gray.opacity(0.1)
-                        .frame(width: thumbWidth, height: thumbHeight)
+                        .frame(width: thumb.width, height: thumb.height)
                 }
             }
             .background(Color.white)
@@ -633,49 +626,32 @@ struct PageCropOverview: View {
             // Crop indicator rectangle overlay
             cropIndicator
         }
-        .frame(width: thumbWidth, height: thumbHeight)
+        .frame(width: thumb.width, height: thumb.height)
         .clipShape(RoundedRectangle(cornerRadius: 3))
         .overlay(RoundedRectangle(cornerRadius: 3).stroke(Color.gray.opacity(0.3), lineWidth: 1))
         .contentShape(Rectangle())
         .gesture(dragGesture, including: onPanBy == nil ? .subviews : .all)
+        .frame(width: boxWidth, height: boxHeight)
         .task {
             thumbnailImage = await Self.renderThumbnailAsync(
                 page: page,
-                width: thumbWidth, height: thumbHeight
+                width: boxWidth, height: boxHeight
             )
         }
     }
 
-    /// Computes the position and size of the highlighted rectangle in the minimap's
-    /// coordinate space, mirroring the crop logic in PageInstrumentPreview.
+    /// The highlighted rectangle: exactly the area the preview strip shows.
     private var cropIndicator: some View {
-        let mediaBox = page.bounds(for: .mediaBox)
-        let rotation  = ((page.rotation % 360) + 360) % 360
-        let pageW = rotation == 90 || rotation == 270 ? mediaBox.height : mediaBox.width
-        let pageH = rotation == 90 || rotation == 270 ? mediaBox.width  : mediaBox.height
-
-        let cropH: CGFloat = 100
-        let cropW = min(pageW * 0.4, 200)
-
-        let defaultY = pageH - cropH
-        let clampedX = min(max(offset.x, 0), pageW - cropW)
-        let clampedY = min(max(defaultY + offset.y, 0), defaultY)
-
-        // Scale from PDF points to thumbnail pixels
-        let scaleX = thumbWidth  / pageW
-        let scaleY = thumbHeight / pageH
-
-        // PDF y=0 is at page bottom; SwiftUI y=0 is at top — flip
-        let rectX = clampedX * scaleX
-        let rectY = (pageH - clampedY - cropH) * scaleY
-        let rectW = cropW  * scaleX
-        let rectH = cropH  * scaleY
-
+        let page = pageDims, thumb = thumbSize
+        let crop = visibleSize ?? instrumentPreviewCrop(pageSize: page, stripSize: .zero)
+        let origin = instrumentPreviewOrigin(offset: offset, pageSize: page, crop: crop)
+        let sx = thumb.width / max(page.width, 1)
+        let sy = thumb.height / max(page.height, 1)
         return Rectangle()
             .stroke(Color.accentColor, lineWidth: 1.5)
             .background(Color.accentColor.opacity(0.15))
-            .frame(width: max(rectW, 4), height: max(rectH, 4))
-            .offset(x: rectX, y: rectY)
+            .frame(width: max(crop.width * sx, 4), height: max(crop.height * sy, 4))
+            .offset(x: origin.x * sx, y: origin.y * sy)
     }
 
     private static func renderThumbnailAsync(

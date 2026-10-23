@@ -489,3 +489,39 @@ struct CLICombineTests {
         }
     }
 }
+
+@Suite("Step 2 preview area")
+struct InstrumentPreviewAreaTests {
+
+    private let a4 = CGSize(width: 595, height: 842)
+
+    @Test("A wide strip shows the full 200 pt width and as much height as its shape allows")
+    func wideStrip() {
+        let crop = instrumentPreviewCrop(pageSize: a4, stripSize: CGSize(width: 900, height: 150))
+        #expect(crop.width == 200)
+        #expect(abs(crop.height - 200 / 6) < 0.001)
+    }
+
+    @Test("A narrow strip shows the full 100 pt height and less width")
+    func narrowStrip() {
+        let crop = instrumentPreviewCrop(pageSize: a4, stripSize: CGSize(width: 150, height: 150))
+        #expect(crop == CGSize(width: 100, height: 100))
+    }
+
+    @Test("The shown area keeps the strip's shape, so nothing on screen is clipped away")
+    func matchesStripShape() {
+        for strip in [CGSize(width: 900, height: 150), CGSize(width: 300, height: 150), CGSize(width: 100, height: 150)] {
+            let crop = instrumentPreviewCrop(pageSize: a4, stripSize: strip)
+            #expect(abs(crop.width / crop.height - strip.width / strip.height) < 0.001)
+        }
+    }
+
+    @Test("Panning stays on the page, and can reach its bottom")
+    func origin() {
+        let crop = CGSize(width: 200, height: 33)
+        #expect(instrumentPreviewOrigin(offset: .zero, pageSize: a4, crop: crop) == .zero)
+        #expect(instrumentPreviewOrigin(offset: CGPoint(x: 150, y: -300), pageSize: a4, crop: crop) == CGPoint(x: 150, y: 300))
+        #expect(instrumentPreviewOrigin(offset: CGPoint(x: 9999, y: -9999), pageSize: a4, crop: crop) == CGPoint(x: 395, y: 809))
+        #expect(instrumentPreviewOrigin(offset: CGPoint(x: -50, y: 50), pageSize: a4, crop: crop) == .zero)
+    }
+}

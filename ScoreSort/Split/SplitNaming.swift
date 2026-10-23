@@ -509,13 +509,12 @@ struct SplitFileNamingRow: View {
     /// Running translation of the in-progress strip drag, so we apply incremental deltas.
     @State private var lastStripDrag: CGSize = .zero
 
-    /// (cropW, cropH, pageW, pageH) in PDF points — mirrors PageInstrumentPreview's crop.
+    /// (cropW, cropH, pageW, pageH) in PDF points: the area the preview strip shows
+    /// (`instrumentPreviewCrop`, the same calculation the preview and minimap use).
     private func cropDims(_ pg: PDFPage) -> (cropW: CGFloat, cropH: CGFloat, pageW: CGFloat, pageH: CGFloat) {
-        let mediaBox = pg.bounds(for: .mediaBox)
-        let rotation = ((pg.rotation % 360) + 360) % 360
-        let pageW = rotation == 90 || rotation == 270 ? mediaBox.height : mediaBox.width
-        let pageH = rotation == 90 || rotation == 270 ? mediaBox.width  : mediaBox.height
-        return (min(pageW * 0.4, 200), 100, pageW, pageH)
+        let pageSize = instrumentPreviewPageSize(pg)
+        let crop = instrumentPreviewCrop(pageSize: pageSize, stripSize: stripSize)
+        return (crop.width, crop.height, pageSize.width, pageSize.height)
     }
 
     /// Adds a PDF-point delta to the shared pan offset, clamped to the page's valid range
@@ -561,8 +560,8 @@ struct SplitFileNamingRow: View {
                     .onChanged { value in
                         guard let pg = page, stripSize.width > 0, stripSize.height > 0 else { return }
                         let d = cropDims(pg)
-                        // `.fill` scales the crop uniformly to cover the strip.
-                        let scale = max(stripSize.width / d.cropW, stripSize.height / d.cropH)
+                        // The shown area exactly fills the strip.
+                        let scale = stripSize.width / d.cropW
                         let dx = (value.translation.width  - lastStripDrag.width)  / scale
                         let dy = (value.translation.height - lastStripDrag.height) / scale
                         lastStripDrag = value.translation
@@ -794,7 +793,9 @@ struct SplitFileNamingRow: View {
                         .overlay { panOverlay }
 
                     // Minimap: full-page thumbnail with crop indicator (drag to reposition)
-                    PageCropOverview(page: pg, offset: previewOffset, onPanBy: applyPan)
+                    PageCropOverview(page: pg, offset: previewOffset,
+                                     visibleSize: CGSize(width: cropDims(pg).cropW, height: cropDims(pg).cropH),
+                                     onPanBy: applyPan)
                         .frame(width: 52, height: 70)
                         .padding(.top, (150 - 70) / 2)  // vertically centre against the 150pt strip
                 }
