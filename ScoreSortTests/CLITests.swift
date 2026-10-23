@@ -525,3 +525,19 @@ struct InstrumentPreviewAreaTests {
         #expect(instrumentPreviewOrigin(offset: CGPoint(x: -50, y: 50), pageSize: a4, crop: crop) == .zero)
     }
 }
+
+@Suite("Naming preview page")
+struct FirstKeptPageTests {
+    @Test("A skipped first page gives way to the first page that's kept")
+    func skipsSkipped() {
+        #expect(firstKeptPage(fileStart: 10, fileSize: 8, skippedPages: [10]) == 11)
+        #expect(firstKeptPage(fileStart: 10, fileSize: 8, skippedPages: [10, 11, 12]) == 13)
+        #expect(firstKeptPage(fileStart: 10, fileSize: 8, skippedPages: [3, 14]) == 10)
+    }
+
+    @Test("Every page skipped: the file's first page")
+    func allSkipped() {
+        #expect(firstKeptPage(fileStart: 4, fileSize: 2, skippedPages: [4, 5]) == 4)
+        #expect(firstKeptPage(fileStart: 4, fileSize: 0, skippedPages: []) == 4)
+    }
+}

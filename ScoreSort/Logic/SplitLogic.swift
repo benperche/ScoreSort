@@ -303,6 +303,13 @@ func splitA3Pages(_ doc: PDFDocument, leftFirst: Bool) -> PDFDocument {
                leftFirst: leftFirst)
 }
 
+/// The page to show for a file in the naming steps: its first page that will actually be
+/// saved, so a skipped first page (a scan's black background, a blank) doesn't stand in
+/// for the part. Falls back to the file's first page when every page is skipped.
+func firstKeptPage(fileStart: Int, fileSize: Int, skippedPages: Set<Int>) -> Int {
+    (fileStart..<(fileStart + max(fileSize, 0))).first { !skippedPages.contains($0) } ?? fileStart
+}
+
 // MARK: - Writing split files
 
 /// One file a split will write: its name (with `.pdf`) and the pages (0-based, in order)

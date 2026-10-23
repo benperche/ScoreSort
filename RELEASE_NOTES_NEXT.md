@@ -24,6 +24,7 @@ _Draft for the next release after 1.10.1. Keep adding to this as more changes la
 
 ## 🐞 Fixed
 
+- **Naming a part shows a page that's actually in it.** If a part's first page was skipped (a black scanner edge, a blank page), the preview in Step 2, and the thumbnail in Step 3, showed that skipped page instead of the first real page of music.
 - **The little page map beside each page preview when naming parts (Split and Bulk Rename) now marks exactly what you can see.** Its rectangle used to be about three times taller than the area actually shown, and you couldn't pan all the way to the bottom of a page.
 - **After splitting a scan, Delete skips one page again**, not the whole file, as intended — so removing a stray blank page doesn't take the rest of the part with it.
 - **Combine says what went wrong instead of “Failed to create PDF”.** If a file in the list has been deleted or can’t be read since you added it, ScoreSort now names it and says why, rather than giving a one-line error — or, if only some files were affected, quietly leaving those parts out of the PDF. Problems saving to a folder (such as a read-only shared drive) are explained too.

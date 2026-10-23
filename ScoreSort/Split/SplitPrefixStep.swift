@@ -539,7 +539,8 @@ struct PageInstrumentPreview: View {
             }
         }
         .clipped()
-        .task {
+        // Keyed to the page, so a row that's handed a different page re-renders.
+        .task(id: ObjectIdentifier(page)) {
             cachedPageImage = await Self.renderFullPageAsync(page: page)
         }
     }
@@ -632,7 +633,7 @@ struct PageCropOverview: View {
         .contentShape(Rectangle())
         .gesture(dragGesture, including: onPanBy == nil ? .subviews : .all)
         .frame(width: boxWidth, height: boxHeight)
-        .task {
+        .task(id: ObjectIdentifier(page)) {
             thumbnailImage = await Self.renderThumbnailAsync(
                 page: page,
                 width: boxWidth, height: boxHeight

@@ -1044,7 +1044,8 @@ struct SplitView: View {
                 if !isFileFullySkipped(fileIndex) {
                     let proposed = splitOutputFileName(base: baseFileName, separator: filenameSeparator,
                                                        suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex)
-                    let firstPage = document.page(at: pagePos)
+                    let firstPage = document.page(at: firstKeptPage(fileStart: pagePos, fileSize: fileSize,
+                                                                    skippedPages: skippedPages))
                     items.append(PrefixItem(id: fileIndex, proposedName: proposed, page: firstPage))
                 }
                 pagePos += fileSize

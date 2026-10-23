@@ -359,7 +359,9 @@ struct SplitNamingStageView: View {
                         ForEach(visibleFileIndices, id: \.self) { fileIndex in
                             SplitFileNamingRow(
                                 fileIndex: fileIndex,
-                                page: pdfDocument.page(at: firstPageIndex(for: fileIndex)),
+                                page: pdfDocument.page(at: firstKeptPage(fileStart: firstPageIndex(for: fileIndex),
+                                                                         fileSize: fileSizes[fileIndex],
+                                                                         skippedPages: skippedPages)),
                                 subtitle: subtitle(for: fileIndex),
                                 baseFileName: baseFileName,
                                 suffix: Binding(
