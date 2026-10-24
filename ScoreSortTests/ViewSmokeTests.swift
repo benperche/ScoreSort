@@ -66,6 +66,11 @@ struct ViewSmokeTests {
                               onSplit: { _ in }, onCancel: {}))
     }
 
+    @Test("AI Assistants settings render")
+    func aiAssistantsPreferences() {
+        render(AIAssistantsPreferencesView())
+    }
+
     @Test("Rotate tab renders")
     func rotateTab() {
         render(RotateView())

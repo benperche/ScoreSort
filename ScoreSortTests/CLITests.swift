@@ -704,3 +704,79 @@ struct CLIFindTests {
         #expect(names == ["New Suite.pdf", "Old Suite.pdf"])
     }
 }
+
+@Suite("Connecting AI assistants")
+struct AIConnectionTests {
+
+    private func dict(_ data: Data) throws -> [String: Any] {
+        try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+    }
+
+    @Test("Adding ScoreSort keeps every other setting and server")
+    func addKeepsEverything() throws {
+        let existing = Data(#"{"preferences":{"menuBarEnabled":false},"mcpServers":{"other":{"command":"/bin/other"}}}"#.utf8)
+        let entry = AIConnection.serverEntry(executable: "/Applications/ScoreSort.app/Contents/MacOS/ScoreSort", debugBuild: false)
+        let updated = try dict(AIConnection.settingsAdding(entry, to: existing))
+        #expect((updated["preferences"] as? [String: Any])?["menuBarEnabled"] as? Bool == false)
+        let servers = try #require(updated["mcpServers"] as? [String: Any])
+        #expect(servers["other"] != nil)
+        let scoresort = try #require(servers["scoresort"] as? [String: Any])
+        #expect(scoresort["args"] as? [String] == ["mcp"])
+        #expect(scoresort["env"] == nil)
+        #expect(AIConnection.configuredExecutable(in: try AIConnection.settingsAdding(entry, to: existing))
+                == "/Applications/ScoreSort.app/Contents/MacOS/ScoreSort")
+    }
+
+    @Test("A missing or empty settings file is started fresh")
+    func freshFile() throws {
+        let entry = AIConnection.serverEntry(executable: "/x/ScoreSort", debugBuild: true)
+        for data in [nil, Data(), Data("  \n".utf8)] as [Data?] {
+            let updated = try dict(AIConnection.settingsAdding(entry, to: data))
+            let scoresort = (updated["mcpServers"] as? [String: Any])?["scoresort"] as? [String: Any]
+            #expect((scoresort?["env"] as? [String: String])?["LLVM_PROFILE_FILE"] == "/dev/null")
+        }
+    }
+
+    @Test("A settings file that isn't JSON is never overwritten")
+    func unreadableFileRefused() {
+        #expect(throws: CommandError.self) {
+            try AIConnection.settingsAdding([:], to: Data("not json {".utf8))
+        }
+        #expect(throws: CommandError.self) {
+            try AIConnection.settingsRemoving(from: Data("[1,2]".utf8))
+        }
+    }
+
+    @Test("Removing ScoreSort leaves the other servers")
+    func remove() throws {
+        let existing = Data(#"{"mcpServers":{"other":{"command":"/bin/other"},"scoresort":{"command":"/x"}}}"#.utf8)
+        let updated = try dict(AIConnection.settingsRemoving(from: existing))
+        let servers = try #require(updated["mcpServers"] as? [String: Any])
+        #expect(servers["other"] != nil && servers["scoresort"] == nil)
+        #expect(AIConnection.configuredExecutable(in: try AIConnection.settingsRemoving(from: existing)) == nil)
+    }
+
+    @Test("The command script runs this copy, and is recognised again — even with quotes in the path")
+    func wrapperScript() {
+        for path in ["/Applications/ScoreSort.app/Contents/MacOS/ScoreSort", "/Users/me/Ben's Apps/ScoreSort.app/Contents/MacOS/ScoreSort"] {
+            let script = AIConnection.wrapperScript(executable: path)
+            #expect(script.hasPrefix("#!/bin/sh\n"))
+            #expect(AIConnection.wrapperExecutable(script) == path)
+        }
+        #expect(AIConnection.wrapperExecutable("#!/bin/sh\necho hello\n") == nil)
+    }
+
+    @Test("A translocated app is spotted")
+    func translocation() {
+        #expect(AIConnection.isTranslocated("/private/var/folders/x/AppTranslocation/ABC/d/ScoreSort.app/Contents/MacOS/ScoreSort"))
+        #expect(!AIConnection.isTranslocated("/Applications/ScoreSort.app/Contents/MacOS/ScoreSort"))
+    }
+
+    @Test("The setup snippet is valid MCP config")
+    func snippet() throws {
+        let text = AIConnection.setupSnippet(executable: "/Applications/ScoreSort.app/Contents/MacOS/ScoreSort", debugBuild: false)
+        let parsed = try dict(Data(text.utf8))
+        #expect(((parsed["mcpServers"] as? [String: Any])?["scoresort"] as? [String: Any])?["command"] as? String
+                == "/Applications/ScoreSort.app/Contents/MacOS/ScoreSort")
+    }
+}

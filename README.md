@@ -367,23 +367,16 @@ A Combine preset can carry its ensemble's stamp, so applying the preset arms the
 
 ### Using ScoreSort with AI
 
-ScoreSort's own functions can be run by an AI assistant (or a script) without opening the window. The AI does what it's good at — looking at the pages and reading the part names — and ScoreSort does the PDF work, exactly as the app would.
+ScoreSort's own functions can be run by an AI assistant (or a script) without opening the window. The AI does what it's good at — looking at the pages, reading the part names, making sensible choices about who plays what — and ScoreSort does the PDF work, exactly as the app would.
 
-**With an AI that has a terminal** (Claude Code, Codex, …), the app is also a command-line tool:
+**Setting it up:** open **ScoreSort ▸ Settings ▸ AI Assistants** (or **Help ▸ Use ScoreSort with an AI Assistant…**):
+- **Connect to Claude** adds ScoreSort's tools to the Claude desktop app in one click (Claude restarts if it's open). Then just ask Claude, in a new chat.
+- **Install Command** adds a `scoresort` command for AI tools that work in a terminal (Claude Code, Codex, …) and for scripts. You may be asked for your password.
+- **Copy Setup** gives the snippet for any other app that supports MCP servers.
 
-```bash
-/Applications/ScoreSort.app/Contents/MacOS/ScoreSort help
-```
+Keep ScoreSort in your Applications folder: if you move it, connect again (the pane notices).
 
-To type just `scoresort`, put a two-line script on your PATH (a script rather than a symlink, so the app's frameworks still load):
-
-```bash
-printf '#!/bin/sh\nexec /Applications/ScoreSort.app/Contents/MacOS/ScoreSort "$@"\n' > /usr/local/bin/scoresort && chmod +x /usr/local/bin/scoresort
-```
-
-(If `/usr/local/bin` doesn't exist or isn't writable, use any folder on your PATH.)
-
-Then ask, for example: *"Use scoresort to split ~/Scans/Holst.pdf into parts, named and numbered in band score order, in ~/Scans/Holst Parts."* — or *"Combine ~/Scans/Holst Parts for my Junior Band preset; the bass guitars can read the tuba part."* The AI should start with `scoresort help ai`, a short guide to the recipes.
+Then ask, for example: *"Split the Holst scan in my Downloads into parts, named and numbered in band score order"* — or *"Combine my Holst parts for the Junior Band preset; the bass guitars can read the tuba part."* You don't need paths: ScoreSort finds files by name in Downloads, Desktop and Documents. (Dragging a file into the chat uploads a copy instead, which ScoreSort can't work on.) The first time it opens files there, macOS asks whether to allow it. An AI with a terminal should start with `scoresort help ai`, a short guide to the recipes.
 
 | Command | Does |
 |---|---|
@@ -399,7 +392,7 @@ Then ask, for example: *"Use scoresort to split ~/Scans/Holst.pdf into parts, na
 
 Every command takes `--json`. Nothing is overwritten without `--overwrite`, and everything that writes takes `--dry-run`.
 
-**With an AI chat app** (Claude's desktop app, or another app that supports MCP), add ScoreSort as an MCP server. For Claude, in *Settings ▸ Developer ▸ Edit Config* (`claude_desktop_config.json`):
+**Setting it up by hand** (if you'd rather): the command line is the app itself, `/Applications/ScoreSort.app/Contents/MacOS/ScoreSort <command>`, and the MCP server is the same with `mcp`. For Claude, quit Claude, then add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 
 ```json
 {
@@ -412,7 +405,7 @@ Every command takes `--json`. Nothing is overwritten without `--overwrite`, and 
 }
 ```
 
-Restart the app, and the ScoreSort tools appear (`scoresort_split`, `scoresort_preview`, …). Page previews come back as images, so the chat can see which part each page is. You don't need paths: "the Holst scan in my Downloads" is enough — it finds files by name in Downloads, Desktop and Documents. (Dragging a file into the chat uploads a copy instead, which ScoreSort can't work on.)
+(Edit it only while Claude is quit — Claude rewrites the file from memory while it runs.)
 
 ---
 

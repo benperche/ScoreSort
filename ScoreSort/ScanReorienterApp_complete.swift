@@ -249,6 +249,9 @@ struct HelpCommands: Commands {
                 appState.showingKeyboardHelp = true
             }
             .keyboardShortcut("`", modifiers: .command)
+
+            Divider()
+            OpenAIAssistantsSettingsButton()
         }
     }
 }
@@ -1228,6 +1231,10 @@ struct AppPreferencesView: View {
             )
             .tabItem { Label("Renamer", systemImage: "folder.badge.gearshape") }
             .tag("renamer")
+
+            AIAssistantsPreferencesView()
+                .tabItem { Label("AI Assistants", systemImage: "sparkles") }
+                .tag("ai")
         }
         .frame(width: 680, height: 720)
         .onAppear { selectedTab = preferredPrefsTab }

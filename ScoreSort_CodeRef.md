@@ -892,6 +892,13 @@ The Rotate tab is deliberately excluded — it works in rotation *metadata*, whi
 
 **MCP** (`MCPServer.swift`): `ScoreSortMCPServer.tools` declares each tool's params (`ParamKind`: string, number, boolean, strings, pairs → `--opt "KEY=VALUE"`, allocations `[{part, file, copies?}]` → `--allocate "PART=FILE[:N]"`) mapped to CLI options; `argv(for:arguments:)` builds the command line (options, then `--`, then positionals) and `callTool` runs the same `CommandSpec`. `handle(_:)` is the pure JSON-RPC dispatcher (initialize — echoes a supported protocol version —, ping, tools/list, tools/call, empty resources/prompts lists, -32601 otherwise); `run()` reads lines from stdin, writes to a `dup` of stdout with fd 1 redirected to stderr. Tool results: text (summary + JSON), `structuredContent`, up to 12 images (preview), `isError`. `scoresort_preview` defaults to top crops in contact sheets at 450 px in a temp folder. `aiGuideText` is both `help ai` and `scoresort_guide`.
 
+### Settings ▸ AI Assistants (`CLI/AIAssistantsPreferences.swift`, `Logic/AIConnection.swift`)
+
+The third Preferences tab (`tag("ai")`; also **Help ▸ Use ScoreSort with an AI Assistant…** via `OpenAIAssistantsSettingsButton`, which sets `preferredPrefsTab` and calls `openSettings`). `AIAssistantsModel` (MainActor) reports and changes two things, both pointed at `Bundle.main.executablePath`:
+- **Claude desktop app** (`com.anthropic.claudefordesktop`): states not installed / not connected / connected / connected to another copy. `setClaudeConnection(_:)` quits Claude if running (confirmed first in the view; waits up to 20 s plus a moment for its own write-back), writes `AIConnection.settingsAdding`/`settingsRemoving` (pure: only `mcpServers.scoresort` changes; a non-object file throws and is left alone; empty/missing starts fresh), restores 0600, then reopens Claude. Debug builds add `env.LLVM_PROFILE_FILE=/dev/null`.
+- **Command line**: `/usr/local/bin/scoresort`, a `wrapperScript` (`exec '<executable>' "$@"`, shell-quoted; a script, not a symlink, so frameworks load). Writes directly, falling back to `NSAppleScript` `do shell script … with administrator privileges`. `wrapperExecutable` parses an installed script back, so a foreign `scoresort` is reported (`occupied`) and never replaced.
+- A translocated app (`/AppTranslocation/`) is refused with "move it to Applications first". **Copy Setup** puts `setupSnippet` on the pasteboard.
+
 ## Shared Infrastructure
 
 **`PDFAlertHandler`** — `typealias PDFAlertHandler = (_ title: String, _ message: String, _ isError: Bool) -> Void`. All PDF save/export methods take this callback; they never show UI directly.
