@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-ScoreSort is a macOS SwiftUI app for managing music PDFs. It has five tools, each a tab: Combine PDFs, Sheet Music Renamer, Split PDF, Rotate Pages, Stamp. macOS 14.0+, Xcode 16+. Bundle id `benperche.ScoreSort`. Distributed via GitHub releases with Sparkle auto-update; App Store planned.
+ScoreSort is a macOS SwiftUI app for managing music PDFs. It has five tools, each a tab: Combine PDFs, Sheet Music Renamer, Split PDF, Rotate Pages, Stamp. macOS 14.0+, Xcode 16+. Bundle id `benperche.ScoreSort`. Distributed via GitHub releases (Developer ID–signed, notarised DMG) with Sparkle auto-update; not on the App Store.
 
 ## Read this first
 
@@ -89,7 +89,7 @@ These are non-obvious *whys* established across the sessions that built the app 
 - **Delete/backspace uses `NSEvent.addLocalMonitorForEvents(matching: .keyDown)`** — SwiftUI's `onKeyPress` does not reliably catch the delete key on macOS.
 - **Preset/name matching prefers graceful fallback over partial fill** — if bookmark labels don't cleanly parse as `"NN - Piece - Part"`, fall back to default behaviour rather than half-filling. Unmatched files/parts are highlighted orange and left for manual matching on purpose: real ensembles (Sydney school bands) have irregular parts — e.g. bass-guitar players covering whatever part exists — that Ben is always happy to assign by hand.
 - **Version comes from `Bundle.main` `CFBundleShortVersionString`**, not a hardcoded constant, and tracks the GitHub release version.
-- **Distribution is unsigned direct distribution** (Gatekeeper "Open Anyway" workaround documented in the README), chosen over the App Store / paid signing at beta stage.
+- **Distribution is direct, not the App Store**: a Developer ID–signed, notarised and stapled DMG on GitHub Releases, updated with Sparkle (steps in the README's "Releasing Updates"). There are no App Store plans, so the AI access (CLI + MCP, which needs to read files wherever the user keeps them) doesn't have to survive sandboxing.
 
 ## Workflow conventions (from project memory)
 

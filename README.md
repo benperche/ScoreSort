@@ -112,16 +112,13 @@ Mark parts as your ensemble's — "Property of Example School Band" — the way 
 ### Requirements
 - macOS 14.0 (Sonoma) or later
 
-### Download from the App Store
-*(Coming soon)*
+### Download
 
-### Download from GitHub
+1. Download the latest `ScoreSort.dmg` from the [Releases](https://github.com/benperche/ScoreSort/releases) page
+2. Open it and drag **ScoreSort** into your **Applications** folder
+3. Open ScoreSort from Applications. macOS asks once whether to open an app downloaded from the internet — click **Open**. (ScoreSort is signed and notarised by Apple.)
 
-1. Download the latest `ScoreSort.zip` from the [Releases](https://github.com/benperche/ScoreSort/releases) page
-2. Unzip it and move **ScoreSort.app** to your Applications folder
-3. Double-click to open — macOS will show *"ScoreSort cannot be opened because it is from an unidentified developer"*
-4. Open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway**
-5. Confirm in the dialog that appears — you'll only need to do this once
+ScoreSort updates itself after that. Keep it in Applications — that's also where AI assistants connected to it expect to find it.
 
 ### Building from Source
 
@@ -487,6 +484,8 @@ ScoreSort updates itself with [Sparkle](https://sparkle-project.org). The update
 6. **Update [`docs/appcast.xml`](docs/appcast.xml)**: add (or fill in) an `<item>` with the new `title`, `sparkle:version` (build number), `sparkle:shortVersionString`, `pubDate`, `releaseNotesLink`, and the `enclosure` `url`, `sparkle:edSignature`, and `length` from step 5. A template is included in the file. **Keep the `<link>` and `<sparkle:informationalUpdate>` (`belowVersion` 9) block on the newest item**: 1.5 and 1.5.1 were sandboxed and can't run Sparkle's installer, so for them the update is shown as a link to the download page instead of an install that fails.
 
 7. **Create a GitHub Release** tagged `vX.X`, attach `ScoreSort.dmg`, and paste the release notes (these become the `releaseNotesLink` page).
+
+   **Check the AI connection with the released build** (it's the only build that runs exactly as users' will): install from the DMG, open ScoreSort, **Settings ▸ AI Assistants ▸ Connect to Claude**, then ask Claude in a new chat to "find my most recent PDF with ScoreSort". If Claude lists files, the notarised app runs fine when Claude starts it.
 
 8. **Commit & push `docs/appcast.xml`** — GitHub Pages serves the new feed and existing users are offered the update in-app.
 
