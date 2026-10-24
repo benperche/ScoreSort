@@ -653,3 +653,54 @@ struct AllocationTests {
         #expect(argv == ["--preset", "Band", "--allocate", "Bass Guitar=Tuba", "--allocate", "Clarinet=Clarinet 1:5", "--", "/x/Parts"])
     }
 }
+
+@Suite("Command: find")
+struct CLIFindTests {
+
+    @Test("Every word must appear; prefixes and longer fragments match; punctuation ignored")
+    func matching() {
+        let words = ScoreSortCLI.searchWords("holst scan")
+        #expect(ScoreSortCLI.nameMatches("Holst_First-Suite (scan)", words: words))
+        #expect(!ScoreSortCLI.nameMatches("Holst First Suite", words: words))
+        #expect(ScoreSortCLI.nameMatches("Clarinet 2", words: ScoreSortCLI.searchWords("clar")))
+        #expect(ScoreSortCLI.nameMatches("AltoSaxes", words: ScoreSortCLI.searchWords("saxe")))
+        #expect(ScoreSortCLI.nameMatches("Élégie", words: ScoreSortCLI.searchWords("elegie")))
+    }
+
+    @Test("Finds PDFs and folders by name, newest first, skipping developer folders")
+    func finds() throws {
+        let root = temporaryFolder("find")
+        let parts = root.appendingPathComponent("Holst Parts")
+        let junk = root.appendingPathComponent("node_modules")
+        try FileManager.default.createDirectory(at: parts, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: junk, withIntermediateDirectories: true)
+        writeDrawnPDF(pages: 3, to: parts.appendingPathComponent("Holst Flute.pdf"))
+        writeDrawnPDF(pages: 1, to: root.appendingPathComponent("Holst Scan.pdf"))
+        writeDrawnPDF(pages: 1, to: junk.appendingPathComponent("Holst Hidden.pdf"))
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(-3600)],
+                                              ofItemAtPath: parts.appendingPathComponent("Holst Flute.pdf").path)
+
+        let pdfs = try ScoreSortCLI.runFind(words: ["holst"], folders: [root.path], kind: "pdf", limit: 20)
+        let results = try #require(pdfs.json["results"] as? [[String: Any]])
+        #expect(results.compactMap { $0["name"] as? String } == ["Holst Scan.pdf", "Holst Flute.pdf"])
+        #expect(results.last?["pages"] as? Int == 3)
+
+        let folders = try ScoreSortCLI.runFind(words: ["holst", "parts"], folders: [root.path], kind: "folder", limit: 20)
+        let folder = try #require((folders.json["results"] as? [[String: Any]])?.first)
+        #expect(folder["name"] as? String == "Holst Parts")
+        #expect(folder["files"] as? Int == 1)
+    }
+
+    @Test("A file dated in the future doesn't jump to the top")
+    func futureDates() throws {
+        let root = temporaryFolder("find")
+        writeDrawnPDF(pages: 1, to: root.appendingPathComponent("Old Suite.pdf"))
+        writeDrawnPDF(pages: 1, to: root.appendingPathComponent("New Suite.pdf"))
+        try FileManager.default.setAttributes([.modificationDate: Date().addingTimeInterval(86_400 * 365 * 50),
+                                               .creationDate: Date().addingTimeInterval(-86_400)],
+                                              ofItemAtPath: root.appendingPathComponent("Old Suite.pdf").path)
+        let result = try ScoreSortCLI.runFind(words: ["suite"], folders: [root.path], kind: "pdf", limit: 20)
+        let names = (result.json["results"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
+        #expect(names == ["New Suite.pdf", "Old Suite.pdf"])
+    }
+}

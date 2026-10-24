@@ -387,6 +387,7 @@ Then ask, for example: *"Use scoresort to split ~/Scans/Holst.pdf into parts, na
 
 | Command | Does |
 |---|---|
+| `find` | Find PDFs or folders by name in Downloads, Desktop and Documents — so you can say "the Holst scan" instead of a path |
 | `info` | Pages, sizes, bookmarks, and whether it's a scan of double pages |
 | `preview` | Page images — `--top --sheet` gives every page's top in one labelled image, for reading part names |
 | `split-scans` | Split Double Pages: cut two-page scans into single pages |
@@ -411,7 +412,7 @@ Every command takes `--json`. Nothing is overwritten without `--overwrite`, and 
 }
 ```
 
-Restart the app, and the ScoreSort tools appear (`scoresort_split`, `scoresort_preview`, …). Page previews come back as images, so the chat can see which part each page is. Give it full paths to your files.
+Restart the app, and the ScoreSort tools appear (`scoresort_split`, `scoresort_preview`, …). Page previews come back as images, so the chat can see which part each page is. You don't need paths: "the Holst scan in my Downloads" is enough — it finds files by name in Downloads, Desktop and Documents. (Dragging a file into the chat uploads a copy instead, which ScoreSort can't work on.)
 
 ---
 

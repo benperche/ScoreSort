@@ -64,6 +64,12 @@ enum ScoreSortMCPServer {
             Tool(name: "scoresort_guide", command: "help",
                  description: "How to use ScoreSort's tools for common jobs (split and name parts, scans of double pages, score-order renaming, combining with presets). Read this first.",
                  params: []),
+            Tool(name: "scoresort_find", command: "find",
+                 description: "Find the files the person means — PDFs, images or folders by name in their Downloads, Desktop and Documents (newest first) — to get the paths the other tools need. Use this whenever you're given a name or description rather than a full path (\"the Holst scan\", \"my Junior Band parts folder\"). With no words, lists their most recent PDFs.",
+                 params: [Param(key: "words", option: nil, kind: .strings, description: "Words from the name, e.g. [\"holst\", \"scan\"]. All must appear, in any order."),
+                          Param(key: "kind", option: "kind", kind: .string, description: "pdf (default), image (photos or scans saved as pictures), folder, or any.", choices: ["pdf", "image", "folder", "any"]),
+                          Param(key: "folders", option: "in", kind: .strings, description: "Absolute paths of folders to look in instead of Downloads, Desktop and Documents."),
+                          Param(key: "limit", option: "limit", kind: .number, description: "How many results (default 20).")]),
             Tool(name: "scoresort_info", command: "info",
                  description: "Describe a PDF: page count, page sizes, bookmarks (with the part names ScoreSort would suggest), and whether it's a scan of double pages that needs scoresort_split_scans first.",
                  params: [Param(key: "file", option: nil, kind: .string, description: "Absolute path to the PDF.", required: true)]),
@@ -255,7 +261,8 @@ enum ScoreSortMCPServer {
 
     static var instructions: String {
         """
-        ScoreSort manages music parts as PDFs. To split a PDF into named parts: scoresort_info, then \
+        ScoreSort manages music parts as PDFs. Given a name rather than a path, find it with scoresort_find. \
+        To split a PDF into named parts: scoresort_info, then \
         scoresort_preview to read the part names off the tops of the pages, then scoresort_split with \
         dryRun, then without. Scans with two pages side by side go through scoresort_split_scans first. \
         scoresort_guide has the full recipes. Use absolute paths.
@@ -382,7 +389,9 @@ Over MCP, the commands below are the scoresort_* tools (scoresort_split, …) wi
 options as JSON fields (dryRun, scoreOrder, parts: [{pages, name}], …).
 
 Ground rules
-  • Use absolute paths.
+  • Use absolute paths. Given a name instead ("the Holst scan", "my Junior Band parts"),
+    find it: ScoreSort find holst scan   (or --kind folder). It looks in Downloads, Desktop
+    and Documents, newest first. If several match, ask which.
   • ScoreSort can't read text on pages. You read part names yourself, from `preview` images.
   • Every command that writes has --dry-run. Nothing is overwritten without --overwrite.
     `rename` only plans until --apply. Dry-run first, read the warnings, then run it.
