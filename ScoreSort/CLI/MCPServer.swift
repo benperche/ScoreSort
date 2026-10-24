@@ -65,10 +65,10 @@ enum ScoreSortMCPServer {
                  description: "How to use ScoreSort's tools for common jobs (split and name parts, scans of double pages, score-order renaming, combining with presets). Read this first.",
                  params: []),
             Tool(name: "scoresort_find", command: "find",
-                 description: "Find the files the person means — PDFs, images or folders by name in their Downloads, Desktop and Documents (newest first) — to get the paths the other tools need. Use this whenever you're given a name or description rather than a full path (\"the Holst scan\", \"my Junior Band parts folder\"). With no words, lists their most recent PDFs.",
+                 description: "Find the files the person means by name — PDFs, images or folders, newest first — to get the paths the other tools need. Searches only the folders the person has shared with AI assistants in ScoreSort's settings (or a folder they've given you by path). Use it whenever you're given a name rather than a full path (\"the Holst scan\", \"my Junior Band parts folder\"). If it finds nothing or there are no shared folders, ask the person to select the file in Finder, press Option-Command-C (Copy as Pathname) and paste the path — dragging a file into the chat sends you a copy, which ScoreSort can't use.",
                  params: [Param(key: "words", option: nil, kind: .strings, description: "Words from the name, e.g. [\"holst\", \"scan\"]. All must appear, in any order."),
                           Param(key: "kind", option: "kind", kind: .string, description: "pdf (default), image (photos or scans saved as pictures), folder, or any.", choices: ["pdf", "image", "folder", "any"]),
-                          Param(key: "folders", option: "in", kind: .strings, description: "Absolute paths of folders to look in instead of Downloads, Desktop and Documents."),
+                          Param(key: "folders", option: "in", kind: .strings, description: "Absolute paths of folders to look in instead of the shared ones — only folders the person has given you."),
                           Param(key: "limit", option: "limit", kind: .number, description: "How many results (default 20).")]),
             Tool(name: "scoresort_info", command: "info",
                  description: "Describe a PDF: page count, page sizes, bookmarks (with the part names ScoreSort would suggest), and whether it's a scan of double pages that needs scoresort_split_scans first.",
@@ -261,7 +261,10 @@ enum ScoreSortMCPServer {
 
     static var instructions: String {
         """
-        ScoreSort manages music parts as PDFs. Given a name rather than a path, find it with scoresort_find. \
+        ScoreSort manages music parts as PDFs. It works on files on the person's Mac, by path: given a name, \
+        find it with scoresort_find (it searches the folders they've shared); otherwise ask them to copy the \
+        path in Finder (select, Option-Command-C) and paste it. A file dragged into the chat is a copy \
+        ScoreSort can't reach. \
         To split a PDF into named parts: scoresort_info, then \
         scoresort_preview to read the part names off the tops of the pages, then scoresort_split with \
         dryRun, then without. Scans with two pages side by side go through scoresort_split_scans first. \
@@ -389,9 +392,12 @@ Over MCP, the commands below are the scoresort_* tools (scoresort_split, …) wi
 options as JSON fields (dryRun, scoreOrder, parts: [{pages, name}], …).
 
 Ground rules
-  • Use absolute paths. Given a name instead ("the Holst scan", "my Junior Band parts"),
-    find it: ScoreSort find holst scan   (or --kind folder). It looks in Downloads, Desktop
-    and Documents, newest first. If several match, ask which.
+  • Work from paths on the person's Mac. Given a name instead ("the Holst scan", "my Junior
+    Band parts"), find it: ScoreSort find holst scan   (or --kind folder). It searches only
+    the folders they've shared with AI assistants in ScoreSort's settings, newest first. If
+    several match, ask which. If nothing's found, or nothing's shared, ask them to select the
+    file or folder in Finder, press ⌥⌘C (Copy as Pathname) and paste it. A file dragged into
+    a chat is a copy in the conversation, not on the Mac — ScoreSort can't use it.
   • ScoreSort can't read text on pages. You read part names yourself, from `preview` images.
   • Every command that writes has --dry-run. Nothing is overwritten without --overwrite.
     `rename` only plans until --apply. Dry-run first, read the warnings, then run it.

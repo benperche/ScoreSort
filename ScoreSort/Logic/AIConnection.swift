@@ -20,6 +20,22 @@ enum AIConnection {
     static let serverName = "scoresort"
     static let commandLinePath = "/usr/local/bin/scoresort"
 
+    /// Folders the person has shared with AI assistants (Settings ▸ AI Assistants): the only
+    /// places `find` looks by name. Kept in ScoreSort's own preferences, which the command
+    /// line and MCP server read too — they're the same app.
+    static let sharedFoldersKey = "aiSharedFolders"
+
+    static var sharedFolders: [URL] {
+        (UserDefaults.standard.stringArray(forKey: sharedFoldersKey) ?? [])
+            .map { URL(fileURLWithPath: $0, isDirectory: true) }
+    }
+
+    static func setSharedFolders(_ folders: [URL]) {
+        var seen = Set<String>()
+        let paths = folders.map(\.standardizedFileURL.path).filter { seen.insert($0).inserted }
+        UserDefaults.standard.set(paths, forKey: sharedFoldersKey)
+    }
+
     static var claudeConfigURL: URL {
         FileManager.default.homeDirectoryForCurrentUser
             .appendingPathComponent("Library/Application Support/Claude/claude_desktop_config.json")

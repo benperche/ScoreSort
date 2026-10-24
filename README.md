@@ -368,16 +368,17 @@ ScoreSort's own functions can be run by an AI assistant (or a script) without op
 
 **Setting it up:** open **ScoreSort ▸ Settings ▸ AI Assistants** (or **Help ▸ Use ScoreSort with an AI Assistant…**):
 - **Connect to Claude** adds ScoreSort's tools to the Claude desktop app in one click (Claude restarts if it's open). Then just ask Claude, in a new chat.
+- **Folders your assistant can look in**: add the folders you keep parts and scans in. Your assistant can find files there by name ("the Holst scan") — and can't see anything else on your Mac.
 - **Install Command** adds a `scoresort` command for AI tools that work in a terminal (Claude Code, Codex, …) and for scripts. You may be asked for your password.
 - **Copy Setup** gives the snippet for any other app that supports MCP servers.
 
 Keep ScoreSort in your Applications folder: if you move it, connect again (the pane notices).
 
-Then ask, for example: *"Split the Holst scan in my Downloads into parts, named and numbered in band score order"* — or *"Combine my Holst parts for the Junior Band preset; the bass guitars can read the tuba part."* You don't need paths: ScoreSort finds files by name in Downloads, Desktop and Documents. (Dragging a file into the chat uploads a copy instead, which ScoreSort can't work on.) The first time it opens files there, macOS asks whether to allow it. An AI with a terminal should start with `scoresort help ai`, a short guide to the recipes.
+Then ask, for example: *"Split the Holst scan in my Scans folder into parts, named and numbered in band score order"* — or *"Combine my Holst parts for the Junior Band preset; the bass guitars can read the tuba part."* Files in your shared folders can be named the way you'd name them to a person. For anything else, select it in Finder, press **⌥⌘C** (Copy as Pathname) and paste the path into the chat. (Dragging a file into the chat doesn't work: that sends the assistant a copy, not the file on your Mac.) If a shared folder is inside Documents, Desktop or Downloads, macOS asks once whether to allow it. An AI with a terminal should start with `scoresort help ai`, a short guide to the recipes.
 
 | Command | Does |
 |---|---|
-| `find` | Find PDFs or folders by name in Downloads, Desktop and Documents — so you can say "the Holst scan" instead of a path |
+| `find` | Find PDFs or folders by name in the folders you've shared with AI assistants — so you can say "the Holst scan" instead of a path |
 | `info` | Pages, sizes, bookmarks, and whether it's a scan of double pages |
 | `preview` | Page images — `--top --sheet` gives every page's top in one labelled image, for reading part names |
 | `split-scans` | Split Double Pages: cut two-page scans into single pages |
@@ -485,7 +486,7 @@ ScoreSort updates itself with [Sparkle](https://sparkle-project.org). The update
 
 7. **Create a GitHub Release** tagged `vX.X`, attach `ScoreSort.dmg`, and paste the release notes (these become the `releaseNotesLink` page).
 
-   **Check the AI connection with the released build** (it's the only build that runs exactly as users' will): install from the DMG, open ScoreSort, **Settings ▸ AI Assistants ▸ Connect to Claude**, then ask Claude in a new chat to "find my most recent PDF with ScoreSort". If Claude lists files, the notarised app runs fine when Claude starts it.
+   **Check the AI connection with the released build** (it's the only build that runs exactly as users' will): install from the DMG, open ScoreSort, **Settings ▸ AI Assistants ▸ Connect to Claude**, share a folder that has a PDF in it, then ask Claude in a new chat to "find my most recent PDF with ScoreSort". If Claude lists it, the notarised app runs fine when Claude starts it.
 
 8. **Commit & push `docs/appcast.xml`** — GitHub Pages serves the new feed and existing users are offered the update in-app.
 

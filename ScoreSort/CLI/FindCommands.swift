@@ -2,10 +2,14 @@
 //  FindCommands.swift
 //  ScoreSort
 //
-//  `find` — locating the files someone means. People talk about "the Holst scan in my
-//  Downloads", not paths, and an AI chat app can't hand ScoreSort a dropped file's path
-//  (dragging a PDF into the chat uploads its contents). So ScoreSort looks for PDFs, images
-//  and folders by name in the usual places — Downloads, Desktop, Documents — newest first.
+//  `find` — locating the files someone means. People talk about "the Holst scan", not paths,
+//  and an AI chat app can't hand ScoreSort a dropped file (dragging a PDF into the chat
+//  uploads a copy to the conversation; nothing lands on the Mac). So ScoreSort looks for PDFs,
+//  images and folders by name — but only in the folders the person has shared with their
+//  assistant in Settings ▸ AI Assistants, or a folder they name by path. It never trawls
+//  Downloads, Desktop or Documents on its own: that would show an assistant everything in
+//  them (CVs, bank statements…), and relies on folder permissions macOS keeps tightening.
+//  Anything else, the person gives by path — in Finder, ⌥⌘C copies a file's path.
 //
 
 import Foundation
@@ -16,7 +20,7 @@ extension ScoreSortCLI {
     static var findCommand: CommandSpec {
         CommandSpec(
             name: "find",
-            summary: "Find PDFs, images or folders by name in Downloads, Desktop and Documents",
+            summary: "Find PDFs or folders by name in the folders shared with AI assistants",
             help: """
             Usage: ScoreSort find [WORDS…] [--in FOLDER]… [--kind pdf|image|folder|any]
                                   [--limit N] [--json]
@@ -26,7 +30,11 @@ extension ScoreSortCLI {
             name (in any order, ignoring case and punctuation). Newest first. With no words,
             lists the most recent PDFs.
 
-              --in      Where to look (repeatable). Default: Downloads, Desktop, Documents.
+            It looks only in the folders the person has shared in ScoreSort ▸ Settings ▸
+            AI Assistants (or one named with --in). For anything else, ask them for the path:
+            in Finder, select the file or folder and press ⌥⌘C (Copy as Pathname), then paste.
+
+              --in      A folder to look in instead, by path (repeatable).
               --kind    pdf (default), image (photos and scans as pictures), folder, or any.
               --limit   How many results (default 20).
 
@@ -50,12 +58,8 @@ extension ScoreSortCLI {
             })
     }
 
-    /// Folders searched when none are given.
-    static var defaultSearchFolders: [URL] {
-        let fm = FileManager.default
-        return [FileManager.SearchPathDirectory.downloadsDirectory, .desktopDirectory, .documentDirectory]
-            .compactMap { fm.urls(for: $0, in: .userDomainMask).first }
-    }
+    /// How to give ScoreSort a file it can't find — said whenever a search comes up short.
+    static let pathAdvice = "To use a file or folder that isn't in a shared folder, select it in Finder, press ⌥⌘C (Copy as Pathname) and paste the path into the chat. To make a folder searchable by name, add it in ScoreSort ▸ Settings ▸ AI Assistants."
 
     /// Folder names never worth descending into when looking for music.
     private static let skippedFolders: Set<String> = [
@@ -88,11 +92,20 @@ extension ScoreSortCLI {
         return info.st_flags & 0x4000_0000 != 0   // SF_DATALESS
     }
 
+    /// - Parameter shared: the folders searched when `folders` is empty; defaults to the ones
+    ///   shared in Settings ▸ AI Assistants.
     static func runFind(words: [String], folders: [String], kind: String, limit: Int,
-                        timeLimit: TimeInterval = 4) throws -> CommandResult {
+                        shared: [URL]? = nil, timeLimit: TimeInterval = 4) throws -> CommandResult {
         guard (1...200).contains(limit) else { throw CommandError("--limit is between 1 and 200.") }
         let query = words.flatMap(searchWords)
-        let roots: [URL] = folders.isEmpty ? defaultSearchFolders : try folders.map { path in
+        let sharedFolders = (shared ?? AIConnection.sharedFolders).filter(urlIsDirectory)
+        if folders.isEmpty && sharedFolders.isEmpty {
+            return CommandResult(
+                text: "No folders are shared with AI assistants yet, so there's nowhere to look by name. " + pathAdvice,
+                json: ["ok": true, "results": [Any](), "total": 0, "searched": [Any](),
+                       "noSharedFolders": true, "advice": pathAdvice])
+        }
+        let roots: [URL] = folders.isEmpty ? sharedFolders : try folders.map { path in
             let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath, isDirectory: true).standardizedFileURL
             guard urlIsDirectory(url) else { throw CommandError("\(url.path) isn't a folder.") }
             return url
@@ -177,17 +190,19 @@ extension ScoreSortCLI {
             lines.append("  \(item.url.path)  (\(detail), \(formatter.string(from: item.modified)))")
         }
 
-        let place = folders.isEmpty ? "Downloads, Desktop and Documents" : roots.map(\.path).joined(separator: ", ")
+        let place = (folders.isEmpty ? "the shared folders (" : "") + roots.map(\.lastPathComponent).joined(separator: ", ") + (folders.isEmpty ? ")" : "")
         var text: String
         if shown.isEmpty {
             text = "Nothing matching “\(words.joined(separator: " "))” in \(place)."
-            text += query.isEmpty ? "" : " Try fewer words, --kind any, or --in another folder."
+            text += (query.isEmpty ? "" : " Try fewer words, or --kind any.") + " " + pathAdvice
         } else {
             text = "\(found.count) found in \(place)" + (found.count > shown.count ? " (newest \(shown.count) shown)" : "") + ":\n"
             text += lines.joined(separator: "\n")
         }
         if timedOut { text += "\n(Stopped looking after \(Int(timeLimit)) seconds — give --in a narrower folder to look further.)" }
-        return CommandResult(text: text, json: ["ok": true, "results": entries, "total": found.count,
-                                                "searched": roots.map(\.path), "stoppedEarly": timedOut])
+        var json: [String: Any] = ["ok": true, "results": entries, "total": found.count,
+                                   "searched": roots.map(\.path), "stoppedEarly": timedOut]
+        if shown.isEmpty { json["advice"] = pathAdvice }
+        return CommandResult(text: text, json: json)
     }
 }

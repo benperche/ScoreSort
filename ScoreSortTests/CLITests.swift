@@ -691,6 +691,27 @@ struct CLIFindTests {
         #expect(folder["files"] as? Int == 1)
     }
 
+    @Test("With no folders shared, nothing is searched — it says how to give a path instead")
+    func nothingShared() throws {
+        let result = try ScoreSortCLI.runFind(words: ["holst"], folders: [], kind: "pdf", limit: 20, shared: [])
+        #expect(result.json["noSharedFolders"] as? Bool == true)
+        #expect((result.json["results"] as? [Any])?.isEmpty == true)
+        #expect(result.text.contains("⌥⌘C"))
+    }
+
+    @Test("Without --in, only the shared folders are searched")
+    func sharedFoldersOnly() throws {
+        let shared = temporaryFolder("shared")
+        let private_ = temporaryFolder("private")
+        writeDrawnPDF(pages: 1, to: shared.appendingPathComponent("Holst Scan.pdf"))
+        writeDrawnPDF(pages: 1, to: private_.appendingPathComponent("Holst Other.pdf"))
+        let result = try ScoreSortCLI.runFind(words: ["holst"], folders: [], kind: "pdf", limit: 20,
+                                              shared: [shared, shared.appendingPathComponent("gone")])
+        let names = (result.json["results"] as? [[String: Any]])?.compactMap { $0["name"] as? String }
+        #expect(names == ["Holst Scan.pdf"])
+        #expect(result.json["searched"] as? [String] == [shared.standardizedFileURL.path])
+    }
+
     @Test("A file dated in the future doesn't jump to the top")
     func futureDates() throws {
         let root = temporaryFolder("find")

@@ -31,6 +31,8 @@ final class AIAssistantsModel: ObservableObject {
     @Published private(set) var claude: ClaudeState = .notInstalled
     @Published private(set) var command: CommandState = .notInstalled
     @Published private(set) var busy = false
+    /// Folders the assistant may look in by name (`find`).
+    @Published private(set) var sharedFolders: [URL] = AIConnection.sharedFolders
     @Published var message: (text: String, isError: Bool)?
 
     #if DEBUG
@@ -49,7 +51,36 @@ final class AIAssistantsModel: ObservableObject {
         !NSRunningApplication.runningApplications(withBundleIdentifier: AIConnection.claudeBundleID).isEmpty
     }
 
+    // MARK: Shared folders
+
+    /// Adds folders through the standard folder picker — choosing them is the consent.
+    func addSharedFolders() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = true
+        panel.canCreateDirectories = true
+        panel.prompt = "Share"
+        panel.message = "Choose folders your AI assistant may look in for parts and scans."
+        let finish: (NSApplication.ModalResponse) -> Void = { [weak self] response in
+            guard let self, response == .OK else { return }
+            AIConnection.setSharedFolders(self.sharedFolders + panel.urls)
+            self.sharedFolders = AIConnection.sharedFolders
+        }
+        if let window = NSApp.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: finish)
+        } else {
+            finish(panel.runModal())
+        }
+    }
+
+    func removeSharedFolder(_ folder: URL) {
+        AIConnection.setSharedFolders(sharedFolders.filter { $0 != folder })
+        sharedFolders = AIConnection.sharedFolders
+    }
+
     func refresh() {
+        sharedFolders = AIConnection.sharedFolders
         if claudeAppURL == nil {
             claude = .notInstalled
         } else {
@@ -207,6 +238,7 @@ struct AIAssistantsPreferencesView: View {
                 }
 
                 claudeSection
+                foldersSection
                 commandSection
                 examplesSection
                 otherAppsSection
@@ -292,6 +324,63 @@ struct AIAssistantsPreferencesView: View {
         }
     }
 
+    private var foldersSection: some View {
+        GroupBox {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Your assistant can find files by name — “the Holst scan” — only in folders you share here, such as the folder you keep band parts or scans in. It can't see anything else on your Mac.")
+                    .foregroundColor(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                if model.sharedFolders.isEmpty {
+                    Text("No folders shared.")
+                        .italic()
+                        .foregroundColor(.secondary)
+                } else {
+                    VStack(spacing: 0) {
+                        ForEach(model.sharedFolders, id: \.self) { folder in
+                            HStack {
+                                Image(systemName: urlIsDirectory(folder) ? "folder.fill" : "questionmark.folder")
+                                    .foregroundColor(urlIsDirectory(folder) ? .accentColor : .orange)
+                                VStack(alignment: .leading, spacing: 1) {
+                                    Text(folder.lastPathComponent)
+                                    Text(urlIsDirectory(folder) ? folder.deletingLastPathComponent().path
+                                                                : "Not found — moved or renamed?")
+                                        .font(.caption)
+                                        .foregroundColor(.secondary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                }
+                                Spacer()
+                                Button {
+                                    model.removeSharedFolder(folder)
+                                } label: {
+                                    Image(systemName: "minus.circle")
+                                }
+                                .buttonStyle(.borderless)
+                                .help("Stop sharing this folder")
+                            }
+                            .padding(.vertical, 5)
+                            if folder != model.sharedFolders.last { Divider() }
+                        }
+                    }
+                    .padding(.horizontal, 8)
+                    .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
+                }
+                HStack(alignment: .top) {
+                    Text("Anything else: select it in Finder, press ⌥⌘C (Copy as Pathname) and paste it into the chat. Dragging a file into the chat doesn't work — that sends Claude a copy, not the file on your Mac.")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Spacer()
+                    Button("Add Folder\u{2026}") { model.addSharedFolders() }
+                }
+            }
+            .padding(6)
+        } label: {
+            Label("Folders your assistant can look in", systemImage: "folder.badge.person.crop")
+                .font(.headline)
+        }
+    }
+
     private var commandSection: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
@@ -340,7 +429,7 @@ struct AIAssistantsPreferencesView: View {
         GroupBox {
             VStack(alignment: .leading, spacing: 6) {
                 ForEach([
-                    "“Split the Holst scan in my Downloads into parts, named and numbered in band score order.”",
+                    "“Split the Holst scan in my Scans folder into parts, named and numbered in band score order.”",
                     "“That scan has two pages on each sheet — cut them into single pages first.”",
                     "“Combine the parts in my Holst folder for the Junior Band preset. The bass guitars can read the tuba part.”",
                     "“Number the parts in this folder in orchestra order.”",
@@ -349,7 +438,7 @@ struct AIAssistantsPreferencesView: View {
                     Text(example)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("Name files and folders the way you would to a person — the assistant finds them in Downloads, Desktop and Documents. The first time it opens files there, macOS asks whether to allow it.")
+                Text("Files in your shared folders can be named the way you would to a person; anything else, paste its path (⌥⌘C in Finder). If a shared folder is inside Documents, Desktop or Downloads, macOS asks once whether to allow it.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.top, 4)
