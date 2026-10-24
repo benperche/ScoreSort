@@ -258,7 +258,6 @@ struct HelpCommands: Commands {
 
 // MARK: - Sparkle Updater (direct distribution via website / GitHub releases)
 // Drives auto-update checks against the appcast at Info.plist's SUFeedURL.
-// Not used for App Store / TestFlight builds (the Mac App Store handles updates).
 final class UpdaterViewModel: ObservableObject {
     private let updaterController: SPUStandardUpdaterController
     private var updaterStarted = false
@@ -313,7 +312,7 @@ struct ScoreSortApp: App {
                 .environmentObject(stampStore)
         }
         // Default window size on first launch. Users can resize freely and the size is
-        // then remembered. (Temporarily set to 1280×800 when taking App Store screenshots.)
+        // then remembered. (Temporarily set to 1280×800 when taking screenshots.)
         .defaultSize(width: 940, height: 800)
         .commands {
             CommandGroup(replacing: .appInfo) {
