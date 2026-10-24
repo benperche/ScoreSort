@@ -31,6 +31,8 @@ enum ScoreSortMCPServer {
         case strings
         /// An array of objects with two fields, passed as a repeated `--option "KEY=VALUE"`.
         case pairs(key: String, value: String, valueIsNumber: Bool)
+        /// `[{part, file, copies?}]`, passed as a repeated `--allocate "PART=FILE[:N]"`.
+        case allocations
     }
 
     struct Param {
@@ -116,13 +118,23 @@ enum ScoreSortMCPServer {
                           Param(key: "recursive", option: "recursive", kind: .boolean, description: "Include subfolders."),
                           Param(key: "rescan", option: "rescan", kind: .boolean, description: "Re-number files that already have numbers."),
                           Param(key: "apply", option: "apply", kind: .boolean, description: "Rename the files (otherwise only plan).")]),
+            Tool(name: "scoresort_allocate", command: "allocate",
+                 description: "Plan who plays what before combining: an ensemble preset's players (scoresort_presets) matched to a folder of parts. Shows each player group and the file(s) they'd get, groups with no part, groups shared across numbered parts, and files no one plays. Writes nothing. Settle the gaps with allocations (e.g. the Bass Guitar players get the Tuba part), check again, then pass the same allocations to scoresort_combine.",
+                 params: [Param(key: "paths", option: nil, kind: .strings, description: "Absolute path of the folder of parts (or the files).", required: true),
+                          Param(key: "preset", option: "preset", kind: .string, description: "The ensemble preset's name.", required: true),
+                          Param(key: "allocations", option: "allocate", kind: .allocations,
+                                description: "Decisions: [{\"part\": \"Bass Guitar\", \"file\": \"Tuba\"}, {\"part\": \"Clarinet\", \"file\": \"Clarinet 1\", \"copies\": 11}, {\"part\": \"Clarinet\", \"file\": \"Clarinet 2\"}]. Replaces that group's automatic choice; entries without copies share the group's remaining players evenly."),
+                          Param(key: "copies", option: "copies", kind: .pairs(key: "file", value: "copies", valueIsNumber: true),
+                                description: "A file's total copies, applied last; 0 leaves it out.")]),
             Tool(name: "scoresort_combine", command: "combine",
                  description: "Combine parts into one PDF to print, each part repeated for its number of players, with a bookmark per copy — the Combine tab. Copies come from a saved ensemble preset (scoresort_presets) and/or per file. Optional booklets and stamp. " + outputHint,
                  params: [Param(key: "paths", option: nil, kind: .strings, description: "Absolute paths of the part files, in order, or one folder (combined in name order).", required: true),
                           Param(key: "out", option: "out", kind: .string, description: "Absolute path of the PDF to write.", required: true),
                           Param(key: "preset", option: "preset", kind: .string, description: "A saved ensemble preset's name, to set each part's copies."),
+                          Param(key: "allocations", option: "allocate", kind: .allocations,
+                                description: "Who plays what, as decided after scoresort_allocate: [{\"part\": \"Bass Guitar\", \"file\": \"Tuba\"}] gives that preset group's players the Tuba part; add \"copies\" to give only some of them a file."),
                           Param(key: "copies", option: "copies", kind: .pairs(key: "file", value: "copies", valueIsNumber: true),
-                                description: "Copies for particular files (after the preset): [{\"file\": \"Flute 1\", \"copies\": 3}] — file is the name or a unique part of it."),
+                                description: "A file's total copies, applied last: [{\"file\": \"Flute 1\", \"copies\": 3}] — file is the name or a unique part of it; 0 leaves it out."),
                           Param(key: "booklet", option: "booklet", kind: .boolean, description: "Impose each part as a fold-and-staple booklet."),
                           Param(key: "sheet", option: "sheet", kind: .string, description: "Booklet paper: double (A4 pages on A3) or fit-a4 (A5 booklet).", choices: ["double", "fit-a4"]),
                           Param(key: "blankPages", option: "blank-pages", kind: .boolean, description: "Booklets: start every part on a fresh sheet."),
@@ -161,6 +173,13 @@ enum ScoreSortMCPServer {
                 prop["items"] = ["type": "object",
                                  "properties": [key: ["type": "string"], value: ["type": isNumber ? "integer" : "string"]],
                                  "required": [key, value]]
+            case .allocations:
+                prop["type"] = "array"
+                prop["items"] = ["type": "object",
+                                 "properties": ["part": ["type": "string", "description": "A preset part (player group) name"],
+                                                "file": ["type": "string", "description": "The file they get (name or unique part of it)"],
+                                                "copies": ["type": "integer", "description": "How many of the group's players; leave out for all (or an even share)"]],
+                                 "required": ["part", "file"]]
             }
             if let choices = p.choices { prop["enum"] = choices }
             if let d = p.defaultValue { prop["default"] = d }
@@ -198,6 +217,17 @@ enum ScoreSortMCPServer {
                 if let list = raw as? [Any] { values = list.compactMap { $0 as? String } }
                 else if let s = raw as? String { values = [s] }
                 else { throw CommandError("“\(p.key)” should be a list of text.") }
+            case .allocations:
+                guard let list = raw as? [[String: Any]] else {
+                    throw CommandError("“\(p.key)” should be a list of {\"part\": …, \"file\": …, \"copies\": …}.")
+                }
+                values = try list.map { item in
+                    guard let part = item["part"] as? String, let file = item["file"] as? String else {
+                        throw CommandError("Each allocation needs \"part\" and \"file\".")
+                    }
+                    if let n = item["copies"] as? NSNumber { return "\(part)=\(file):\(n.intValue)" }
+                    return "\(part)=\(file)"
+                }
             case .pairs(let key, let value, _):
                 guard let list = raw as? [[String: Any]] else {
                     throw CommandError("“\(p.key)” should be a list of {\"\(key)\": …, \"\(value)\": …}.")
@@ -392,12 +422,30 @@ Ground rules
      recognise are left alone: rename them to include an instrument, or place them with
      --number "FILE=NN". Then run again with --apply.
 
-4. Combine parts to print
-   ScoreSort presets                                         (ensembles: parts and copies)
-   ScoreSort combine <folder> --preset "NAME" --out <file.pdf> --dry-run
-     Each part repeated for its players, with a bookmark per copy. Check the warnings:
-     files not in the preset get 1 copy; correct them with --copies "Flute 1=3".
-     --booklet makes fold-and-staple booklets. Then run without --dry-run.
+4. Combine parts to print for an ensemble — deciding who plays what
+   ScoreSort presets                         (ensembles: player groups, e.g. "Flute × 12")
+   ScoreSort allocate <folder> --preset "NAME"
+     Each group and the part(s) its players get, from ScoreSort's own matching. Settle:
+     • Groups with no part — players who'd get nothing. Give them the closest part:
+         --allocate "Bass Guitar=Tuba"
+       Keep the transposition (and clef) the player reads:
+         Bb treble: clarinet, bass clarinet, trumpet/cornet, tenor sax, soprano sax,
+                    baritone/euphonium treble clef
+         Eb treble: alto sax, baritone sax, Eb clarinet, alto clarinet
+         F:         horn (an F horn part, or failing that an Eb horn part)
+         C treble:  flute, oboe, mallets, violin; C bass clef: trombone, euphonium BC,
+                    bassoon, tuba, string bass, bass guitar (reads the bass line)
+       Never hand a player a part in another transposition without saying so.
+     • Groups shared across numbered parts (Clarinet × 19 over Clarinet 1, 2, 3): shared
+       evenly by default. Change with "Clarinet=Clarinet 1:8" etc. if the person says so;
+       otherwise even is fine.
+     • Files no group plays: 1 copy each (a spare, or the conductor's). Leave one out with
+       --copies "FILE=0", or set any total with --copies "FILE=N".
+     Re-run allocate with your --allocate options until nothing important is unsettled,
+     and show the person the plan — especially any substitutions.
+   ScoreSort combine <folder> --preset "NAME" --allocate … --out <file.pdf> --dry-run
+     The same options, so it's the same plan; then run it without --dry-run.
+     --booklet makes fold-and-staple booklets. The preset's stamp is used unless --stamp.
 
 5. Stamp a school or ensemble name onto parts
    ScoreSort stamps
@@ -407,6 +455,7 @@ Ground rules
 Ask the person when
   • a page's instrument can't be read, or two parts look the same;
   • you don't know the ensemble (band, jazz or orchestra) for score order;
-  • copies or a preset are uncertain;
+  • copies or a preset are uncertain, or which ensemble a folder is for;
+  • a substitution would change what a player reads (transposition, clef, a different part);
   • anything would be overwritten.
 """

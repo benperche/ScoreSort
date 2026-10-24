@@ -541,3 +541,115 @@ struct FirstKeptPageTests {
         #expect(firstKeptPage(fileStart: 4, fileSize: 0, skippedPages: []) == 4)
     }
 }
+
+@Suite("Ensemble allocation (allocate / combine --allocate)")
+@MainActor
+struct AllocationTests {
+
+    private func files(_ names: [String]) -> [AllocationFile] {
+        names.map { AllocationFile(id: UUID(), name: $0, pages: 2) }
+    }
+
+    private let preset = EnsemblePreset(name: "Band", parts: [
+        PresetPart(name: "Flute", copies: 6),
+        PresetPart(name: "Clarinet", copies: 9),
+        PresetPart(name: "Bass Guitar", copies: 2),
+    ])
+
+    private func copies(_ a: EnsembleAllocation, _ f: [AllocationFile], _ name: String) -> Int? {
+        f.first { $0.name == name }.flatMap { a.copies[$0.id] }
+    }
+
+    @Test("Choices parse as PART=FILE or PART=FILE:N")
+    func parsing() throws {
+        let a = try AllocationChoice("Bass Guitar=Tuba")
+        #expect(a.part == "Bass Guitar" && a.file == "Tuba" && a.copies == nil)
+        let b = try AllocationChoice("Clarinet=Clarinet 1:5")
+        #expect(b.file == "Clarinet 1" && b.copies == 5)
+        #expect(throws: CommandError.self) { try AllocationChoice("Tuba") }
+        #expect(throws: CommandError.self) { try AllocationChoice("=Tuba") }
+    }
+
+    @Test("The matcher records which group each file was given")
+    func assignmentsRecorded() {
+        let f = files(["Flute 1.pdf", "Flute 2.pdf"])
+        let result = matchPreset(parts: [PresetPart(name: "Flute", copies: 5)], files: f.map { ($0.id, $0.name) })
+        #expect(result.assignments.map(\.part) == ["Flute", "Flute"])
+        #expect(result.assignments.map(\.copies).reduce(0, +) == 5)
+    }
+
+    @Test("Automatic matching leaves a group with no part, reported to decide")
+    func groupWithoutPart() throws {
+        let f = files(["Flute.pdf", "Clarinet 1.pdf", "Clarinet 2.pdf", "Tuba.pdf"])
+        let a = try ScoreSortCLI.buildAllocation(files: f, preset: preset, choices: [], copies: [])
+        #expect(copies(a, f, "Flute.pdf") == 6)
+        #expect((copies(a, f, "Clarinet 1.pdf") ?? 0) + (copies(a, f, "Clarinet 2.pdf") ?? 0) == 9)
+        #expect(copies(a, f, "Tuba.pdf") == 1)   // nobody in the preset: one spare
+        let described = ScoreSortCLI.describeAllocation(a, files: f)
+        #expect(described.toDecide.contains { $0.contains("Bass Guitar") })
+    }
+
+    @Test("--allocate gives a group's players a file, adding to what that file already has")
+    func allocateToExistingPart() throws {
+        let f = files(["Flute.pdf", "Clarinet.pdf", "Tuba.pdf"])
+        let a = try ScoreSortCLI.buildAllocation(files: f, preset: preset,
+                                                 choices: [try AllocationChoice("Bass Guitar=Tuba")], copies: [])
+        #expect(copies(a, f, "Tuba.pdf") == 2)
+        #expect(!a.withoutPlayers.contains(f[2].id))
+        #expect(ScoreSortCLI.describeAllocation(a, files: f).toDecide.isEmpty)
+    }
+
+    @Test("A group split by hand: fixed numbers, and the rest shared")
+    func manualSplit() throws {
+        let f = files(["Flute.pdf", "Clarinet 1.pdf", "Clarinet 2.pdf", "Clarinet 3.pdf"])
+        let a = try ScoreSortCLI.buildAllocation(files: f, preset: preset, choices: [
+            try AllocationChoice("Clarinet=Clarinet 1:5"),
+            try AllocationChoice("Clarinet=Clarinet 2"),
+            try AllocationChoice("Clarinet=Clarinet 3"),
+        ], copies: [])
+        #expect(copies(a, f, "Clarinet 1.pdf") == 5)
+        #expect(copies(a, f, "Clarinet 2.pdf") == 2)
+        #expect(copies(a, f, "Clarinet 3.pdf") == 2)
+    }
+
+    @Test("--copies sets a total last; 0 leaves a file out")
+    func copiesOverride() throws {
+        let f = files(["Flute.pdf", "Clarinet.pdf", "Harp.pdf"])
+        let a = try ScoreSortCLI.buildAllocation(files: f, preset: preset, choices: [],
+                                                 copies: ["Harp=0", "Flute=8"])
+        #expect(copies(a, f, "Harp.pdf") == 0)
+        #expect(copies(a, f, "Flute.pdf") == 8)
+    }
+
+    @Test("Unknown parts, and --allocate without a preset, are errors")
+    func errors() {
+        let f = files(["Flute.pdf"])
+        #expect(throws: CommandError.self) {
+            try ScoreSortCLI.buildAllocation(files: f, preset: preset, choices: [try AllocationChoice("Kazoo=Flute")], copies: [])
+        }
+        #expect(throws: CommandError.self) {
+            try ScoreSortCLI.buildAllocation(files: f, preset: nil, choices: [try AllocationChoice("Flute=Flute")], copies: [])
+        }
+    }
+
+    @Test("combine leaves out a file given 0 copies")
+    func combineLeavesOut() throws {
+        let dir = temporaryFolder("alloc")
+        for name in ["Flute.pdf", "Harp.pdf"] { writeDrawnPDF(pages: 2, to: dir.appendingPathComponent(name)) }
+        let out = dir.appendingPathComponent("out/All.pdf")
+        let result = try ScoreSortCLI.runCombine(paths: [dir.path], out: out.path, preset: nil, copies: ["Harp=0"],
+                                                 options: CombineOutputOptions(), stamp: nil, stampScope: .everyPage,
+                                                 dryRun: false, overwrite: false)
+        #expect(result.exitCode == 0)
+        #expect(PDFDocument(url: out)?.pageCount == 2)
+    }
+
+    @Test("MCP allocations become --allocate options")
+    func mcpAllocations() throws {
+        let tool = try #require(ScoreSortMCPServer.tools.first { $0.name == "scoresort_allocate" })
+        let argv = try ScoreSortMCPServer.argv(for: tool, arguments: [
+            "paths": ["/x/Parts"], "preset": "Band",
+            "allocations": [["part": "Bass Guitar", "file": "Tuba"], ["part": "Clarinet", "file": "Clarinet 1", "copies": 5]]])
+        #expect(argv == ["--preset", "Band", "--allocate", "Bass Guitar=Tuba", "--allocate", "Clarinet=Clarinet 1:5", "--", "/x/Parts"])
+    }
+}

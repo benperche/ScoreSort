@@ -23,6 +23,10 @@ struct PresetMatchResult {
     var matchedCount = 0
     /// Preset parts that matched no file.
     var unmatchedPartNames: Set<String> = []
+    /// Who gets what: each preset part's players and the file (and copies) they were given.
+    /// One part can feed several files (a shared entry), and several parts one file
+    /// (consolidation). The copies per file are the sums of these.
+    var assignments: [(part: String, fileId: UUID, copies: Int)] = []
 }
 
 /// Matches a preset's parts to files by name, in two phases:
@@ -63,12 +67,14 @@ func matchPreset(parts: [PresetPart], files: [(id: UUID, name: String)]) -> Pres
         result.matchedCount += ids.count
         guard ids.count > 1 else {
             result.copies.append((ids[0], part.copies))
+            result.assignments.append((part.name, ids[0], part.copies))
             continue
         }
         // Files were gathered in list order, so the remainder goes to the lower-numbered parts.
         let shares = splitPresetCopies(part.copies, across: ids.count)
         for (offset, id) in ids.enumerated() {
             result.copies.append((id, shares[offset]))
+            result.assignments.append((part.name, id, shares[offset]))
             result.splitFileIds.insert(id)
         }
     }
@@ -94,6 +100,7 @@ func matchPreset(parts: [PresetPart], files: [(id: UUID, name: String)]) -> Pres
         }
         guard candidates.count == 1, let fileId = candidates.first?.id else { continue }
         result.copies.append((fileId, group.reduce(0) { $0 + $1.copies }))
+        for part in group { result.assignments.append((part.name, fileId, part.copies)) }
         result.unmatchedFileIds.remove(fileId)
         result.matchedCount += 1
         for part in group { matchedPartNames.insert(part.name) }

@@ -383,7 +383,7 @@ printf '#!/bin/sh\nexec /Applications/ScoreSort.app/Contents/MacOS/ScoreSort "$@
 
 (If `/usr/local/bin` doesn't exist or isn't writable, use any folder on your PATH.)
 
-Then ask, for example: *"Use scoresort to split ~/Scans/Holst.pdf into parts, named and numbered in band score order, in ~/Scans/Holst Parts."* The AI should start with `scoresort help ai`, a short guide to the recipes.
+Then ask, for example: *"Use scoresort to split ~/Scans/Holst.pdf into parts, named and numbered in band score order, in ~/Scans/Holst Parts."* — or *"Combine ~/Scans/Holst Parts for my Junior Band preset; the bass guitars can read the tuba part."* The AI should start with `scoresort help ai`, a short guide to the recipes.
 
 | Command | Does |
 |---|---|
@@ -392,7 +392,8 @@ Then ask, for example: *"Use scoresort to split ~/Scans/Holst.pdf into parts, na
 | `split-scans` | Split Double Pages: cut two-page scans into single pages |
 | `split` | Split into named parts (`--part "1-2=Flute 1"` …), with `--score-order`, `--skip`, `--stamp` |
 | `rename` | Score Order Sorter on a folder (plans until `--apply`) |
-| `combine` | Combine parts with copies (`--preset`, `--copies`), booklets and stamp |
+| `allocate` | Plan who plays what: a preset's player groups matched to a folder of parts — players with no part, parts with no players — settled with `--allocate "Bass Guitar=Tuba"` |
+| `combine` | Combine parts with copies (`--preset`, `--allocate`, `--copies`), booklets and stamp |
 | `presets`, `stamps`, `stamp` | Your saved presets and stamps; stamp copies of files |
 
 Every command takes `--json`. Nothing is overwritten without `--overwrite`, and everything that writes takes `--dry-run`.
