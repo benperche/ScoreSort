@@ -222,9 +222,29 @@ func bookmarkSplitNames(titles: [String],
 /// The name a split file is saved under, extension included. An empty suffix
 /// auto-numbers from the file's position; an empty base name leaves the suffix to
 /// stand alone rather than starting the name with a separator.
-func splitOutputFileName(base: String, separator: String, suffix: String, fileIndex: Int) -> String {
+///
+/// `onlyFile`: this is the only file being written. With no suffix it then keeps the base
+/// name as it is — "02 Ebony Alto 1.pdf", not "02 Ebony Alto 1 - 1.pdf" — so a part whose
+/// pages were only cut or reordered comes out under its own name.
+func splitOutputFileName(base: String, separator: String, suffix: String, fileIndex: Int,
+                         onlyFile: Bool = false) -> String {
+    if suffix.isEmpty && onlyFile && !base.isEmpty { return "\(base).pdf" }
     let part = suffix.isEmpty ? "\(fileIndex + 1)" : suffix
     return base.isEmpty ? "\(part).pdf" : "\(base)\(separator)\(part).pdf"
+}
+
+/// True when saving `names` into `folder` would put one exactly where the source file is
+/// (same folder, same name — compared without case, as the Mac's disks do).
+func splitOutputReplacesSource(names: [String], folder: URL, source: URL) -> Bool {
+    let sourcePath = source.standardizedFileURL.resolvingSymlinksInPath().path.lowercased()
+    return names.contains {
+        folder.appendingPathComponent($0).standardizedFileURL.resolvingSymlinksInPath().path.lowercased() == sourcePath
+    }
+}
+
+/// How many files a split will write: those with at least one page not skipped.
+func splitActiveFileCount(pageToFile: [Int: Int], skippedPages: Set<Int>) -> Int {
+    Set(pageToFile.filter { !skippedPages.contains($0.key) }.values).count
 }
 
 /// Carries per-file names across a change of split points: a file keeps its name

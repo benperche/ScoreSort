@@ -821,3 +821,49 @@ struct SplitWorthSavingTests {
         #expect(!splitOutputIsWorthSaving(activeFiles: 0, skippedPages: 4, pagesRebuilt: true))
     }
 }
+
+@Suite("Saving a single rebuilt part")
+@MainActor
+struct SingleFileSplitTests {
+
+    @Test("With one file and no suffix, the base name is kept as it is")
+    func onlyFileKeepsName() {
+        #expect(splitOutputFileName(base: "02 Ebony Alto 1", separator: " - ", suffix: "", fileIndex: 0, onlyFile: true)
+                == "02 Ebony Alto 1.pdf")
+        #expect(splitOutputFileName(base: "02 Ebony Alto 1", separator: " - ", suffix: "Flute", fileIndex: 0, onlyFile: true)
+                == "02 Ebony Alto 1 - Flute.pdf")
+        #expect(splitOutputFileName(base: "02 Ebony Alto 1", separator: " - ", suffix: "", fileIndex: 0)
+                == "02 Ebony Alto 1 - 1.pdf")
+        #expect(splitOutputFileName(base: "", separator: " - ", suffix: "", fileIndex: 0, onlyFile: true) == "1.pdf")
+    }
+
+    @Test("Files that will be written are counted, skipped-out ones not")
+    func activeFiles() {
+        #expect(splitActiveFileCount(pageToFile: [0: 0, 1: 0, 2: 1], skippedPages: []) == 2)
+        #expect(splitActiveFileCount(pageToFile: [0: 0, 1: 0, 2: 1], skippedPages: [2]) == 1)
+    }
+
+    @Test("An output landing on the original is spotted, whatever the case")
+    func replacesSource() {
+        let folder = URL(fileURLWithPath: "/Users/x/Parts", isDirectory: true)
+        let source = folder.appendingPathComponent("02 Ebony Alto 1.pdf")
+        #expect(splitOutputReplacesSource(names: ["02 ebony alto 1.pdf"], folder: folder, source: source))
+        #expect(!splitOutputReplacesSource(names: ["02 Ebony Alto 1 - Flute.pdf"], folder: folder, source: source))
+        #expect(!splitOutputReplacesSource(names: ["02 Ebony Alto 1.pdf"],
+                                           folder: URL(fileURLWithPath: "/Users/x/Out", isDirectory: true), source: source))
+    }
+
+    @Test("A single-file split saves under the base name")
+    func singleFileSave() throws {
+        let dir = temporaryFolder("single")
+        let source = dir.appendingPathComponent("02 Ebony Alto 1.pdf")
+        writeDrawnPDF(pages: 4, to: source)
+        let manager = PDFManager()
+        manager.loadPDF(from: source)
+        let out = dir.appendingPathComponent("out")
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        manager.saveSplitPDF(to: out, splitMarkers: [], baseFileName: "02 Ebony Alto 1", customFileNames: [:],
+                             pageToFileMapping: [0: 0, 1: 0, 2: 0, 3: 0], separator: " - ") { _, _, _ in }
+        #expect(try FileManager.default.contentsOfDirectory(atPath: out.path) == ["02 Ebony Alto 1.pdf"])
+    }
+}

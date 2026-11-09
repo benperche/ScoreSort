@@ -159,7 +159,8 @@ extension ScoreSortCLI {
         // 2. Names, exactly as the Split tab composes them.
         var items = parts.enumerated().map { i, part in
             PrefixItem(id: i,
-                       proposedName: splitOutputFileName(base: base, separator: separator, suffix: part.name, fileIndex: i),
+                       proposedName: splitOutputFileName(base: base, separator: separator, suffix: part.name, fileIndex: i,
+                                                         onlyFile: parts.count == 1),
                        page: nil)
         }
         var finalNames = Dictionary(uniqueKeysWithValues: items.map { ($0.id, $0.proposedName) })

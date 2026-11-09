@@ -232,6 +232,7 @@ struct SplitView: View {
                         baseFileName: $baseFileName,
                         customFileNames: $customFileNames,
                         previewOffset: $previewOffset,
+                        pagesRebuilt: documentRebuilt,
                         onBack: { splitStage = .split },
                         onClear: {
                             splitStage = .split
@@ -1056,7 +1057,8 @@ struct SplitView: View {
                 let fileSize = fileSizes[fileIndex]
                 if !isFileFullySkipped(fileIndex) {
                     let proposed = splitOutputFileName(base: baseFileName, separator: filenameSeparator,
-                                                       suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex)
+                                                       suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex,
+                                                       onlyFile: activeFileCount == 1)
                     let firstPage = document.page(at: firstKeptPage(fileStart: pagePos, fileSize: fileSize,
                                                                     skippedPages: skippedPages))
                     items.append(PrefixItem(id: fileIndex, proposedName: proposed, page: firstPage))
@@ -1079,31 +1081,30 @@ struct SplitView: View {
 
             panel.begin { response in
                 guard response == .OK, let folderURL = panel.url else { return }
-                pdfManager.saveSplitPDF(
-                    to: folderURL,
-                    splitMarkers: splitMarkers,
-                    baseFileName: baseFileName,
-                    customFileNames: customFileNames,
-                    pageToFileMapping: pageToFileMapping,
-                    skippedPages: skippedPages,
-                    separator: filenameSeparator,
-                    stampJob: activeStampJob
-                ) { title, message, isError in
-                    if isError {
-                        showNSAlert(title: title, message: message, isError: true)
-                    } else {
-                        var names: [String] = []
-                        for i in 0..<fileSizes.count {
-                            guard !isFileFullySkipped(i) else { continue }
-                            names.append(splitOutputFileName(base: baseFileName, separator: filenameSeparator,
-                                                             suffix: customFileNames[i] ?? "", fileIndex: i))
-                        }
-                        sourceWasTrashed = trashSourceFileIfRequested()
-                        pendingFolderURL = folderURL
-                        summaryNames = names
-                        splitStage = .summary
-                    }
+                var names: [String] = []
+                for i in 0..<fileSizes.count {
+                    guard !isFileFullySkipped(i) else { continue }
+                    names.append(splitOutputFileName(base: baseFileName, separator: filenameSeparator,
+                                                     suffix: customFileNames[i] ?? "", fileIndex: i,
+                                                     onlyFile: activeFileCount == 1))
                 }
+                saveSplitFiles(names: names, into: folderURL, save: { folder, completion in
+                    pdfManager.saveSplitPDF(
+                        to: folder,
+                        splitMarkers: splitMarkers,
+                        baseFileName: baseFileName,
+                        customFileNames: customFileNames,
+                        pageToFileMapping: pageToFileMapping,
+                        skippedPages: skippedPages,
+                        separator: filenameSeparator,
+                        stampJob: activeStampJob,
+                        completion: completion)
+                }, finish: { trashed in
+                    sourceWasTrashed = trashed
+                    pendingFolderURL = folderURL
+                    summaryNames = names
+                    splitStage = .summary
+                })
             }
         }
     }
@@ -1383,25 +1384,92 @@ struct SplitView: View {
             finalNamesForSummary.append(fullName)
         }
 
-        pdfManager.saveSplitPDF(
-            to: folderURL,
-            splitMarkers: splitMarkers,
-            baseFileName: "",
-            customFileNames: finalCustomNames,
-            pageToFileMapping: pageToFileMapping,
-            skippedPages: omittedPages,
-            separator: "",
-            stampJob: activeStampJob
-        ) { title, message, isError in
-            if isError {
-                showNSAlert(title: title, message: message, isError: true)
-            } else {
-                sourceWasTrashed = trashSourceFileIfRequested()
-                pendingFolderURL = folderURL   // stored here so summary can offer "Show in Finder"
-                summaryNames = finalNamesForSummary
-                splitStage = .summary
+        saveSplitFiles(names: finalNamesForSummary, into: folderURL, save: { folder, completion in
+            pdfManager.saveSplitPDF(
+                to: folder,
+                splitMarkers: splitMarkers,
+                baseFileName: "",
+                customFileNames: finalCustomNames,
+                pageToFileMapping: pageToFileMapping,
+                skippedPages: omittedPages,
+                separator: "",
+                stampJob: activeStampJob,
+                completion: completion)
+        }, finish: { trashed in
+            sourceWasTrashed = trashed
+            pendingFolderURL = folderURL   // stored here so summary can offer "Show in Finder"
+            summaryNames = finalNamesForSummary
+            splitStage = .summary
+        })
+    }
+
+    /// Saves the split files (`save` writes them into the folder it's given) and then moves
+    /// the original to the Trash if asked. When one of `names` lands exactly on the original —
+    /// same folder, same name, as when a single part's pages were only cut from A3 — the files
+    /// are written to a temporary folder first, so the original has been read in full before
+    /// anything touches it. Then the original goes to the Trash (“Move original to Trash”) or,
+    /// after asking, is replaced, and the new files move into place. `finish` gets whether the
+    /// original went to the Trash.
+    private func saveSplitFiles(names: [String], into folder: URL,
+                                save: (URL, PDFAlertHandler) -> Void,
+                                finish: (Bool) -> Void) {
+        guard let source = pdfManager.sourceURL,
+              splitOutputReplacesSource(names: names, folder: folder, source: source) else {
+            var failed = false
+            save(folder) { title, message, isError in
+                if isError { failed = true; showNSAlert(title: title, message: message, isError: true) }
             }
+            if !failed { finish(trashSourceFileIfRequested()) }
+            return
         }
+
+        if !deleteSourceAfterSplit {
+            guard confirmNSAlert(
+                title: "Replace the Original?",
+                message: "“\(source.lastPathComponent)” is being saved in the folder it came from, with the same name, so the new version will replace the original.\n\nTo keep the original instead, tick “Move original to Trash” (it stays recoverable there), or give the file a suffix.",
+                confirmTitle: "Replace") else { return }
+        }
+
+        let fm = FileManager.default
+        guard let temp = try? fm.url(for: .itemReplacementDirectory, in: .userDomainMask,
+                                     appropriateFor: folder, create: true) else {
+            showNSAlert(title: "Couldn't Save", message: "ScoreSort couldn't make a temporary folder to save into beside \(folder.path).", isError: true)
+            return
+        }
+        defer { try? fm.removeItem(at: temp) }
+
+        var failure: (title: String, message: String)? = nil
+        save(temp) { title, message, isError in
+            if isError { failure = (title, message) }
+        }
+        if let failure {
+            showNSAlert(title: failure.title, message: failure.message, isError: true)
+            return
+        }
+
+        var trashed = false
+        do {
+            if deleteSourceAfterSplit {
+                try fm.trashItem(at: source, resultingItemURL: nil)
+                trashed = true
+            }
+            for name in names {
+                let from = temp.appendingPathComponent(name)
+                guard fm.fileExists(atPath: from.path) else { continue }
+                let to = folder.appendingPathComponent(name)
+                if fm.fileExists(atPath: to.path) {
+                    _ = try fm.replaceItemAt(to, withItemAt: from)
+                } else {
+                    try fm.moveItem(at: from, to: to)
+                }
+            }
+        } catch {
+            showNSAlert(title: "Couldn't Finish Saving",
+                        message: "The split files were made, but couldn't be put in \(folder.path): \(error.localizedDescription)" + (trashed ? "\n\nThe original is in the Trash." : ""),
+                        isError: true)
+            return
+        }
+        finish(trashed)
     }
 }
 

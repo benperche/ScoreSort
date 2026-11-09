@@ -45,7 +45,8 @@ struct FilePreviewCard: View {
 
     var fileName: String {
         splitOutputFileName(base: baseFileName, separator: filenameSeparator,
-                            suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex)
+                            suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex,
+                            onlyFile: splitActiveFileCount(pageToFile: pageToFileMapping, skippedPages: skippedPages) == 1)
     }
 
     /// Background fill colour reflecting skip / selection / active state.
@@ -192,6 +193,9 @@ struct SplitNamingStageView: View {
     @Binding var baseFileName: String
     @Binding var customFileNames: [Int: String]
     @Binding var previewOffset: CGPoint
+    /// ScoreSort rebuilt the document's pages (cut double pages, reordered), so even one
+    /// whole file is a new PDF worth saving.
+    var pagesRebuilt: Bool = false
     let onBack: () -> Void
     let onClear: () -> Void
     let onSave: () -> Void
@@ -260,8 +264,9 @@ struct SplitNamingStageView: View {
     }
 
     private var canSave: Bool {
-        let count = visibleFileIndices.count
-        return (count >= 2 || (count >= 1 && !skippedPages.isEmpty))
+        // Same rule as Step 1 (`splitOutputIsWorthSaving`).
+        splitOutputIsWorthSaving(activeFiles: visibleFileIndices.count, skippedPages: skippedPages.count,
+                                 pagesRebuilt: pagesRebuilt)
             && baseNameError == nil && !anySuffixError
             && !(prefixEnabled == false && hasDuplicateSuffixes)   // would overwrite on direct save
     }
@@ -308,7 +313,9 @@ struct SplitNamingStageView: View {
 
                     Text(baseFileName.isEmpty
                          ? "No base name — each file is named by its suffix alone, e.g. Flute.pdf"
-                         : "Example: \(baseFileName)\(filenameSeparator)Flute.pdf  ·  Leave a suffix blank for auto-numbering: \(baseFileName)\(filenameSeparator)1.pdf")
+                         : visibleFileIndices.count == 1
+                             ? "Leave the suffix blank to keep this name: \(baseFileName).pdf  ·  Or add one: \(baseFileName)\(filenameSeparator)Flute.pdf"
+                             : "Example: \(baseFileName)\(filenameSeparator)Flute.pdf  ·  Leave a suffix blank for auto-numbering: \(baseFileName)\(filenameSeparator)1.pdf")
                         .font(.caption)
                         .foregroundColor(.secondary)
 
@@ -359,6 +366,7 @@ struct SplitNamingStageView: View {
                         ForEach(visibleFileIndices, id: \.self) { fileIndex in
                             SplitFileNamingRow(
                                 fileIndex: fileIndex,
+                                isOnlyFile: visibleFileIndices.count == 1,
                                 page: pdfDocument.page(at: firstKeptPage(fileStart: firstPageIndex(for: fileIndex),
                                                                          fileSize: fileSizes[fileIndex],
                                                                          skippedPages: skippedPages)),
@@ -467,6 +475,9 @@ struct SplitNamingStageView: View {
 /// and BulkRenameView (one row per separate PDF file).
 struct SplitFileNamingRow: View {
     let fileIndex: Int
+    /// The only file being written (splitter): a blank suffix then keeps the base name as it
+    /// is rather than numbering it. Bulk Rename leaves this off.
+    var isOnlyFile: Bool = false
     /// The PDF page to display in the thumbnail strip.
     /// SplitNamingStageView passes the first page of each output section;
     /// BulkRenameView passes page 0 of each individual document.
@@ -537,7 +548,8 @@ struct SplitFileNamingRow: View {
     @State private var committedTypedText: String = ""
 
     private var finalFileName: String {
-        splitOutputFileName(base: baseFileName, separator: filenameSeparator, suffix: suffix, fileIndex: fileIndex)
+        splitOutputFileName(base: baseFileName, separator: filenameSeparator, suffix: suffix, fileIndex: fileIndex,
+                            onlyFile: isOnlyFile)
     }
 
     // ── Pan overlay ─────────────────────────────────────────────────────────

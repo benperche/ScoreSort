@@ -1793,10 +1793,11 @@ class PDFManager: ObservableObject {
 
         // The writing itself is shared with the command line (`writeSplitFiles`,
         // Logic/SplitLogic.swift), so both produce identical files.
+        let onlyFile = splitActiveFileCount(pageToFile: pageToFileMapping, skippedPages: skippedPages) == 1
         let plans = splitFilePlans(pageToFile: pageToFileMapping, pageCount: document.pageCount,
                                    skippedPages: skippedPages) { fileIndex in
             splitOutputFileName(base: baseFileName, separator: separator,
-                                suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex)
+                                suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex, onlyFile: onlyFile)
         }
         let report = writeSplitFiles(plans, from: document, to: folderURL, stampJob: stampJob)
 
