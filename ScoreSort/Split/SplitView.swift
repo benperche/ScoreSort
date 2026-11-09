@@ -94,6 +94,10 @@ struct SplitView: View {
     @State private var a3HintVisible = false
     /// Shows a brief tip banner after a scan's double pages are split.
     @State private var a3SplitNoticeVisible = false
+    /// True once ScoreSort has rebuilt this document's pages — Split Double Pages, Swap with
+    /// Next, Fix Booklet Order. Saving it then makes a new PDF even as a single file (an A3
+    /// part split to A4, say), so one output file is allowed through to naming.
+    @State private var documentRebuilt = false
     @State private var scanSplitNotice: AttributedString = ""
     /// Shows a brief tip banner after the first booklet fix, pointing to the per-card redo icon.
     @State private var bookletRedoNoticeVisible = false
@@ -172,6 +176,13 @@ struct SplitView: View {
     /// Number of output files that have at least one non-skipped page.
     var activeFileCount: Int {
         (0..<numberOfFiles).filter { !isFileFullySkipped($0) }.count
+    }
+
+    /// Whether Step 1 can move on to naming: there must be something new to save — two or
+    /// more files, some pages left out, or pages ScoreSort has rebuilt.
+    var canContinueToNaming: Bool {
+        splitOutputIsWorthSaving(activeFiles: activeFileCount, skippedPages: skippedPages.count,
+                                 pagesRebuilt: documentRebuilt)
     }
 
     /// Indices of output files whose every page is skipped.
@@ -257,6 +268,7 @@ struct SplitView: View {
                 skippedPages = []
                 selectedFileIndices = []
                 skipMode = .file
+                documentRebuilt = false
                 undoStack = []
                 redoStack = []
 
@@ -282,6 +294,7 @@ struct SplitView: View {
                     pendingScanSplitSkips = nil
                     skippedPages = skips.filter { $0 < totalPages }
                     skipMode = .page
+                    documentRebuilt = true
                 }
             } else {
                 // PDF cleared — reset all split flow state so nothing bleeds
@@ -298,6 +311,7 @@ struct SplitView: View {
                 skippedPages = []
                 selectedFileIndices = []
                 skipMode = .file
+                documentRebuilt = false
                 undoStack = []
                 redoStack = []
                 sourceWasTrashed = false
@@ -639,7 +653,7 @@ struct SplitView: View {
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.large)
-                                .disabled(activeFileCount < 1 || (activeFileCount < 2 && skippedPages.isEmpty))
+                                .disabled(!canContinueToNaming)
                             }
                         }
                         .padding()
@@ -699,7 +713,7 @@ struct SplitView: View {
                             return .handled
                         case .return:
                             // Advance to naming (same gate as the "Next: Name Files" button).
-                            if !(activeFileCount < 1 || (activeFileCount < 2 && skippedPages.isEmpty)) {
+                            if canContinueToNaming {
                                 splitStage = .naming
                                 return .handled
                             }
@@ -812,7 +826,7 @@ struct SplitView: View {
 
         switch splitStage {
         case .split:
-            let canProceed = loaded && !(activeFileCount < 1 || (activeFileCount < 2 && skippedPages.isEmpty))
+            let canProceed = loaded && canContinueToNaming
             slice.primaryTitle = "Continue to Naming"
             slice.primarySave  = canProceed ? { splitStage = .naming } : nil
             // Always list the actions (disabled until a PDF is loaded) so the menu
@@ -1031,8 +1045,7 @@ struct SplitView: View {
 
     func saveSplitPDF() {
         guard let document = pdfManager.pdfDocument,
-              activeFileCount >= 1,
-              activeFileCount >= 2 || !skippedPages.isEmpty else { return }
+              canContinueToNaming else { return }
 
         if prefixEnabled {
             // Go straight to Step 3 — folder picker comes after the user confirms order.
@@ -1268,6 +1281,7 @@ struct SplitView: View {
 
         // Replace the document while preserving all other split state.
         suppressNextA3Detection = true
+        documentRebuilt         = true
         suppressDocumentReset   = true
         pdfManager.pdfDocument  = newDoc
     }
@@ -1318,6 +1332,7 @@ struct SplitView: View {
         skippedPages = newSkipped
         lastBookletOrder = (n: n, order: order)
         suppressNextA3Detection = true
+        documentRebuilt         = true
         suppressDocumentReset   = true
         pdfManager.pdfDocument  = newDoc
     }
@@ -1340,6 +1355,7 @@ struct SplitView: View {
             }
         }
         suppressNextA3Detection = true
+        documentRebuilt         = true
         suppressDocumentReset   = true
         pdfManager.pdfDocument  = newDoc
         // currentPage stays the same so the preview immediately shows

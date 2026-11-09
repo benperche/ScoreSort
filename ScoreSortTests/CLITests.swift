@@ -801,3 +801,23 @@ struct AIConnectionTests {
                 == "/Applications/ScoreSort.app/Contents/MacOS/ScoreSort")
     }
 }
+
+@Suite("When Step 1 can continue to naming")
+struct SplitWorthSavingTests {
+    @Test("Two files, or skipped pages, are worth saving as before")
+    func usualCases() {
+        #expect(splitOutputIsWorthSaving(activeFiles: 2, skippedPages: 0, pagesRebuilt: false))
+        #expect(splitOutputIsWorthSaving(activeFiles: 1, skippedPages: 3, pagesRebuilt: false))
+        #expect(!splitOutputIsWorthSaving(activeFiles: 1, skippedPages: 0, pagesRebuilt: false))
+    }
+
+    @Test("One whole file is worth saving once its pages were rebuilt (e.g. A3 cut to A4)")
+    func rebuiltSingleFile() {
+        #expect(splitOutputIsWorthSaving(activeFiles: 1, skippedPages: 0, pagesRebuilt: true))
+    }
+
+    @Test("Nothing left to save is never worth saving")
+    func nothingLeft() {
+        #expect(!splitOutputIsWorthSaving(activeFiles: 0, skippedPages: 4, pagesRebuilt: true))
+    }
+}

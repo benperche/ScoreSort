@@ -558,6 +558,8 @@ The split state is stored as an **ordered array of page counts**, one entry per 
 
 **`suppressDocumentReset`** — set to `true` before replacing `pdfManager.pdfDocument` in-place (page swap, booklet reorder). `onChange` returns early without resetting any split state.
 
+**`documentRebuilt` / `canContinueToNaming`** — Step 1 continues to naming (button, Return, the menu's primary action, and `saveSplitPDF`'s guard all use `canContinueToNaming` → `splitOutputIsWorthSaving` in `Logic/SplitLogic.swift`) when there are ≥2 active files, some skipped pages, **or** `documentRebuilt`: set by Split Double Pages (in the pending-skips branch of `onChange`) and by every in-place rebuild (swap, booklet order, beside `suppressDocumentReset`), cleared on a new or cleared document. Without it, a part scanned on A3 and cut to A4 — still one file, nothing skipped — couldn't be saved.
+
 **`suppressNextA3Detection`** — set to `true` before loading a just-split document so `onChange` skips re-offering Split Double Pages.
 
 **`skipMode`** — defaults to `.file`; set to `.page` after a double-page split (blank pages need removing one at a time). Reset to `.file` on any fresh PDF load or clear — which is why the split sets it via `pendingScanSplitSkips` *after* `onChange`'s reset: set before the document assignment (as the old A3 path did), the reset silently undid it.

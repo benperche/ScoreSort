@@ -310,6 +310,13 @@ func firstKeptPage(fileStart: Int, fileSize: Int, skippedPages: Set<Int>) -> Int
     (fileStart..<(fileStart + max(fileSize, 0))).first { !skippedPages.contains($0) } ?? fileStart
 }
 
+/// Whether a split is worth saving: it must produce something new — two or more files, a
+/// file with pages left out, or pages ScoreSort has rebuilt (cut from double pages,
+/// reordered, swapped), which makes even one whole file a different PDF.
+func splitOutputIsWorthSaving(activeFiles: Int, skippedPages: Int, pagesRebuilt: Bool) -> Bool {
+    activeFiles >= 1 && (activeFiles >= 2 || skippedPages > 0 || pagesRebuilt)
+}
+
 // MARK: - Writing split files
 
 /// One file a split will write: its name (with `.pdf`) and the pages (0-based, in order)
