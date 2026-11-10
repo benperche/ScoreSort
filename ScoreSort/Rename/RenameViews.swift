@@ -69,9 +69,58 @@ struct ScoreOrderSortView: View {
     /// used to compute shift+click ranges.
     private var allDisplayedOps: [RenameOperation] {
         let undetected = renamerManager.operations.filter { $0.type == .undetected }
-        let rest       = renamerManager.operations.filter { $0.type != .undetected && $0.type != .excluded }
         let excluded   = renamerManager.operations.filter { $0.type == .excluded }
-        return undetected + rest + excluded
+        return undetected + folderGroups.flatMap(\.operations) + excluded
+    }
+
+    /// The matched files as shown: grouped by the folder each goes into while sorting into
+    /// folders ("" = stays at the top), groups in the order their first file comes (score
+    /// order); otherwise one group.
+    private var folderGroups: [(folder: String, operations: [RenameOperation])] {
+        let detected = renamerManager.operations.filter { $0.type != .undetected && $0.type != .excluded }
+        guard renamerManager.partFolderMode != .off else { return [("", detected)] }
+        var order: [String] = []
+        var groups: [String: [RenameOperation]] = [:]
+        for operation in detected {
+            let folder = operation.folder ?? ""
+            if groups[folder] == nil { order.append(folder) }
+            groups[folder, default: []].append(operation)
+        }
+        return order.map { ($0, groups[$0]!) }
+    }
+
+    // ── Move to Folder ────────────────────────────────────────────────────
+    /// File names of the selected files that can go in a folder (not unrecognised or excluded).
+    private var movableSelection: Set<String> {
+        Set(renamerManager.operations
+            .filter { selectedIDs.contains($0.id) && $0.type != .undetected && $0.type != .excluded }
+            .map(\.originalName))
+    }
+
+    /// Folders offered: the ensemble's sections (By Section), then any folder already in use.
+    private var folderChoices: [String] {
+        var choices = renamerManager.partFolderMode == .section
+            ? partFolderSections(for: renamerManager.ensembleType) : []
+        for folder in folderGroups.map(\.folder) + renamerManager.folderOverrides.values.sorted()
+        where !folder.isEmpty && !choices.contains(where: { $0.caseInsensitiveCompare(folder) == .orderedSame }) {
+            choices.append(folder)
+        }
+        return choices
+    }
+
+    /// The menu items that move `names` (the selection, or a right-clicked file).
+    @ViewBuilder private func moveToFolderItems(_ names: @escaping () -> Set<String>) -> some View {
+        ForEach(folderChoices, id: \.self) { folder in
+            Button(folder) { renamerManager.setFolder(folder, for: names()) }
+        }
+        Divider()
+        Button("New Folder\u{2026}") {
+            if let folder = askForPartFolderName() { renamerManager.setFolder(folder, for: names()) }
+        }
+        Button("Top Level (No Folder)") { renamerManager.setFolder("", for: names()) }
+        Divider()
+        Button("ScoreSort\u{2019}s Choice") { renamerManager.setFolder(nil, for: names()) }
+            .disabled(names().allSatisfy { renamerManager.folderOverrides[$0] == nil })
     }
 
     private func handleSelect(_ operation: RenameOperation, command: Bool, shift: Bool) {
@@ -309,6 +358,16 @@ struct ScoreOrderSortView: View {
                         let hasExcludableSelection = renamerManager.operations.contains {
                             selectedIDs.contains($0.id) && $0.type != .excluded
                         }
+                        if renamerManager.partFolderMode != .off {
+                            Menu {
+                                moveToFolderItems { movableSelection }
+                            } label: {
+                                Label("Move to Folder", systemImage: "folder")
+                            }
+                            .fixedSize()
+                            .disabled(movableSelection.isEmpty)
+                            .help("Put the selected files in a different folder, where ScoreSort guessed wrong. Click, Shift-click or ⌘-click to select; right-click a file for the same choices.")
+                        }
                         Button {
                             excludeSelected()
                         } label: {
@@ -478,14 +537,36 @@ struct ScoreOrderSortView: View {
                         .background(Color(NSColor.controlBackgroundColor))
                     }
 
-                    ForEach(detected) { operation in
-                        ScoreOrderFileRow(
-                            operation: operation,
-                            isSelected: selectedIDs.contains(operation.id),
-                            onDoubleClick: { selectedFileForAssignment = operation },
-                            onSelect: { cmd, shift in handleSelect(operation, command: cmd, shift: shift) }
-                        )
-                        Divider()
+                    let grouped = renamerManager.partFolderMode != .off
+                    ForEach(folderGroups, id: \.folder) { group in
+                        if grouped {
+                            PartFolderGroupHeader(folder: group.folder, fileCount: group.operations.count,
+                                                  isChosenByHand: group.operations.contains {
+                                                      renamerManager.folderOverrides[$0.originalName] != nil
+                                                  })
+                        }
+                        ForEach(group.operations) { operation in
+                            ScoreOrderFileRow(
+                                operation: operation,
+                                isSelected: selectedIDs.contains(operation.id),
+                                onDoubleClick: { selectedFileForAssignment = operation },
+                                onSelect: { cmd, shift in handleSelect(operation, command: cmd, shift: shift) }
+                            )
+                            .overlay(alignment: .leading) {
+                                if grouped && !group.folder.isEmpty {
+                                    Rectangle().fill(Color.partFolder.opacity(0.55)).frame(width: 3)
+                                }
+                            }
+                            .contextMenu {
+                                if grouped {
+                                    // Acts on the selection when this file is in it, else on this file.
+                                    moveToFolderItems {
+                                        selectedIDs.contains(operation.id) ? movableSelection : [operation.originalName]
+                                    }
+                                }
+                            }
+                            Divider()
+                        }
                     }
                 }
 

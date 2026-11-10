@@ -221,19 +221,33 @@ func stripScoreOrderPrefix(from filename: String, rescan: Bool) -> (clean: Strin
 /// is skipped ("Target exists"). With `rescan`, existing prefixes are re-done and only
 /// wrong ones change. With `folderMode`, each numbered part also moves into its section or
 /// instrument folder beside it (`partFolderDestination`) — including parts already numbered,
-/// which then only move. Nothing is touched on disk.
+/// which then only move. `folderOverrides` (original file name → folder, "" for none) are the
+/// person's own choices where ScoreSort guessed wrong; they apply only with `folderMode` on.
+/// Nothing is touched on disk.
 func planScoreOrderRename(files: [URL], order: [String], separator: String, rescan: Bool = false,
                           manualOverrides: [String: Int] = [:], excluded: Set<String> = [],
-                          folderMode: PartFolderMode = .off, ensemble: EnsembleType = .band) -> [RenameOperation] {
+                          folderMode: PartFolderMode = .off, ensemble: EnsembleType = .band,
+                          folderOverrides: [String: String] = [:]) -> [RenameOperation] {
     var operations: [RenameOperation] = []
     var detectedFiles: [(order: Int, url: URL, originalName: String)] = []
     var scoreFiles: [(url: URL, originalName: String)] = []
     var undetectedFiles: [(url: URL, originalName: String)] = []
     var manuallyAssigned: [(number: Int, url: URL, originalName: String)] = []
 
+    /// Where the file at `url` goes once named `name`: its folder — the person's choice, else
+    /// ScoreSort's — when sorting into folders.
+    func destination(_ url: URL, _ name: String) -> URL {
+        let renamed = url.deletingLastPathComponent().appendingPathComponent(name)
+        guard folderMode != .off else { return renamed }
+        if let chosen = folderOverrides[url.lastPathComponent] {
+            return partFolderDestination(for: renamed, folder: chosen)
+        }
+        return partFolderDestination(for: renamed, mode: folderMode, ensemble: ensemble)
+    }
+
     /// A file whose name stays as it is but which moves into its folder; nil when it doesn't move.
     func movedIntoFolder(_ url: URL) -> RenameOperation? {
-        let target = partFolderDestination(for: url, mode: folderMode, ensemble: ensemble)
+        let target = destination(url, url.lastPathComponent)
         guard target != url else { return nil }
         let name = url.lastPathComponent
         if FileManager.default.fileExists(atPath: target.path) {
@@ -285,11 +299,6 @@ func planScoreOrderRename(files: [URL], order: [String], separator: String, resc
     detectedFiles.sort { $0.order < $1.order }
     let fileManager = FileManager.default
 
-    /// Where a file named `name` beside `url` ends up: in its folder when sorting into folders.
-    func destination(_ url: URL, _ name: String) -> URL {
-        partFolderDestination(for: url.deletingLastPathComponent().appendingPathComponent(name),
-                              mode: folderMode, ensemble: ensemble)
-    }
     /// The folder `destination` put it in, for showing; nil when it stays beside the others.
     func folderName(_ url: URL, _ destination: URL) -> String? {
         let folder = destination.deletingLastPathComponent()

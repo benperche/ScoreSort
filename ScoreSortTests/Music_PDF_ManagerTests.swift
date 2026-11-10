@@ -72,6 +72,7 @@ struct InstrumentDetectionTests {
 
     @Test func detectsSimpleInstrument() {
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.customInstrumentOrder = ["flute", "clarinet", "trumpet"]
         let result = manager.detectInstrument(in: "Flute Part.pdf")
         #expect(result != nil)
@@ -80,6 +81,7 @@ struct InstrumentDetectionTests {
 
     @Test func detectionIsCaseInsensitive() {
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.customInstrumentOrder = ["flute"]
         // Filename is mixed case; instrument list is lowercase
         #expect(manager.detectInstrument(in: "FLUTE 1.pdf") != nil)
@@ -88,6 +90,7 @@ struct InstrumentDetectionTests {
 
     @Test func returnsNilWhenNoMatch() {
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.customInstrumentOrder = ["flute", "clarinet"]
         #expect(manager.detectInstrument(in: "Untitled Score.pdf") == nil)
     }
@@ -96,6 +99,7 @@ struct InstrumentDetectionTests {
         // "Baritone BC Bassoon.pdf" — baritone appears before bassoon,
         // so baritone should win even though both match.
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.customInstrumentOrder = ["baritone", "bassoon"]
         let result = manager.detectInstrument(in: "Baritone BC Bassoon.pdf")
         #expect(result?.1 == "baritone")
@@ -106,6 +110,7 @@ struct InstrumentDetectionTests {
         // but the length-sort means "bass clarinet" is tried first and wins
         // because it appears at the same (or earlier) position.
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.customInstrumentOrder = ["clarinet", "bass clarinet"]
         let result = manager.detectInstrument(in: "Bass Clarinet Part.pdf")
         #expect(result?.1 == "bass clarinet")
@@ -115,6 +120,7 @@ struct InstrumentDetectionTests {
         // The returned index should be the position in customInstrumentOrder,
         // which is used to sort files into the right score order.
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.customInstrumentOrder = ["flute", "oboe", "clarinet"]
         let fluteResult = manager.detectInstrument(in: "Flute.pdf")
         let clarResult  = manager.detectInstrument(in: "Clarinet.pdf")
@@ -134,12 +140,14 @@ struct ManualOverrideTests {
 
     @Test func assignsNumberToFile() {
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.setManualOverride(for: "Flute.pdf", number: 3)
         #expect(manager.manualOverrides["Flute.pdf"] == 3)
     }
 
     @Test func replacesExistingOverrideForSameFile() {
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.setManualOverride(for: "Flute.pdf", number: 3)
         manager.setManualOverride(for: "Flute.pdf", number: 5)
         #expect(manager.manualOverrides["Flute.pdf"] == 5)
@@ -149,6 +157,7 @@ struct ManualOverrideTests {
 
     @Test func conflictingNumberShiftsExistingOverride() {
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.setManualOverride(for: "Clarinet.pdf", number: 3)
         // Assigning 3 again for a different file should push Clarinet to 4
         manager.setManualOverride(for: "Flute.pdf", number: 3)
@@ -158,6 +167,7 @@ struct ManualOverrideTests {
 
     @Test func conflictShiftsChainOfOverrides() {
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.setManualOverride(for: "File A.pdf", number: 3)
         manager.setManualOverride(for: "File B.pdf", number: 4)
         // Inserting at 3 should push both A and B up
@@ -198,6 +208,7 @@ struct ScanFolderTests {
     @Test mutating func scoreFileGetsPrefix00() throws {
         try makePDFFile(named: "Score.pdf")
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.customInstrumentOrder = ["score", "flute"]
         manager.loadFolder(url: tempDir)
 
@@ -209,6 +220,7 @@ struct ScanFolderTests {
         try makePDFFile(named: "Flute.pdf")
         try makePDFFile(named: "Clarinet.pdf")
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.customInstrumentOrder = ["flute", "clarinet"]
         manager.loadFolder(url: tempDir)
 
@@ -221,6 +233,7 @@ struct ScanFolderTests {
     @Test mutating func unrecognisedFileIsMarkedUndetected() throws {
         try makePDFFile(named: "Mystery Part.pdf")
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.customInstrumentOrder = ["flute", "clarinet"]
         manager.loadFolder(url: tempDir)
 
@@ -231,6 +244,7 @@ struct ScanFolderTests {
     @Test mutating func manualOverrideIsRespected() throws {
         try makePDFFile(named: "Flute.pdf")
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.customInstrumentOrder = ["flute"]
         manager.loadFolder(url: tempDir)           // load first — as in real usage
         manager.setManualOverride(for: "Flute.pdf", number: 5)
@@ -243,6 +257,7 @@ struct ScanFolderTests {
     @Test mutating func alreadyPrefixedFileSkippedInNormalMode() throws {
         try makePDFFile(named: "01 - Flute.pdf")
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.customInstrumentOrder = ["flute"]
         manager.loadFolder(url: tempDir)
 

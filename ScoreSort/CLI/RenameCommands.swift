@@ -19,7 +19,7 @@ extension ScoreSortCLI {
             Usage: ScoreSort rename <folder | files…> --ensemble band|jazz|orchestra
                                     [--number "FILE=NN"]… [--exclude FILE]… [--recursive]
                                     [--rescan] [--separator TEXT] [--folders section|instrument]
-                                    [--apply] [--json]
+                                    [--folder "FILE=FOLDER"]… [--apply] [--json]
 
             The Rename tab's Score Order Sorter. Each file's name is checked for an
             instrument from the ensemble's order (your custom order from ScoreSort's
@@ -45,6 +45,9 @@ extension ScoreSortCLI {
                             Trumpets, Trombones, Rhythm). instrument: Flute, Clarinet…
                             Parts already numbered move too. The score and unrecognised
                             files stay put.
+              --folder      With --folders: put a file in a folder of your choosing where
+                            ScoreSort's guess is wrong, e.g. --folder "Bass.pdf=Rhythm".
+                            An empty folder ("Bass.pdf=") leaves it at the top.
               --apply       Rename the files.
 
             Files whose names contain no instrument are listed as "not recognised" and left
@@ -54,7 +57,7 @@ extension ScoreSortCLI {
               ScoreSort rename "Holst Parts" --ensemble band
               ScoreSort rename "Holst Parts" --ensemble band --number "Euph TC.pdf=12" --apply
             """,
-            valueOptions: ["ensemble", "number", "exclude", "separator", "folders"],
+            valueOptions: ["ensemble", "number", "exclude", "separator", "folders", "folder"],
             flagOptions: ["recursive", "rescan", "apply"],
             run: { args in
                 guard !args.positionals.isEmpty else { throw CommandError("Give the folder of parts (or the files) to rename.") }
@@ -66,6 +69,15 @@ extension ScoreSortCLI {
                     }
                     overrides[String(spec[..<eq])] = n
                 }
+                var folderOverrides: [String: String] = [:]
+                for spec in args.all("folder") {
+                    guard let eq = spec.lastIndex(of: "=") else {
+                        throw CommandError("--folder needs FILE=FOLDER, e.g. \"Bass.pdf=Rhythm\" (got “\(spec)”).")
+                    }
+                    let folder = spec[spec.index(after: eq)...].trimmingCharacters(in: .whitespaces)
+                    if !folder.isEmpty, let problem = partFolderNameError(folder) { throw CommandError(problem) }
+                    folderOverrides[String(spec[..<eq])] = folder
+                }
                 return try runRename(paths: args.positionals,
                                      ensemble: parseEnsemble(args.required("ensemble")),
                                      overrides: overrides,
@@ -74,6 +86,7 @@ extension ScoreSortCLI {
                                      rescan: args.has("rescan"),
                                      separator: args.value("separator"),
                                      folders: parsePartFolderMode(args.value("folders")),
+                                     folderOverrides: folderOverrides,
                                      apply: args.has("apply"))
             })
     }
@@ -81,7 +94,7 @@ extension ScoreSortCLI {
     static func runRename(paths: [String], ensemble: EnsembleType, overrides: [String: Int] = [:],
                           excluded: Set<String> = [], recursive: Bool = false, rescan: Bool = false,
                           separator: String? = nil, folders: PartFolderMode = .off,
-                          apply: Bool) throws -> CommandResult {
+                          folderOverrides: [String: String] = [:], apply: Bool) throws -> CommandResult {
         // The files: one folder, or files given one by one.
         let urls = paths.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath).standardizedFileURL }
         var files: [URL]
@@ -96,7 +109,7 @@ extension ScoreSortCLI {
         guard !files.isEmpty else { throw CommandError("No PDFs or images to rename there.") }
 
         let names = Set(files.map(\.lastPathComponent))
-        for name in Set(overrides.keys).union(excluded) where !names.contains(name) {
+        for name in Set(overrides.keys).union(excluded).union(folderOverrides.keys) where !names.contains(name) {
             throw CommandError("“\(name)” isn't one of the files (use the file name exactly, with .pdf).")
         }
 
@@ -105,7 +118,7 @@ extension ScoreSortCLI {
             files: files, order: InstrumentOrders.getOrder(for: ensemble),
             separator: separator ?? UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - ",
             rescan: rescan, manualOverrides: overrides, excluded: excluded,
-            folderMode: folders, ensemble: ensemble)
+            folderMode: folders, ensemble: ensemble, folderOverrides: folderOverrides)
 
         var report = RenameReport()
         if apply { report = performRenames(operations) }

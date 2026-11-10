@@ -126,6 +126,8 @@ enum ScoreSortMCPServer {
                           Param(key: "recursive", option: "recursive", kind: .boolean, description: "Include subfolders."),
                           Param(key: "rescan", option: "rescan", kind: .boolean, description: "Re-number files that already have numbers."),
                           Param(key: "folders", option: "folders", kind: .string, description: "Also move each part into a folder beside it for its section (Woodwind, Brass…; jazz: Saxophones, Trumpets…) or instrument. Parts already numbered move too. Only when the person asks for folders.", choices: ["section", "instrument", "off"]),
+                          Param(key: "folderChoices", option: "folder", kind: .pairs(key: "file", value: "folder", valueIsNumber: false),
+                                description: "With folders: put a file in another folder where the plan's guess is wrong (folder \"\" = top level)."),
                           Param(key: "apply", option: "apply", kind: .boolean, description: "Rename the files (otherwise only plan).")]),
             Tool(name: "scoresort_allocate", command: "allocate",
                  description: "Plan who plays what before combining: an ensemble preset's players (scoresort_presets) matched to a folder of parts. Shows each player group and the file(s) they'd get, groups with no part, groups shared across numbered parts, and files no one plays. Writes nothing. Settle the gaps with allocations (e.g. the Bass Guitar players get the Tuba part), check again, then pass the same allocations to scoresort_combine.",

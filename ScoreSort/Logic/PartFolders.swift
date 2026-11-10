@@ -130,6 +130,22 @@ private let partFolderEntries: [PartFolderEntry] = [
     PartFolderEntry(phrases: ["voice", "voices", "vocal", "vocals", "vox", "vocalist", "choir"], family: .voice, instrument: "Vocals"),
 ]
 
+/// The section folders for an ensemble, in score order — offered by "Move to Folder".
+func partFolderSections(for ensemble: EnsembleType) -> [String] {
+    ensemble == .jazz
+        ? ["Saxophones", "Trumpets", "Trombones", "Rhythm", "Strings", "Vocals"]
+        : ["Woodwind", "Brass", "Percussion", "Rhythm", "Strings", "Vocals"]
+}
+
+/// Why a folder name typed by the person can't be used, or nil when it's fine.
+func partFolderNameError(_ name: String) -> String? {
+    let trimmed = name.trimmingCharacters(in: .whitespaces)
+    if trimmed.isEmpty { return "Give the folder a name." }
+    if trimmed.contains("/") || trimmed.contains(":") { return "A folder name can't contain “/” or “:”." }
+    if trimmed.hasPrefix(".") { return "A folder name can't start with a full stop (it would be hidden)." }
+    return nil
+}
+
 /// The section a family belongs to in this ensemble; nil for the score.
 private func partSection(_ family: PartFamily, ensemble: EnsembleType) -> String? {
     if ensemble == .jazz {
@@ -219,8 +235,15 @@ func partFolderPath(_ fileName: String, folder: String?) -> String {
 /// a folder of that name, so sorting a sorted folder again doesn't nest them. `partName`, when
 /// known, decides the folder (see `partFolderName(partName:…)`).
 func partFolderDestination(for url: URL, partName: String? = nil, mode: PartFolderMode, ensemble: EnsembleType) -> URL {
+    partFolderDestination(for: url, folder: partFolderName(partName: partName ?? "", fileName: url.lastPathComponent,
+                                                           mode: mode, ensemble: ensemble))
+}
+
+/// `url` moved into `folder` beside it (nil: left where it is), without nesting a file
+/// already in a folder of that name.
+func partFolderDestination(for url: URL, folder: String?) -> URL {
     let parent = url.deletingLastPathComponent()
-    guard let folder = partFolderName(partName: partName ?? "", fileName: url.lastPathComponent, mode: mode, ensemble: ensemble),
+    guard let folder, !folder.isEmpty,
           parent.lastPathComponent.caseInsensitiveCompare(folder) != .orderedSame else { return url }
     return parent.appendingPathComponent(folder, isDirectory: true).appendingPathComponent(url.lastPathComponent)
 }

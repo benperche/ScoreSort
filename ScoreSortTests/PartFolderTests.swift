@@ -155,6 +155,45 @@ struct PartFolderWritingTests {
         #expect(contents(dir) == ["Flute/01 - Flute 1.pdf", "Trumpet/02 - Trumpet 2.pdf"])
     }
 
+    @Test("Move to Folder: a file chosen by hand goes where it was put, not where ScoreSort guessed")
+    func handChosenFolders() throws {
+        InstrumentOrders.setup()
+        let dir = folder(with: ["Bass.pdf", "Flute 1.pdf", "01 - Piano.pdf", "Score.pdf"])
+        let operations = planScoreOrderRename(files: renamableFiles(in: dir, recursive: false),
+                                              order: InstrumentOrders.getOrder(for: .band), separator: " - ",
+                                              folderMode: .section, ensemble: .band,
+                                              folderOverrides: ["Bass.pdf": "Rhythm", "Flute 1.pdf": "",
+                                                                "01 - Piano.pdf": "Keys & Synths"])
+        let bass = try #require(operations.first { $0.originalName == "Bass.pdf" })
+        #expect(bass.folder == "Rhythm")                      // not Strings
+        let flute = try #require(operations.first { $0.originalName == "Flute 1.pdf" })
+        #expect(flute.folder == nil)                          // kept at the top
+        _ = performRenames(operations)
+        let names = contents(dir)
+        #expect(names.contains { $0.hasPrefix("Rhythm/") && $0.hasSuffix("Bass.pdf") })
+        #expect(names.contains("Keys & Synths/01 - Piano.pdf"))
+        #expect(names.contains { !$0.contains("/") && $0.hasSuffix("Flute 1.pdf") })
+        #expect(names.contains { !$0.contains("/") && $0.hasSuffix("Score.pdf") })
+    }
+
+    @Test("Hand-chosen folders are ignored with folders off")
+    func handChosenFoldersNeedFoldersOn() {
+        InstrumentOrders.setup()
+        let dir = folder(with: ["Flute 1.pdf"])
+        let operations = planScoreOrderRename(files: renamableFiles(in: dir, recursive: false),
+                                              order: InstrumentOrders.getOrder(for: .band), separator: " - ",
+                                              folderOverrides: ["Flute 1.pdf": "Brass"])
+        #expect(operations.first?.folder == nil)
+    }
+
+    @Test("Folder names that can't be used are refused")
+    func folderNameErrors() {
+        #expect(partFolderNameError("Low Brass") == nil)
+        #expect(partFolderNameError("  ") != nil)
+        #expect(partFolderNameError("Brass/Low") != nil)
+        #expect(partFolderNameError(".hidden") != nil)
+    }
+
     @Test("With folders off, nothing moves into folders")
     func offLeavesFolderAlone() {
         InstrumentOrders.setup()
@@ -191,5 +230,19 @@ struct PartFolderWritingTests {
         #expect(names.contains { $0.hasPrefix("Saxophones/") && $0.hasSuffix("Alto Sax 1.pdf") })
         #expect(names.contains { $0.hasPrefix("Rhythm/") && $0.hasSuffix("Drums.pdf") })
         #expect(throws: CommandError.self) { try ScoreSortCLI.parsePartFolderMode("sections please") }
+    }
+
+    @Test("The command line's rename takes --folder to correct a guess")
+    func renameCommandFolderChoice() throws {
+        let dir = folder(with: ["Bass.pdf", "Flute 1.pdf"])
+        let result = try ScoreSortCLI.runRename(paths: [dir.path], ensemble: .band, separator: " - ",
+                                                folders: .section, folderOverrides: ["Bass.pdf": "Rhythm"],
+                                                apply: false)
+        let files = try #require(result.json["files"] as? [[String: Any]])
+        #expect(files.first { $0["file"] as? String == "Bass.pdf" }?["folder"] as? String == "Rhythm")
+        #expect(throws: CommandError.self) {
+            try ScoreSortCLI.runRename(paths: [dir.path], ensemble: .band, folders: .section,
+                                       folderOverrides: ["Tuba.pdf": "Brass"], apply: false)
+        }
     }
 }

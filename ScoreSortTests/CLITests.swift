@@ -335,6 +335,7 @@ struct CLIRenameTests {
         InstrumentOrders.setup()
         let dir = folder(with: ["Flute 1.pdf", "Score.pdf", "Trumpet 2.pdf", "Clarinet 1.pdf", "Kazoo.pdf", "01 - Oboe.pdf"])
         let manager = RenamerManager()   // (its separator is the user's setting — read, never set, here)
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.loadFolder(url: dir)
         let planned = planScoreOrderRename(files: renamableFiles(in: dir, recursive: false),
                                            order: manager.customInstrumentOrder, separator: manager.prefixSeparator)

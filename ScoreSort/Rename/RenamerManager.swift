@@ -73,6 +73,9 @@ class RenamerManager: ObservableObject {
     /// True only while an ensemble's preset order is being loaded into `customInstrumentOrder`.
     private var isLoadingPresetOrder = false
     var manualOverrides: [String: Int] = [:]
+    /// Folders chosen by hand with "Move to Folder" (file name → folder, "" for the top level),
+    /// where ScoreSort's guess was wrong. Used while sorting into folders.
+    @Published private(set) var folderOverrides: [String: String] = [:]
     @Published private(set) var isRescanMode = false
     
     var statusText: String {
@@ -96,6 +99,7 @@ class RenamerManager: ObservableObject {
         self.folderURL = url
         self.directFiles = []
         self.manualOverrides = [:]
+        self.folderOverrides = [:]
         self.excludedNames = []
         self.isRescanMode = false
         scanFolder()
@@ -107,6 +111,7 @@ class RenamerManager: ObservableObject {
         self.directFiles = urls.filter(isRenamableFile)
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         self.manualOverrides = [:]
+        self.folderOverrides = [:]
         self.excludedNames = []
         self.isRescanMode = false
         scanFolder()
@@ -142,6 +147,16 @@ class RenamerManager: ObservableObject {
 
     /// Marks the given filenames as excluded (won't rename) or restores them.
     /// Excluded files remain visible in the list, sorted to the bottom in red.
+    /// Puts these files in `folder` ("" for the top level), or back to ScoreSort's own choice
+    /// with nil.
+    func setFolder(_ folder: String?, for names: Set<String>) {
+        for name in names {
+            if let folder { folderOverrides[name] = folder.trimmingCharacters(in: .whitespaces) }
+            else { folderOverrides.removeValue(forKey: name) }
+        }
+        if hasContent { scanFolder() }
+    }
+
     func setExcluded(_ names: Set<String>, excluded: Bool) {
         if excluded {
             excludedNames.formUnion(names)
@@ -156,6 +171,7 @@ class RenamerManager: ObservableObject {
         self.directFiles = []
         self.operations = []
         self.manualOverrides = [:]
+        self.folderOverrides = [:]
         self.excludedNames = []
         self.isRescanMode = false
     }
@@ -234,7 +250,8 @@ class RenamerManager: ObservableObject {
                                           manualOverrides: manualOverrides,
                                           excluded: excludedNames,
                                           folderMode: partFolderMode,
-                                          ensemble: ensembleType)
+                                          ensemble: ensembleType,
+                                          folderOverrides: folderOverrides)
     }
 
     func detectInstrument(in filename: String) -> (Int, String)? {

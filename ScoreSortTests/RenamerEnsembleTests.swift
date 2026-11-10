@@ -17,6 +17,7 @@ struct RenamerEnsembleTests {
 
     @Test func switchingEnsembleChangesWhatIsRecognised() {
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
 
         // Orchestra knows the strings; jazz doesn't.
         manager.ensembleType = .orchestra
@@ -36,6 +37,7 @@ struct RenamerEnsembleTests {
 
     @Test func everySwitchTakesEffectNotJustTheFirst() {
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         for type in [EnsembleType.jazz, .orchestra, .band, .orchestra, .jazz] {
             manager.ensembleType = type
             #expect(manager.customInstrumentOrder == InstrumentOrders.getOrder(for: type),
@@ -47,6 +49,7 @@ struct RenamerEnsembleTests {
     /// ensemble change rather than being silently replaced.
     @Test func aUserEditedOrderIsNotOverwritten() {
         let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's Settings default
         manager.ensembleType = .orchestra
         manager.customInstrumentOrder = ["tuba", "piccolo"]      // as if edited in Preferences
         manager.ensembleType = .band
