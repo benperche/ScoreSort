@@ -39,6 +39,7 @@ struct RenamerView: View {
 
 // MARK: - Score Order Sort View
 struct ScoreOrderSortView: View {
+    @AppStorage(PartFolderMode.defaultsKey) private var partFolderDefault: PartFolderMode = .off
     @EnvironmentObject private var renamerManager: RenamerManager
     @EnvironmentObject private var appState: AppState
     @Environment(\.openSettings) private var openSettings
@@ -217,6 +218,10 @@ struct ScoreOrderSortView: View {
             .onChange(of: selectedIDs)                 { DispatchQueue.main.async { syncTabCommands() } }
             .onChange(of: batchFolders)                { DispatchQueue.main.async { syncTabCommands() } }
             .onChange(of: renameResult == nil)         { DispatchQueue.main.async { syncTabCommands() } }
+            // A new Settings default becomes this session's "Sort into folders" choice.
+            .onChange(of: partFolderDefault) { _, newDefault in
+                DispatchQueue.main.async { renamerManager.partFolderMode = newDefault }
+            }
     }
 
     /// Publishes the Score Order Sorter's actions to the menu bridge while Rename is active.
@@ -610,6 +615,7 @@ struct ScoreOrderSortView: View {
                 .pickerStyle(.segmented)
                 .frame(maxWidth: 280)
                 Spacer()
+                PartFolderPicker(mode: $renamerManager.partFolderMode.deferredCommit())
             }
             HStack {
                 Text(renamerManager.statusText)
@@ -846,7 +852,7 @@ private struct ScoreOrderFileRow: View {
                         .lineLimit(1)
                 default:
                     if !operation.newName.isEmpty {
-                        Text(operation.newName)
+                        Text(operation.newPathForDisplay)
                             .font(.body)
                             .foregroundColor(operation.color)
                             .lineLimit(1)
@@ -1051,6 +1057,9 @@ struct BulkRenameView: View {
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
     @AppStorage("prefixEnsembleType") private var prefixEnsembleType: EnsembleType = .band
+    /// "Sort into folders": starts from the Settings default and follows it when it changes.
+    @State private var partFolderMode: PartFolderMode = PartFolderMode.savedDefault
+    @AppStorage(PartFolderMode.defaultsKey) private var partFolderDefault: PartFolderMode = .off
 
     // ── Instrument names — the selected ensemble's score order (so suggestions
     // follow that ensemble; e.g. in a band, Horn comes right after Trumpet) ──
@@ -1090,6 +1099,11 @@ struct BulkRenameView: View {
 
     // ── Body ──────────────────────────────────────────────────────────────
     var body: some View {
+        stageBody
+            .onChange(of: partFolderDefault) { _, newDefault in partFolderMode = newDefault }
+    }
+
+    @ViewBuilder private var stageBody: some View {
         switch bulkStage {
         case .summary:
             RenameSummaryView(
@@ -1291,6 +1305,8 @@ struct BulkRenameView: View {
                 }
                 HStack {
                     Spacer()
+                    PartFolderPicker(mode: $partFolderMode)
+                        .padding(.trailing, 8)
                     Button(action: executeRename) {
                         Label(prefixEnabled
                               ? "Next: Prefix Order"
@@ -1436,7 +1452,12 @@ struct BulkRenameView: View {
                 let newName = sfx.isEmpty
                     ? "\(baseFileName)\(sep)\(index + 1).pdf"
                     : "\(baseFileName)\(sep)\(sfx).pdf"
-                let newURL = item.url.deletingLastPathComponent().appendingPathComponent(newName)
+                let newURL = partFolderDestination(
+                    for: item.url.deletingLastPathComponent().appendingPathComponent(newName), partName: sfx,
+                    mode: partFolderMode, ensemble: prefixEnsembleType)
+                let shownName = sortedName(newName, from: item.url, to: newURL)
+                try? FileManager.default.createDirectory(at: newURL.deletingLastPathComponent(),
+                                                         withIntermediateDirectories: true)
                 var coordinatorError: NSError?
                 NSFileCoordinator().coordinate(
                     writingItemAt: item.url, options: .forMoving,
@@ -1445,7 +1466,7 @@ struct BulkRenameView: View {
                 ) { src, dst in
                     do {
                         try FileManager.default.moveItem(at: src, to: dst)
-                        finalNames.append(newName)
+                        finalNames.append(shownName)
                     } catch {
                         if isFilePermissionError(error) { sawPermissionError = true }
                         errors.append("\(item.url.lastPathComponent): \(error.localizedDescription)")
@@ -1481,6 +1502,12 @@ struct BulkRenameView: View {
         }
     }
 
+    /// `name` as the summary shows it: "Woodwind/01 - Flute.pdf" when sorting moved it into a folder.
+    private func sortedName(_ name: String, from original: URL, to target: URL) -> String {
+        let folder = target.deletingLastPathComponent()
+        return folder == original.deletingLastPathComponent() ? name : "\(folder.lastPathComponent)/\(name)"
+    }
+
     /// Called by PrefixOrderStepView when the user confirms ordering.
     /// Renames each file from its original URL to the final prefixed name in one pass.
     private func applyPrefixAndRenameBulk(orderedItems: [PrefixItem]) {
@@ -1508,8 +1535,13 @@ struct BulkRenameView: View {
             guard let number = numbers[item.id] else { continue }  // skipped → leave unrenamed
             let prefix = String(format: "%02d", number)
             let finalName = "\(prefix)\(sep)\(item.proposedName)"
-            let targetURL = originalURL.deletingLastPathComponent()
-                                       .appendingPathComponent(finalName)
+            let targetURL = partFolderDestination(
+                for: originalURL.deletingLastPathComponent().appendingPathComponent(finalName),
+                partName: suffixes[item.id] ?? "",
+                mode: partFolderMode, ensemble: prefixEnsembleType)
+            let shownName = sortedName(finalName, from: originalURL, to: targetURL)
+            try? FileManager.default.createDirectory(at: targetURL.deletingLastPathComponent(),
+                                                     withIntermediateDirectories: true)
             var coordinatorError: NSError?
             NSFileCoordinator().coordinate(
                 writingItemAt: originalURL, options: .forMoving,
@@ -1518,7 +1550,7 @@ struct BulkRenameView: View {
             ) { src, dst in
                 do {
                     try FileManager.default.moveItem(at: src, to: dst)
-                    finalNames.append(finalName)
+                    finalNames.append(shownName)
                 } catch {
                     if isFilePermissionError(error) { sawPermissionError = true }
                     errors.append("\(item.proposedName): \(error.localizedDescription)")

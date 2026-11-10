@@ -26,6 +26,7 @@ extension ScoreSortCLI {
                                    [--base NAME] [--separator TEXT] [--skip PAGES]
                                    [--score-order band|jazz|orchestra] [--prefix-separator TEXT]
                                    [--stamp NAME] [--stamp-scope first|every]
+                                   [--folders section|instrument] [--ensemble band|jazz|orchestra]
                                    [--dry-run] [--overwrite] [--json]
 
             Splits a PDF into one file per part — the Split tab's Steps 1–3.
@@ -56,6 +57,14 @@ extension ScoreSortCLI {
               --stamp        Stamp a saved stamp design onto each part (see `stamps`).
               --stamp-scope  first (default): each part's first page; every: every page.
 
+            Sorting into folders (so each group of players can be given just their folder):
+              --folders      section: Woodwind, Brass, Percussion, Strings, Rhythm (piano,
+                             guitar, bass guitar) — for a jazz band Saxophones, Trumpets,
+                             Trombones, Rhythm. instrument: Flute, Clarinet, Alto Saxophone…
+                             Folders are made inside --out; the score and unrecognised
+                             parts stay at the top. off (the default) puts every file in --out.
+              --ensemble     The ensemble the sections follow (default: --score-order's, else band).
+
               --dry-run      Show the files that would be written; write nothing.
               --overwrite    Replace files that already exist (otherwise it stops).
 
@@ -66,7 +75,7 @@ extension ScoreSortCLI {
               ScoreSort split "Combined.pdf" --out Parts --bookmarks
             """,
             valueOptions: ["out", "part", "base", "separator", "skip", "score-order", "prefix-separator",
-                           "stamp", "stamp-scope", "bookmark-names"],
+                           "stamp", "stamp-scope", "bookmark-names", "folders", "ensemble"],
             flagOptions: ["bookmarks", "dry-run", "overwrite"],
             run: { args in
                 guard let path = args.positionals.first else { throw CommandError("Give the PDF to split.") }
@@ -87,6 +96,8 @@ extension ScoreSortCLI {
         var prefixSeparator: String? = nil
         var stamp: String? = nil
         var stampScope: StampScope = .firstPageOfEachPart
+        var folders: PartFolderMode = .off
+        var ensemble: EnsembleType? = nil
         var dryRun = false
         var overwrite = false
 
@@ -117,6 +128,8 @@ extension ScoreSortCLI {
             prefixSeparator = args.value("prefix-separator")
             stamp = args.value("stamp")
             stampScope = try parseStampScope(args.value("stamp-scope"), default: .firstPageOfEachPart)
+            folders = try parsePartFolderMode(args.value("folders"))
+            if let ensemble = args.value("ensemble") { self.ensemble = try parseEnsemble(ensemble) }
             dryRun = args.has("dry-run")
             overwrite = args.has("overwrite")
         }
@@ -177,9 +190,14 @@ extension ScoreSortCLI {
             }
         }
 
-        // 3. The files, with the problems an AI should hear about before writing.
+        // 3. The files, with the problems an AI should hear about before writing. Sorting
+        // into folders puts each name in its folder ("Brass/03 - Trumpet 1.pdf").
+        let folderEnsemble = options.ensemble ?? options.scoreOrder ?? .band
         let plans = items.map { item in
-            SplitFilePlan(name: finalNames[item.id] ?? item.proposedName,
+            SplitFilePlan(name: partFolderPath(finalNames[item.id] ?? item.proposedName,
+                                               folder: partFolderName(partName: parts[item.id].name,
+                                                                      fileName: item.proposedName,
+                                                                      mode: options.folders, ensemble: folderEnsemble)),
                           pages: parts[item.id].pages.filter { !skipped.contains($0) })
         }
         let empty = plans.filter { $0.pages.isEmpty }.map(\.name)
@@ -236,6 +254,14 @@ extension ScoreSortCLI {
         if !warnings.isEmpty { text += "\n" + warnings.map { "Note: " + $0 }.joined(separator: "\n") }
         if !failures.isEmpty { text += "\n" + report.failures.map { "Failed: \($0.name) — \($0.reason)" }.joined(separator: "\n") }
         return CommandResult(text: text, json: json, exitCode: ok ? 0 : 1)
+    }
+
+    static func parsePartFolderMode(_ text: String?) throws -> PartFolderMode {
+        guard let text else { return .off }
+        guard let mode = PartFolderMode(rawValue: text.lowercased()) else {
+            throw CommandError("--folders is section, instrument or off (got “\(text)”).")
+        }
+        return mode
     }
 
     // MARK: - split-scans

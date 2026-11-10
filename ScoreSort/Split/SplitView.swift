@@ -117,6 +117,10 @@ struct SplitView: View {
     /// Persisted so users who always want it don't re-tick every time; it's recoverable
     /// (Trash, not permanent delete) and the summary screen confirms when it happened.
     @AppStorage("deleteSourceAfterSplit") private var deleteSourceAfterSplit: Bool = false
+    /// "Sort into folders" (Step 2's menu): starts from the Settings default, follows it when
+    /// that changes, and otherwise keeps the choice from one piece to the next.
+    @State private var partFolderMode: PartFolderMode = PartFolderMode.savedDefault
+    @AppStorage(PartFolderMode.defaultsKey) private var partFolderDefault: PartFolderMode = .off
     @AppStorage("splitStampEnabled") private var stampEnabled: Bool = false
     @AppStorage("splitStampScope") private var stampScope: StampScope = .firstPageOfEachPart
     /// Set true after a successful save when the source file was actually trashed, so the
@@ -233,6 +237,7 @@ struct SplitView: View {
                         customFileNames: $customFileNames,
                         previewOffset: $previewOffset,
                         pagesRebuilt: documentRebuilt,
+                        partFolderMode: $partFolderMode,
                         onBack: { splitStage = .split },
                         onClear: {
                             splitStage = .split
@@ -245,6 +250,7 @@ struct SplitView: View {
                 splitStageBody
             }
         }
+        .onChange(of: partFolderDefault) { _, newDefault in partFolderMode = newDefault }
         .onChange(of: pdfManager.pdfDocument) { _, newValue in
             if let doc = newValue {
                 // Page-swap replaces the document in-place: preserve all split state.
@@ -1081,12 +1087,14 @@ struct SplitView: View {
 
             panel.begin { response in
                 guard response == .OK, let folderURL = panel.url else { return }
+                let folders = splitPartFolders()
                 var names: [String] = []
                 for i in 0..<fileSizes.count {
                     guard !isFileFullySkipped(i) else { continue }
-                    names.append(splitOutputFileName(base: baseFileName, separator: filenameSeparator,
-                                                     suffix: customFileNames[i] ?? "", fileIndex: i,
-                                                     onlyFile: activeFileCount == 1))
+                    names.append(partFolderPath(splitOutputFileName(base: baseFileName, separator: filenameSeparator,
+                                                                    suffix: customFileNames[i] ?? "", fileIndex: i,
+                                                                    onlyFile: activeFileCount == 1),
+                                                folder: folders[i]))
                 }
                 saveSplitFiles(names: names, into: folderURL, save: { folder, completion in
                     pdfManager.saveSplitPDF(
@@ -1098,6 +1106,7 @@ struct SplitView: View {
                         skippedPages: skippedPages,
                         separator: filenameSeparator,
                         stampJob: activeStampJob,
+                        partFolders: folders,
                         completion: completion)
                 }, finish: { trashed in
                     sourceWasTrashed = trashed
@@ -1363,6 +1372,20 @@ struct SplitView: View {
         // what was just moved down one slot.
     }
 
+    /// Each file's folder under "Sort into folders" (none when it's off), from its Step 2 part
+    /// name — or, for a single file kept under its own name, the whole name.
+    private func splitPartFolders() -> [Int: String] {
+        var folders: [Int: String] = [:]
+        for i in 0..<fileSizes.count {
+            let suffix = customFileNames[i] ?? ""
+            let fileName = splitOutputFileName(base: baseFileName, separator: filenameSeparator, suffix: suffix,
+                                               fileIndex: i, onlyFile: activeFileCount == 1)
+            folders[i] = partFolderName(partName: suffix, fileName: fileName,
+                                        mode: partFolderMode, ensemble: prefixEnsembleType)
+        }
+        return folders
+    }
+
     private func applyPrefixToFolder(_ folderURL: URL, orderedItems: [PrefixItem]) {
         let sep = UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - "
 
@@ -1373,6 +1396,7 @@ struct SplitView: View {
         var finalCustomNames: [Int: String] = [:]
         var finalNamesForSummary: [String] = []
         var omittedPages = skippedPages   // Step-1 skips, plus any Step-3 skips below
+        let folders = splitPartFolders()
 
         for item in orderedItems {
             guard let fullName = fullNames[item.id] else {
@@ -1381,7 +1405,7 @@ struct SplitView: View {
                 continue
             }
             finalCustomNames[item.id] = fullName.hasSuffix(".pdf") ? String(fullName.dropLast(4)) : fullName
-            finalNamesForSummary.append(fullName)
+            finalNamesForSummary.append(partFolderPath(fullName, folder: folders[item.id]))
         }
 
         saveSplitFiles(names: finalNamesForSummary, into: folderURL, save: { folder, completion in
@@ -1394,6 +1418,7 @@ struct SplitView: View {
                 skippedPages: omittedPages,
                 separator: "",
                 stampJob: activeStampJob,
+                partFolders: folders,
                 completion: completion)
         }, finish: { trashed in
             sourceWasTrashed = trashed
@@ -1457,6 +1482,7 @@ struct SplitView: View {
                 let from = temp.appendingPathComponent(name)
                 guard fm.fileExists(atPath: from.path) else { continue }
                 let to = folder.appendingPathComponent(name)
+                try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
                 if fm.fileExists(atPath: to.path) {
                     _ = try fm.replaceItemAt(to, withItemAt: from)
                 } else {

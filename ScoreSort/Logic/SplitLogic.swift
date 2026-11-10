@@ -364,7 +364,7 @@ struct SplitWriteReport {
     var failures: [(name: String, reason: String)] = []
 }
 
-/// Writes each planned file into `folder`, stamping each one's first page (or every page)
+/// Writes each planned file into `folder` (making any subfolder its name includes), stamping each one's first page (or every page)
 /// as `stampJob` says — each output file is one part. Existing files are replaced.
 /// Shared by the Split tab and the command line, so both produce the same files.
 func writeSplitFiles(_ plans: [SplitFilePlan], from document: PDFDocument, to folder: URL,
@@ -382,7 +382,16 @@ func writeSplitFiles(_ plans: [SplitFilePlan], from document: PDFDocument, to fo
             continue
         }
         let doc = applyingStamp(stampJob, to: assembled, partFirstPages: [0])
-        if let reason = savePDFDocument(doc, to: folder.appendingPathComponent(plan.name)) {
+        // A name can carry a section folder ("Brass/03 - Trumpet 1.pdf", `partFolderPath`).
+        let destination = folder.appendingPathComponent(plan.name)
+        do {
+            try FileManager.default.createDirectory(at: destination.deletingLastPathComponent(),
+                                                    withIntermediateDirectories: true)
+        } catch {
+            report.failures.append((plan.name, "Its folder couldn't be made: \(error.localizedDescription)"))
+            continue
+        }
+        if let reason = savePDFDocument(doc, to: destination) {
             report.failures.append((plan.name, reason))
         } else {
             report.written.append(plan.name)

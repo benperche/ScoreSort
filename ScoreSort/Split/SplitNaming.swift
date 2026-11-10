@@ -196,6 +196,8 @@ struct SplitNamingStageView: View {
     /// ScoreSort rebuilt the document's pages (cut double pages, reordered), so even one
     /// whole file is a new PDF worth saving.
     var pagesRebuilt: Bool = false
+    /// "Sort into folders" for the saved parts.
+    @Binding var partFolderMode: PartFolderMode
     let onBack: () -> Void
     let onClear: () -> Void
     let onSave: () -> Void
@@ -449,6 +451,9 @@ struct SplitNamingStageView: View {
                     .buttonStyle(.bordered)
 
                     Spacer()
+
+                    PartFolderPicker(mode: $partFolderMode)
+                        .padding(.trailing, 8)
 
                     Button(action: onSave) {
                         Label(prefixEnabled ? "Next: Prefix Order" : "Save Split Files",

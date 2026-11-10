@@ -1013,6 +1013,20 @@ struct PreferencesView: View {
     @State private var newInstrument: String = ""
     @Environment(\.dismiss) private var dismiss
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
+    @AppStorage(PartFolderMode.defaultsKey) private var partFolderDefault: PartFolderMode = .off
+
+    private var partFolderSettingDescription: String {
+        let what: String
+        switch partFolderDefault {
+        case .off:
+            what = "Parts are saved and renamed side by side, as usual."
+        case .section:
+            what = "Each part goes into a folder for its section: Woodwind, Brass, Percussion, Strings and Rhythm (piano, guitar, bass guitar) — or Saxophones, Trumpets, Trombones and Rhythm for a jazz band."
+        case .instrument:
+            what = "Each part goes into a folder for its instrument: Flute, Clarinet, Alto Saxophone… (Clarinet 1, 2 and 3 share one)."
+        }
+        return what + " Handy for giving each group of players just their own folder. The score, and any part ScoreSort doesn't recognise, stay at the top. This is the starting choice: the Splitter and Renamer each have a “Sort into folders” menu beside their save and rename buttons."
+    }
 
     init(ensembleType: Binding<EnsembleType>, instrumentOrder: Binding<[String]>, prefixSeparator: Binding<String>) {
         self._ensembleType = ensembleType
@@ -1175,6 +1189,23 @@ struct PreferencesView: View {
                         Toggle("Search subfolders recursively", isOn: $searchRecursively)
                             .toggleStyle(.checkbox)
                         Text("When off (default), only PDFs directly inside the dropped folder are shown. When on, PDFs inside any nested subfolders are included too.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+
+                    Divider()
+
+                    // ── Sort into folders (Splitter, Score Order Sorter, Bulk Rename) ──
+                    VStack(alignment: .leading, spacing: 8) {
+                        Picker("Sort parts into folders:", selection: $partFolderDefault) {
+                            ForEach(PartFolderMode.allCases, id: \.self) { mode in
+                                Text(mode.title).tag(mode)
+                            }
+                        }
+                        .pickerStyle(.menu)
+                        .fixedSize()
+                        .font(.headline)
+                        Text(partFolderSettingDescription)
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }
@@ -1788,7 +1819,7 @@ class PDFManager: ObservableObject {
         }
     }
     
-    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], skippedPages: Set<Int> = [], separator: String = "_", stampJob: StampJob? = nil, completion: PDFAlertHandler) {
+    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], skippedPages: Set<Int> = [], separator: String = "_", stampJob: StampJob? = nil, partFolders: [Int: String] = [:], completion: PDFAlertHandler) {
         guard let document = pdfDocument else { return }
 
         // The writing itself is shared with the command line (`writeSplitFiles`,
@@ -1796,8 +1827,11 @@ class PDFManager: ObservableObject {
         let onlyFile = splitActiveFileCount(pageToFile: pageToFileMapping, skippedPages: skippedPages) == 1
         let plans = splitFilePlans(pageToFile: pageToFileMapping, pageCount: document.pageCount,
                                    skippedPages: skippedPages) { fileIndex in
-            splitOutputFileName(base: baseFileName, separator: separator,
-                                suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex, onlyFile: onlyFile)
+            // "Sort into folders": a file's section/instrument folder, by file index.
+            partFolderPath(splitOutputFileName(base: baseFileName, separator: separator,
+                                               suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex,
+                                               onlyFile: onlyFile),
+                           folder: partFolders[fileIndex])
         }
         let report = writeSplitFiles(plans, from: document, to: folderURL, stampJob: stampJob)
 

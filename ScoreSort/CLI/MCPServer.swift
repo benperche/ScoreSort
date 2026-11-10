@@ -112,6 +112,8 @@ enum ScoreSortMCPServer {
                           Param(key: "scoreOrder", option: "score-order", kind: .string, description: "Number the files in this ensemble's score order.", choices: ["band", "jazz", "orchestra"]),
                           Param(key: "stamp", option: "stamp", kind: .string, description: "A saved stamp design to stamp onto each part (see scoresort_stamps)."),
                           Param(key: "stampScope", option: "stamp-scope", kind: .string, description: "first (default) or every page.", choices: ["first", "every"]),
+                          Param(key: "folders", option: "folders", kind: .string, description: "Save each part into a folder inside out for its section (Woodwind, Brass, Percussion, Strings, Rhythm; jazz: Saxophones, Trumpets, Trombones, Rhythm) or its instrument (Flute, Clarinet…), so each group of players can be given just their folder. Only when the person asks for folders.", choices: ["section", "instrument", "off"]),
+                          Param(key: "ensemble", option: "ensemble", kind: .string, description: "The ensemble the folders' sections follow (default: scoreOrder's, else band).", choices: ["band", "jazz", "orchestra"]),
                           Param(key: "dryRun", option: "dry-run", kind: .boolean, description: "Show the files that would be written; write nothing."),
                           Param(key: "overwrite", option: "overwrite", kind: .boolean, description: "Replace files that already exist.")]),
             Tool(name: "scoresort_rename", command: "rename",
@@ -123,6 +125,7 @@ enum ScoreSortMCPServer {
                           Param(key: "exclude", option: "exclude", kind: .strings, description: "File names to leave alone."),
                           Param(key: "recursive", option: "recursive", kind: .boolean, description: "Include subfolders."),
                           Param(key: "rescan", option: "rescan", kind: .boolean, description: "Re-number files that already have numbers."),
+                          Param(key: "folders", option: "folders", kind: .string, description: "Also move each part into a folder beside it for its section (Woodwind, Brass…; jazz: Saxophones, Trumpets…) or instrument. Parts already numbered move too. Only when the person asks for folders.", choices: ["section", "instrument", "off"]),
                           Param(key: "apply", option: "apply", kind: .boolean, description: "Rename the files (otherwise only plan).")]),
             Tool(name: "scoresort_allocate", command: "allocate",
                  description: "Plan who plays what before combining: an ensemble preset's players (scoresort_presets) matched to a folder of parts. Shows each player group and the file(s) they'd get, groups with no part, groups shared across numbered parts, and files no one plays. Writes nothing. Settle the gaps with allocations (e.g. the Bass Guitar players get the Tuba part), check again, then pass the same allocations to scoresort_combine.",
@@ -423,6 +426,9 @@ Ground rules
         doesn't recognise (they'd be numbered last — rename the part, e.g. "Bari Sax" →
         "Baritone Saxophone"). --score-order is band, jazz or orchestra.
    e. Run the same command without --dry-run.
+   To give each section only its own parts, add --folders section (Woodwind, Brass,
+   Percussion, Strings, Rhythm; jazz: Saxophones, Trumpets, Trombones, Rhythm) or
+   --folders instrument: the files go into those folders inside --out.
 
 2. Scans with two pages side by side (A3 sheets, or a book scanner)
    ScoreSort split-scans <scan.pdf> --out <scan pages.pdf> --json
@@ -435,7 +441,8 @@ Ground rules
    ScoreSort rename <folder> --ensemble band|jazz|orchestra
      Shows the plan: "Flute 1.pdf → 01 - Flute 1.pdf", the score as 00. Files it doesn't
      recognise are left alone: rename them to include an instrument, or place them with
-     --number "FILE=NN". Then run again with --apply.
+     --number "FILE=NN". Then run again with --apply. --folders section|instrument also
+     moves each part into a section or instrument folder (already-numbered parts too).
 
 4. Combine parts to print for an ensemble — deciding who plays what
    ScoreSort presets                         (ensembles: player groups, e.g. "Flute × 12")

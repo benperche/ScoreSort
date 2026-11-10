@@ -18,7 +18,8 @@ extension ScoreSortCLI {
             help: """
             Usage: ScoreSort rename <folder | files…> --ensemble band|jazz|orchestra
                                     [--number "FILE=NN"]… [--exclude FILE]… [--recursive]
-                                    [--rescan] [--separator TEXT] [--apply] [--json]
+                                    [--rescan] [--separator TEXT] [--folders section|instrument]
+                                    [--apply] [--json]
 
             The Rename tab's Score Order Sorter. Each file's name is checked for an
             instrument from the ensemble's order (your custom order from ScoreSort's
@@ -38,6 +39,12 @@ extension ScoreSortCLI {
                             when parts were added or the order changed). Without it,
                             already-numbered files are left alone.
               --separator   Between the number and the name (default: the app's setting, " - ").
+              --folders     Also move each numbered part into a folder beside it, so each
+                            group of players can be given just their folder. section:
+                            Woodwind, Brass, Percussion, Strings, Rhythm (jazz: Saxophones,
+                            Trumpets, Trombones, Rhythm). instrument: Flute, Clarinet…
+                            Parts already numbered move too. The score and unrecognised
+                            files stay put.
               --apply       Rename the files.
 
             Files whose names contain no instrument are listed as "not recognised" and left
@@ -47,7 +54,7 @@ extension ScoreSortCLI {
               ScoreSort rename "Holst Parts" --ensemble band
               ScoreSort rename "Holst Parts" --ensemble band --number "Euph TC.pdf=12" --apply
             """,
-            valueOptions: ["ensemble", "number", "exclude", "separator"],
+            valueOptions: ["ensemble", "number", "exclude", "separator", "folders"],
             flagOptions: ["recursive", "rescan", "apply"],
             run: { args in
                 guard !args.positionals.isEmpty else { throw CommandError("Give the folder of parts (or the files) to rename.") }
@@ -66,13 +73,15 @@ extension ScoreSortCLI {
                                      recursive: args.has("recursive"),
                                      rescan: args.has("rescan"),
                                      separator: args.value("separator"),
+                                     folders: parsePartFolderMode(args.value("folders")),
                                      apply: args.has("apply"))
             })
     }
 
     static func runRename(paths: [String], ensemble: EnsembleType, overrides: [String: Int] = [:],
                           excluded: Set<String> = [], recursive: Bool = false, rescan: Bool = false,
-                          separator: String? = nil, apply: Bool) throws -> CommandResult {
+                          separator: String? = nil, folders: PartFolderMode = .off,
+                          apply: Bool) throws -> CommandResult {
         // The files: one folder, or files given one by one.
         let urls = paths.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath).standardizedFileURL }
         var files: [URL]
@@ -95,7 +104,8 @@ extension ScoreSortCLI {
         let operations = planScoreOrderRename(
             files: files, order: InstrumentOrders.getOrder(for: ensemble),
             separator: separator ?? UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - ",
-            rescan: rescan, manualOverrides: overrides, excluded: excluded)
+            rescan: rescan, manualOverrides: overrides, excluded: excluded,
+            folderMode: folders, ensemble: ensemble)
 
         var report = RenameReport()
         if apply { report = performRenames(operations) }
@@ -106,6 +116,7 @@ extension ScoreSortCLI {
 
         func status(_ op: RenameOperation) -> String {
             switch op.type {
+            case .rename where op.newName == op.originalName: return "move into folder"
             case .rename, .manual: return "rename"
             case .correct: return "correct"
             case .skip: return op.statusOverride == "Target exists" ? "target exists" : "already correct"
@@ -118,6 +129,7 @@ extension ScoreSortCLI {
         let entries: [[String: Any]] = operations.map { op in
             var entry: [String: Any] = ["file": op.originalName, "status": status(op)]
             if !op.newName.isEmpty { entry["newName"] = op.newName }
+            if let folder = op.folder { entry["folder"] = folder }
             if apply && op.newURL != nil { entry["renamed"] = renamedFrom.contains(op.originalURL.standardizedFileURL) }
             return entry
         }
@@ -127,7 +139,7 @@ extension ScoreSortCLI {
         for op in operations {
             switch op.type {
             case .rename, .correct, .manual:
-                lines.append("  \(op.originalName) → \(op.newName)" + (op.type == .manual ? "  (your number)" : ""))
+                lines.append("  \(op.originalName) → \(op.newPathForDisplay)" + (op.type == .manual ? "  (your number)" : ""))
             case .undetected:
                 lines.append("  \(op.originalName): not recognised — left alone")
             default:

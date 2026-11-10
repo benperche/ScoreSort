@@ -9,6 +9,8 @@ _Draft for the next release after 1.10.1. Keep adding to this as more changes la
 
 ## 🏷️ Rename Files
 
+- **Sort parts into folders, so each section gets only its own parts.** A new **Sort into folders** menu, beside the Rename and Save buttons in the Renamer and the Splitter, puts each part in a folder for its section — Woodwind, Brass, Percussion, Strings and Rhythm (piano, guitar, bass guitar), or Saxophones, Trumpets, Trombones and Rhythm for a jazz band — or for its instrument (Flute, Clarinet, Alto Saxophone…). Share the Brass folder with your brass players and they see just their parts, not everyone's. The score, and any part ScoreSort doesn't recognise, stay at the top. Split several pieces into the same folder and their parts collect in the same section folders. In the Renamer, parts that are already numbered are simply moved into their folders. Choose the starting setting in **Settings ▸ Renamer**.
+
 ## 🔗 Combine PDFs
 
 - **Moving files after adding them no longer breaks Combine.** ScoreSort now keeps track of each file you add, so if you move or rename it in Finder before making the PDF, it still finds it — and the list and table of contents pick up the new name. (A file you've moved to the Trash counts as gone.)

@@ -60,6 +60,12 @@ class RenamerManager: ObservableObject {
         }
     }
 
+    /// "Sort into folders" for this session, starting from the Settings default. Each numbered
+    /// part also moves into its section or instrument folder beside it.
+    @Published var partFolderMode: PartFolderMode = PartFolderMode.savedDefault {
+        didSet { if hasContent && partFolderMode != oldValue { scanFolder() } }
+    }
+
     /// True when there is either a folder loaded or direct files loaded.
     var hasContent: Bool { folderURL != nil || !directFiles.isEmpty }
 
@@ -226,7 +232,9 @@ class RenamerManager: ObservableObject {
                                           separator: prefixSeparator,
                                           rescan: isRescanMode,
                                           manualOverrides: manualOverrides,
-                                          excluded: excludedNames)
+                                          excluded: excludedNames,
+                                          folderMode: partFolderMode,
+                                          ensemble: ensembleType)
     }
 
     func detectInstrument(in filename: String) -> (Int, String)? {
@@ -253,7 +261,12 @@ class RenamerManager: ObservableObject {
             return
         }
         let successCount = report.renamed.count
-        let renamedNames = report.renamed.map(\.to.lastPathComponent)
+        // A part sorted into a folder shows as "Woodwind/01 - Flute.pdf".
+        let renamedNames = report.renamed.map { from, to in
+            to.deletingLastPathComponent() == from.deletingLastPathComponent()
+                ? to.lastPathComponent
+                : "\(to.deletingLastPathComponent().lastPathComponent)/\(to.lastPathComponent)"
+        }
         let errors = report.errors
         let sawPermissionError = report.sawPermissionError
 
@@ -671,9 +684,11 @@ struct RenameOperation: Identifiable {
     let type: RenameOperationType
     var statusOverride: String?
     var oldPrefix: String?
+    /// The section or instrument folder it moves into ("Sort into folders"); nil when it stays put.
+    var folder: String?
 
     init(originalURL: URL, originalName: String, newName: String, newURL: URL? = nil,
-         type: RenameOperationType, statusOverride: String? = nil, oldPrefix: String? = nil) {
+         type: RenameOperationType, statusOverride: String? = nil, oldPrefix: String? = nil, folder: String? = nil) {
         self.id = originalURL.standardizedFileURL.path
         self.originalURL = originalURL
         self.originalName = originalName
@@ -682,6 +697,13 @@ struct RenameOperation: Identifiable {
         self.type = type
         self.statusOverride = statusOverride
         self.oldPrefix = oldPrefix
+        self.folder = folder
+    }
+
+    /// The new name as shown, with its folder: "Woodwind/01 - Flute.pdf".
+    var newPathForDisplay: String {
+        guard let folder else { return newName }
+        return "\(folder)/\(newName)"
     }
     
     var statusText: String {
