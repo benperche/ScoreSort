@@ -117,10 +117,9 @@ struct SplitView: View {
     /// Persisted so users who always want it don't re-tick every time; it's recoverable
     /// (Trash, not permanent delete) and the summary screen confirms when it happened.
     @AppStorage("deleteSourceAfterSplit") private var deleteSourceAfterSplit: Bool = false
-    /// "Sort into folders" (Step 2's menu): starts from the Settings default, follows it when
-    /// that changes, and otherwise keeps the choice from one piece to the next.
-    @State private var partFolderMode: PartFolderMode = PartFolderMode.savedDefault
-    @AppStorage(PartFolderMode.defaultsKey) private var partFolderDefault: PartFolderMode = .off
+    /// "Sort into folders" (Step 2's menu). One remembered setting, shared with the Renamer and
+    /// Settings ▸ Renamer: it stays as last chosen, across pieces and launches.
+    @AppStorage(PartFolderMode.defaultsKey) private var partFolderMode: PartFolderMode = .off
     @AppStorage("splitStampEnabled") private var stampEnabled: Bool = false
     @AppStorage("splitStampScope") private var stampScope: StampScope = .firstPageOfEachPart
     /// Set true after a successful save when the source file was actually trashed, so the
@@ -250,7 +249,6 @@ struct SplitView: View {
                 splitStageBody
             }
         }
-        .onChange(of: partFolderDefault) { _, newDefault in partFolderMode = newDefault }
         .onChange(of: pdfManager.pdfDocument) { _, newValue in
             if let doc = newValue {
                 // Page-swap replaces the document in-place: preserve all split state.

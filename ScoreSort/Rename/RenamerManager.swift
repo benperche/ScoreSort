@@ -60,11 +60,19 @@ class RenamerManager: ObservableObject {
         }
     }
 
-    /// "Sort into folders" for this session, starting from the Settings default. Each numbered
-    /// part also moves into its section or instrument folder beside it.
+    /// "Sort into folders": each numbered part also moves into its section or instrument folder
+    /// beside it. One remembered setting (`PartFolderMode.defaultsKey`), shared with Split, Bulk
+    /// Rename and Settings ▸ Renamer, so it stays as last chosen.
     @Published var partFolderMode: PartFolderMode = PartFolderMode.savedDefault {
-        didSet { if hasContent && partFolderMode != oldValue { scanFolder() } }
+        didSet {
+            guard partFolderMode != oldValue else { return }
+            if !isTesting { UserDefaults.standard.set(partFolderMode.rawValue, forKey: PartFolderMode.defaultsKey) }
+            if hasContent { scanFolder() }
+        }
     }
+    /// Under the test runner a manager's choice stays in memory, so tests never change the
+    /// person's own setting.
+    private let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
 
     /// True when there is either a folder loaded or direct files loaded.
     var hasContent: Bool { folderURL != nil || !directFiles.isEmpty }
@@ -213,14 +221,18 @@ class RenamerManager: ObservableObject {
         // Add manual override numbers
         numbers.append(contentsOf: manualOverrides.values)
         
-        // Add auto-detected numbers by scanning current operations
+        // Add auto-detected numbers by scanning current operations — including files already
+        // numbered correctly while renumbering, which get renumbered around a manual number too.
         for operation in operations {
-            if operation.type == .rename || operation.type == .correct {
-                // Extract the number prefix from the new name
-                if let match = operation.newName.range(of: "^(\\d{2})", options: .regularExpression),
-                   let number = Int(operation.newName[match]) {
-                    numbers.append(number)
-                }
+            let name: String
+            switch operation.type {
+            case .rename, .correct: name = operation.newName
+            case .skip where isRescanMode && operation.newName.isEmpty: name = operation.originalName
+            default: continue
+            }
+            if let match = name.range(of: "^(\\d{2})", options: .regularExpression),
+               let number = Int(name[match]) {
+                numbers.append(number)
             }
         }
         

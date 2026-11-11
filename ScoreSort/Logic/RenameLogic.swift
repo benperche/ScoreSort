@@ -296,7 +296,14 @@ func planScoreOrderRename(files: [URL], order: [String], separator: String, resc
         }
     }
 
-    detectedFiles.sort { $0.order < $1.order }
+    // Score order, then parts of one instrument by their names without any old number, in
+    // natural order — so "Trombone 2" comes before "Trombone 3" (and "Trumpet 10" after
+    // "Trumpet 9") even if they were numbered the other way round before.
+    func partName(_ name: String) -> String { stripScoreOrderPrefix(from: name, rescan: rescan).clean }
+    detectedFiles.sort {
+        if $0.order != $1.order { return $0.order < $1.order }
+        return partName($0.originalName).localizedStandardCompare(partName($1.originalName)) == .orderedAscending
+    }
     let fileManager = FileManager.default
 
     /// The folder `destination` put it in, for showing; nil when it stays beside the others.

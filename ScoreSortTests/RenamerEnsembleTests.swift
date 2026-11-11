@@ -56,3 +56,57 @@ struct RenamerEnsembleTests {
         #expect(manager.customInstrumentOrder == ["tuba", "piccolo"])
     }
 }
+
+@Suite("Renumbering around numbers chosen by hand")
+@MainActor
+struct RenumberAroundManualTests {
+
+    private let names = ["Alto Saxophone", "Tenor Saxophone", "Trumpet 1", "Trumpet 2", "Trumpet 3", "Trumpet 4",
+                         "Trombone 1", "Trombone 3", "Trombone 2", "Trombone 4", "Guitar", "Piano",
+                         "Bass Clarinet", "Bass", "Drums", "Clarinet 1", "Clarinet 2 Piccolo"]
+
+    /// The folder as it was: numbered 01–17 in the order above (Trombone 3 before 2, the
+    /// clarinets last).
+    private func numberedFolder() -> URL {
+        let dir = temporaryFolder("renumber")
+        for (i, name) in names.enumerated() {
+            writePDF(pages: 1, to: dir.appendingPathComponent(String(format: "%02d - Arabesque Cookie - %@.pdf", i + 1, name)))
+        }
+        return dir
+    }
+
+    private func file(_ name: String, in dir: URL) -> String {
+        renamableFiles(in: dir, recursive: false).map(\.lastPathComponent).first { $0.hasSuffix(" - \(name).pdf") }!
+    }
+
+    @Test("Clarinets set to 1 and 2 and the bass clarinet to 5: everything else fills in around them")
+    func arabesqueCookie() {
+        InstrumentOrders.setup()
+        let dir = numberedFolder()
+        let overrides = [file("Clarinet 1", in: dir): 1, file("Clarinet 2 Piccolo", in: dir): 2,
+                         file("Bass Clarinet", in: dir): 5]
+        let operations = planScoreOrderRename(files: renamableFiles(in: dir, recursive: false),
+                                              order: InstrumentOrders.getOrder(for: .jazz), separator: " - ",
+                                              rescan: true, manualOverrides: overrides)
+        let result = operations.map { $0.newName.isEmpty ? $0.originalName : $0.newName }
+            .map { $0.replacingOccurrences(of: " - Arabesque Cookie - ", with: " ").replacingOccurrences(of: ".pdf", with: "") }
+            .sorted()
+        #expect(result == ["01 Clarinet 1", "02 Clarinet 2 Piccolo", "03 Alto Saxophone", "04 Tenor Saxophone",
+                           "05 Bass Clarinet", "06 Trumpet 1", "07 Trumpet 2", "08 Trumpet 3", "09 Trumpet 4",
+                           "10 Trombone 1", "11 Trombone 2", "12 Trombone 3", "13 Trombone 4",
+                           "14 Guitar", "15 Piano", "16 Bass", "17 Drums"])
+    }
+
+    @Test("Renumbering puts parts of one instrument in order, whatever they were numbered before")
+    func sameInstrumentInNaturalOrder() {
+        InstrumentOrders.setup()
+        let dir = numberedFolder()
+        let operations = planScoreOrderRename(files: renamableFiles(in: dir, recursive: false),
+                                              order: InstrumentOrders.getOrder(for: .jazz), separator: " - ",
+                                              rescan: true)
+        let trombone2 = operations.first { $0.originalName.hasSuffix("Trombone 2.pdf") }
+        let trombone3 = operations.first { $0.originalName.hasSuffix("Trombone 3.pdf") }
+        #expect(trombone2?.newName.hasPrefix("08") == true)
+        #expect(trombone3?.newName.hasPrefix("09") == true)
+    }
+}

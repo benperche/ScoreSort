@@ -464,6 +464,8 @@ hasCustomOrder: Bool
 - Returns the **leftmost** match (handles "Baritone BC Bassoon" → baritone, not bassoon).
 
 ### `setManualOverride(for:number:)`
+`ManualAssignmentView` keeps the number as **text** read live (`typedNumber`), starting at the file's current number: `TextField(value:format:)` only committed on Return/blur, so clicking Assign straight after typing assigned the stale value. `getExistingNumbers()` counts "already correct" files in rescan mode too (they're renumbered around a manual number). In `planScoreOrderRename`, parts of the same instrument sort by name **without the old prefix**, `localizedStandardCompare` (Trombone 2 before 3, Trumpet 10 after 9) — sorting by the prefixed name kept a wrong order "already correct".
+
 - If number conflicts with existing override, shifts all overrides ≥ number up by 1.
 - Then assigns number, triggers `scanFolder()`.
 
@@ -520,7 +522,9 @@ Puts each part in a **section** folder (band/orchestra: Woodwind, Brass, Percuss
 - Split: names carry the folder (`partFolderPath` → "Brass/03 - Trumpet 1.pdf"); `PDFManager.saveSplitPDF(partFolders:)` (file index → folder, from `SplitView.splitPartFolders()`); `writeSplitFiles` and `saveSplitFiles`' temp-folder move make the folders.
 - Rename: `planScoreOrderRename(folderMode:ensemble:)` sends each `newURL` through `partFolderDestination` (never nests a file already in a folder of that name) and sets `RenameOperation.folder` (`newPathForDisplay`). Already-numbered / already-correct files that would move become `.rename` ops with `newName == originalName` (CLI status "move into folder"). `performRenames` creates the folder and checks the *source* folders for write access (the new folder doesn't exist yet).
 - **Grouped list + Move to Folder** (Score Order Sorter, folders on): `ScoreOrderSortView.folderGroups` groups the matched rows by `operation.folder` ("" = top level) in order of first appearance, under `PartFolderGroupHeader` (teal `Color.partFolder`, left spine — styled like Combine's collate groups); `allDisplayedOps` follows that order so Shift-click ranges match the screen. The toolbar's **Move to Folder** menu (and each row's context menu — the selection if the row is in it, else that row) offers `partFolderSections(for:)` + folders in use, New Folder… (`askForPartFolderName`, validated by `partFolderNameError`), Top Level, and ScoreSort's Choice. Choices live in `RenamerManager.folderOverrides` (original file name → folder, "" = top level; reset on load/clear) → `planScoreOrderRename(folderOverrides:)`, ignored with folders off. Unrecognised and excluded rows can't be moved (give them a number first). CLI: `rename --folder "FILE=FOLDER"` (MCP `folderChoices`).
-- Tests that build a `RenamerManager()` set `partFolderMode = .off` — it starts from the user's real Settings default.
+- **One remembered setting** (`PartFolderMode.defaultsKey`): Split and Bulk Rename bind `@AppStorage` directly; `RenamerManager.partFolderMode` writes it in `didSet` (not under the test runner) and `ScoreOrderSortView` follows changes made elsewhere. Ben wanted it to stay as last set across launches, not reset to a default.
+- **The matched list is one flat `ForEach(matchedListItems)`** of `MatchedListItem` (`.folderHeader` / `.file`). Nested `ForEach(folderGroups) { ForEach(group.operations) }` inside the `LazyVStack` kept drawing an old plan after the grouping changed (rows showed "Brass/…" with folders off, while the status line was current).
+- Tests that build a `RenamerManager()` set `partFolderMode = .off` — it starts from the user's real setting.
 
 ---
 

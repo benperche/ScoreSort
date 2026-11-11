@@ -1025,7 +1025,7 @@ struct PreferencesView: View {
         case .instrument:
             what = "Each part goes into a folder for its instrument: Flute, Clarinet, Alto Saxophone… (Clarinet 1, 2 and 3 share one)."
         }
-        return what + " Handy for giving each group of players just their own folder. The score, and any part ScoreSort doesn't recognise, stay at the top. This is the starting choice: the Splitter and Renamer each have a “Sort into folders” menu beside their save and rename buttons."
+        return what + " Handy for giving each group of players just their own folder. The score, and any part ScoreSort doesn't recognise, stay at the top. The Splitter and Renamer also have this “Sort into folders” menu beside their save and rename buttons; changing it there changes it here too, and it stays as you last left it."
     }
 
     init(ensembleType: Binding<EnsembleType>, instrumentOrder: Binding<[String]>, prefixSeparator: Binding<String>) {

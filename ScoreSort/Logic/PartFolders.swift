@@ -27,7 +27,8 @@ nonisolated enum PartFolderMode: String, CaseIterable, Sendable {
         }
     }
 
-    /// The Settings default (Settings ▸ Renamer), which each tab's menu starts from.
+    /// The remembered setting — Settings ▸ Renamer and every "Sort into folders" menu show and
+    /// change this one value.
     static let defaultsKey = "partFolderDefault"
 
     static var savedDefault: PartFolderMode {

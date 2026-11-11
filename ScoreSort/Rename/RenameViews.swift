@@ -38,6 +38,19 @@ struct RenamerView: View {
 }
 
 // MARK: - Score Order Sort View
+/// One row of the Score Order Sorter's matched list: a folder heading, or a file.
+enum MatchedListItem: Identifiable {
+    case folderHeader(String, count: Int, byHand: Bool)
+    case file(RenameOperation, folder: String?)
+
+    var id: String {
+        switch self {
+        case .folderHeader(let folder, _, _): return "folder-header:\(folder)"
+        case .file(let operation, _):         return operation.id
+        }
+    }
+}
+
 struct ScoreOrderSortView: View {
     @AppStorage(PartFolderMode.defaultsKey) private var partFolderDefault: PartFolderMode = .off
     @EnvironmentObject private var renamerManager: RenamerManager
@@ -87,6 +100,20 @@ struct ScoreOrderSortView: View {
             groups[folder, default: []].append(operation)
         }
         return order.map { ($0, groups[$0]!) }
+    }
+
+    /// The matched section's rows, flattened: with folders on, a header before each folder's
+    /// files (`folder` is that file's group, "" = top level); with folders off, files only
+    /// (`folder` nil).
+    private var matchedListItems: [MatchedListItem] {
+        guard renamerManager.partFolderMode != .off else {
+            return folderGroups.flatMap { $0.operations.map { MatchedListItem.file($0, folder: nil) } }
+        }
+        return folderGroups.flatMap { group -> [MatchedListItem] in
+            let byHand = group.operations.contains { renamerManager.folderOverrides[$0.originalName] != nil }
+            return [.folderHeader(group.folder, count: group.operations.count, byHand: byHand)]
+                + group.operations.map { .file($0, folder: group.folder) }
+        }
     }
 
     // ── Move to Folder ────────────────────────────────────────────────────
@@ -267,7 +294,7 @@ struct ScoreOrderSortView: View {
             .onChange(of: selectedIDs)                 { DispatchQueue.main.async { syncTabCommands() } }
             .onChange(of: batchFolders)                { DispatchQueue.main.async { syncTabCommands() } }
             .onChange(of: renameResult == nil)         { DispatchQueue.main.async { syncTabCommands() } }
-            // A new Settings default becomes this session's "Sort into folders" choice.
+            // "Sort into folders" changed elsewhere (Split, Bulk Rename, Settings): follow it.
             .onChange(of: partFolderDefault) { _, newDefault in
                 DispatchQueue.main.async { renamerManager.partFolderMode = newDefault }
             }
@@ -537,15 +564,13 @@ struct ScoreOrderSortView: View {
                         .background(Color(NSColor.controlBackgroundColor))
                     }
 
-                    let grouped = renamerManager.partFolderMode != .off
-                    ForEach(folderGroups, id: \.folder) { group in
-                        if grouped {
-                            PartFolderGroupHeader(folder: group.folder, fileCount: group.operations.count,
-                                                  isChosenByHand: group.operations.contains {
-                                                      renamerManager.folderOverrides[$0.originalName] != nil
-                                                  })
-                        }
-                        ForEach(group.operations) { operation in
+                    // One flat list of headers and rows: nested ForEach groups inside the
+                    // LazyVStack kept showing an old plan after the grouping changed.
+                    ForEach(matchedListItems) { item in
+                        switch item {
+                        case .folderHeader(let folder, let count, let byHand):
+                            PartFolderGroupHeader(folder: folder, fileCount: count, isChosenByHand: byHand)
+                        case .file(let operation, let folder):
                             ScoreOrderFileRow(
                                 operation: operation,
                                 isSelected: selectedIDs.contains(operation.id),
@@ -553,12 +578,12 @@ struct ScoreOrderSortView: View {
                                 onSelect: { cmd, shift in handleSelect(operation, command: cmd, shift: shift) }
                             )
                             .overlay(alignment: .leading) {
-                                if grouped && !group.folder.isEmpty {
+                                if let folder, !folder.isEmpty {
                                     Rectangle().fill(Color.partFolder.opacity(0.55)).frame(width: 3)
                                 }
                             }
                             .contextMenu {
-                                if grouped {
+                                if folder != nil {
                                     // Acts on the selection when this file is in it, else on this file.
                                     moveToFolderItems {
                                         selectedIDs.contains(operation.id) ? movableSelection : [operation.originalName]
@@ -995,10 +1020,30 @@ struct ManualAssignmentView: View {
     let operation: RenameOperation
     let existingNumbers: [Int]
     let onAssign: (Int) -> Void
-    
-    @State private var selectedNumber: Int = 1
+
+    /// What's typed. Kept as text and read as it's typed: a number field only took its value
+    /// on Return or leaving the field, so clicking Assign straight after typing used the old
+    /// number.
+    @State private var numberText: String
     @Environment(\.dismiss) private var dismiss
-    
+
+    init(operation: RenameOperation, existingNumbers: [Int], onAssign: @escaping (Int) -> Void) {
+        self.operation = operation
+        self.existingNumbers = existingNumbers
+        self.onAssign = onAssign
+        // Start from the number it has now (planned, or already on the file).
+        let current = operation.newName.isEmpty ? operation.originalName : operation.newName
+        let prefix = current.range(of: "^\\d{2}", options: .regularExpression).flatMap { Int(current[$0]) }
+        _numberText = State(initialValue: String(prefix ?? 1))
+    }
+
+    /// The typed number, when it's a whole number from 0 to 99.
+    private var typedNumber: Int? {
+        guard let n = Int(numberText.trimmingCharacters(in: .whitespaces)), (0...99).contains(n) else { return nil }
+        return n
+    }
+    private var selectedNumber: Int { typedNumber ?? 0 }
+
     var willShiftOthers: Bool {
         existingNumbers.contains(selectedNumber)
     }
@@ -1047,11 +1092,13 @@ struct ManualAssignmentView: View {
                     .font(.headline)
                 
                 HStack(spacing: 12) {
-                    TextField("Number", value: $selectedNumber, format: .number)
+                    TextField("Number", text: $numberText)
                         .textFieldStyle(.roundedBorder)
                         .frame(width: 100)
-                    
-                    Stepper("", value: $selectedNumber, in: 0...99)
+                        .onSubmit { assign() }
+
+                    Stepper("", value: Binding(get: { selectedNumber },
+                                               set: { numberText = String($0) }), in: 0...99)
                 }
             }
             .padding(12)
@@ -1063,11 +1110,17 @@ struct ManualAssignmentView: View {
             
             // Info section
             VStack(alignment: .leading, spacing: 8) {
-                Text("The file will be prefixed with \(String(format: "%02d", selectedNumber))")
-                    .font(.caption)
-                    .foregroundColor(.primary)
-                
-                if willShiftOthers {
+                if typedNumber == nil {
+                    Text("Type a number from 0 to 99.")
+                        .font(.caption)
+                        .foregroundColor(.red)
+                } else {
+                    Text("The file will be prefixed with \(String(format: "%02d", selectedNumber)), and the other files numbered around it")
+                        .font(.caption)
+                        .foregroundColor(.primary)
+                }
+
+                if typedNumber != nil && willShiftOthers {
                     Text("⚠️ " + shiftDescription)
                         .font(.caption)
                         .foregroundColor(.orange)
@@ -1088,17 +1141,21 @@ struct ManualAssignmentView: View {
                 
                 Spacer()
                 
-                Button("Assign") {
-                    onAssign(selectedNumber)
-                    dismiss()
-                }
-                .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
+                Button("Assign") { assign() }
+                    .keyboardShortcut(.defaultAction)
+                    .buttonStyle(.borderedProminent)
+                    .disabled(typedNumber == nil)
             }
         }
         .padding(24)
         .frame(width: 500, height: 400)
         .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private func assign() {
+        guard let number = typedNumber else { return }
+        onAssign(number)
+        dismiss()
     }
 }
 
@@ -1138,9 +1195,8 @@ struct BulkRenameView: View {
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
     @AppStorage("prefixEnsembleType") private var prefixEnsembleType: EnsembleType = .band
-    /// "Sort into folders": starts from the Settings default and follows it when it changes.
-    @State private var partFolderMode: PartFolderMode = PartFolderMode.savedDefault
-    @AppStorage(PartFolderMode.defaultsKey) private var partFolderDefault: PartFolderMode = .off
+    /// "Sort into folders": one remembered setting, shared with Split and Settings ▸ Renamer.
+    @AppStorage(PartFolderMode.defaultsKey) private var partFolderMode: PartFolderMode = .off
 
     // ── Instrument names — the selected ensemble's score order (so suggestions
     // follow that ensemble; e.g. in a band, Horn comes right after Trumpet) ──
@@ -1181,7 +1237,6 @@ struct BulkRenameView: View {
     // ── Body ──────────────────────────────────────────────────────────────
     var body: some View {
         stageBody
-            .onChange(of: partFolderDefault) { _, newDefault in partFolderMode = newDefault }
     }
 
     @ViewBuilder private var stageBody: some View {
