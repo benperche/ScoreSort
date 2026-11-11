@@ -337,11 +337,22 @@ struct CLIRenameTests {
         let manager = RenamerManager()   // (its separator is the user's setting — read, never set, here)
         manager.partFolderMode = .off   // not the user's Settings default
         manager.loadFolder(url: dir)
+        // "01 - Oboe" is numbered and the rest aren't, so both renumber the lot.
+        #expect(manager.isRescanMode && manager.renumberedAutomatically)
         let planned = planScoreOrderRename(files: renamableFiles(in: dir, recursive: false),
-                                           order: manager.customInstrumentOrder, separator: manager.prefixSeparator)
+                                           order: manager.customInstrumentOrder, separator: manager.prefixSeparator,
+                                           rescan: true)
         #expect(planned.map(\.originalName) == manager.operations.map(\.originalName))
         #expect(planned.map(\.newName) == manager.operations.map(\.newName))
         #expect(planned.map(\.type) == manager.operations.map(\.type))
+    }
+
+    @Test("A mix of numbered and unnumbered parts is renumbered, so no number is used twice")
+    func mixedFolderRenumbered() throws {
+        let dir = folder(with: ["01 - Alto Saxophone.pdf", "02 - Trumpet 1.pdf", "Clarinet 1.pdf"])
+        let result = try ScoreSortCLI.runRename(paths: [dir.path], ensemble: .band, separator: " - ", apply: true)
+        #expect(result.json["renumberedAutomatically"] as? Bool == true)
+        #expect(contents(dir) == ["01 - Clarinet 1.pdf", "02 - Alto Saxophone.pdf", "03 - Trumpet 1.pdf"])
     }
 
     @Test("Without --apply nothing is renamed")

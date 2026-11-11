@@ -37,7 +37,9 @@ extension ScoreSortCLI {
               --recursive   Include files in subfolders.
               --rescan      Re-number files that already have a number prefix (for
                             when parts were added or the order changed). Without it,
-                            already-numbered files are left alone.
+                            already-numbered files are left alone — unless some parts
+                            are numbered and some aren't, when everything is renumbered
+                            anyway (numbering only the new ones would repeat numbers).
               --separator   Between the number and the name (default: the app's setting, " - ").
               --folders     Also move each numbered part into a folder beside it, so each
                             group of players can be given just their folder. section:
@@ -114,6 +116,11 @@ extension ScoreSortCLI {
         }
 
         InstrumentOrders.setup()
+        // As the Score Order Sorter does: a mix of numbered and unnumbered parts is renumbered.
+        let renumberedAutomatically = !rescan
+            && scoreOrderNeedsRenumbering(files: files, order: InstrumentOrders.getOrder(for: ensemble),
+                                          numberedByHand: Set(overrides.keys))
+        let rescan = rescan || renumberedAutomatically
         let operations = planScoreOrderRename(
             files: files, order: InstrumentOrders.getOrder(for: ensemble),
             separator: separator ?? UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - ",
@@ -163,6 +170,9 @@ extension ScoreSortCLI {
             ? "Renamed \(report.renamed.count) of \(moves.count) \(moves.count == 1 ? "file" : "files") (\(ensemble.rawValue.lowercased()) order):"
             : "Plan (\(ensemble.rawValue.lowercased()) order) — nothing renamed yet; add --apply to rename:"
         text += "\n" + lines.joined(separator: "\n")
+        if renumberedAutomatically {
+            text += "\nRenumbering every file: some were already numbered and some weren't, or an already-numbered file was given a --number (otherwise numbers would repeat, or yours would be ignored)."
+        }
         if !unrecognised.isEmpty {
             text += "\nNot recognised: rename these to include an instrument, or give each a number with --number \"FILE=NN\"."
         }
@@ -171,6 +181,7 @@ extension ScoreSortCLI {
         let ok = report.errors.isEmpty
         return CommandResult(text: text,
                              json: ["ok": ok, "applied": apply, "ensemble": ensemble.rawValue.lowercased(),
+                                    "renumberedAll": rescan, "renumberedAutomatically": renumberedAutomatically,
                                     "files": entries, "unrecognised": unrecognised, "errors": report.errors],
                              exitCode: ok ? 0 : 1)
     }

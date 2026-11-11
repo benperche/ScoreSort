@@ -464,6 +464,7 @@ hasCustomOrder: Bool
 - Returns the **leftmost** match (handles "Baritone BC Bassoon" → baritone, not bassoon).
 
 ### `setManualOverride(for:number:)`
+**Automatic renumbering:** `scoreOrderNeedsRenumbering(files:order:numberedByHand:)` is true when numbered files sit beside unnumbered recognised parts (new ones would restart at 01 and clash), or when an already-numbered file has a manual number (outside rescan mode a prefixed file is `.alreadyPrefixed` *before* overrides are looked at, so the number was silently ignored). `RenamerManager.renumberIfMixed` turns `isRescanMode` on at load / `addFiles` / `setManualOverride` (without clearing overrides) and sets `renumberedAutomatically` (status text says so; cleared when the person uses `setRescanMode`). `rename` does the same and reports `renumberedAutomatically`.
 `ManualAssignmentView` keeps the number as **text** read live (`typedNumber`), starting at the file's current number: `TextField(value:format:)` only committed on Return/blur, so clicking Assign straight after typing assigned the stale value. `getExistingNumbers()` counts "already correct" files in rescan mode too (they're renumbered around a manual number). In `planScoreOrderRename`, parts of the same instrument sort by name **without the old prefix**, `localizedStandardCompare` (Trombone 2 before 3, Trumpet 10 after 9) — sorting by the prefixed name kept a wrong order "already correct".
 
 - If number conflicts with existing override, shifts all overrides ≥ number up by 1.

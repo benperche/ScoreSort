@@ -110,3 +110,59 @@ struct RenumberAroundManualTests {
         #expect(trombone3?.newName.hasPrefix("09") == true)
     }
 }
+
+@Suite("Renumbering a folder that mixes numbered and unnumbered parts")
+@MainActor
+struct MixedNumberingTests {
+
+    private func folder(_ names: [String]) -> URL {
+        let dir = temporaryFolder("mixed")
+        for name in names { writePDF(pages: 1, to: dir.appendingPathComponent(name)) }
+        return dir
+    }
+
+    @Test("Only a real mix counts")
+    func detection() {
+        let order = ["flute", "clarinet", "trumpet"]
+        let urls = { (names: [String]) in names.map { URL(fileURLWithPath: "/x/\($0)") } }
+        #expect(scoreOrderNeedsRenumbering(files: urls(["01 - Flute.pdf", "Clarinet 1.pdf"]), order: order))
+        #expect(!scoreOrderNeedsRenumbering(files: urls(["01 - Flute.pdf", "02 - Clarinet 1.pdf"]), order: order))
+        #expect(!scoreOrderNeedsRenumbering(files: urls(["Flute.pdf", "Clarinet 1.pdf"]), order: order))
+        // An unnumbered file with no instrument (programme notes) isn't a part to number.
+        #expect(!scoreOrderNeedsRenumbering(files: urls(["01 - Flute.pdf", "Notes.pdf"]), order: order))
+    }
+
+    @Test("Loading a mixed folder turns renumbering on, and says why; a tidy one doesn't")
+    func loading() {
+        let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's setting
+        manager.customInstrumentOrder = ["flute", "clarinet", "trumpet"]
+        manager.loadFolder(url: folder(["01 - Flute.pdf", "02 - Trumpet 1.pdf", "Clarinet 1.pdf"]))
+        #expect(manager.isRescanMode)
+        #expect(manager.renumberedAutomatically)
+        #expect(manager.statusText.contains("Renumbering them all"))
+        let newNames = manager.operations.map(\.newName).filter { !$0.isEmpty }.sorted()
+        #expect(newNames == ["02 - Clarinet 1.pdf", "03 - Trumpet 1.pdf"])   // Flute stays 01
+
+        // Unticking it is the person's choice, and sticks.
+        manager.setRescanMode(false)
+        #expect(!manager.renumberedAutomatically)
+
+        manager.loadFolder(url: folder(["01 - Flute.pdf", "02 - Clarinet 1.pdf"]))
+        #expect(!manager.isRescanMode)
+    }
+
+    @Test("Typing a number for an already-numbered file renumbers the rest around it")
+    func numberForANumberedFile() {
+        let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's setting
+        manager.customInstrumentOrder = ["flute", "clarinet", "trumpet"]
+        manager.loadFolder(url: folder(["01 - Flute.pdf", "02 - Trumpet 1.pdf", "03 - Clarinet 1.pdf"]))
+        #expect(!manager.isRescanMode)   // tidy, so left alone at first
+
+        manager.setManualOverride(for: "03 - Clarinet 1.pdf", number: 1)
+        #expect(manager.isRescanMode && manager.renumberedAutomatically)
+        let names = manager.operations.map { $0.newName.isEmpty ? $0.originalName : $0.newName }.sorted()
+        #expect(names == ["01 - Clarinet 1.pdf", "02 - Flute.pdf", "03 - Trumpet 1.pdf"])
+    }
+}

@@ -203,6 +203,28 @@ func detectScoreOrderInstrument(in filename: String, order: [String]) -> (Int, S
     return (first.index, first.instrument)
 }
 
+/// True when the whole folder has to be renumbered rather than only its unnumbered files:
+/// • some files are already numbered ("01 - Flute.pdf") and some recognised parts aren't —
+///   numbering only the new ones would start again from 01 and repeat numbers; or
+/// • a file that's already numbered was given a number by hand (`numberedByHand`) — outside
+///   renumbering it would be left as it is, so the number would be ignored.
+/// The Score Order Sorter and `rename` then renumber everything.
+func scoreOrderNeedsRenumbering(files: [URL], order: [String], numberedByHand: Set<String> = []) -> Bool {
+    func isNumbered(_ name: String) -> Bool { name.range(of: "^\\d{2}[-_\\s]", options: .regularExpression) != nil }
+    if numberedByHand.contains(where: isNumbered) { return true }
+    var numbered = false, unnumbered = false
+    for url in files {
+        let name = url.lastPathComponent
+        if isNumbered(name) {
+            numbered = true
+        } else if detectScoreOrderInstrument(in: name, order: order) != nil {
+            unnumbered = true
+        }
+        if numbered && unnumbered { return true }
+    }
+    return false
+}
+
 /// In rescan mode, an existing `NN - ` / `NN_` / `NN ` prefix split off: the clean name and
 /// the old two-digit prefix. Otherwise the name unchanged and no prefix.
 func stripScoreOrderPrefix(from filename: String, rescan: Bool) -> (clean: String, oldPrefix: String?) {

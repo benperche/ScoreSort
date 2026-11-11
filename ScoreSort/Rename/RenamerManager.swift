@@ -85,6 +85,10 @@ class RenamerManager: ObservableObject {
     /// where ScoreSort's guess was wrong. Used while sorting into folders.
     @Published private(set) var folderOverrides: [String: String] = [:]
     @Published private(set) var isRescanMode = false
+    /// "Renumber prefixed files" was turned on by ScoreSort, because the files mix numbered and
+    /// unnumbered parts or a numbered file was given a number by hand
+    /// (`scoreOrderNeedsRenumbering`); cleared when the person sets it.
+    @Published private(set) var renumberedAutomatically = false
     
     var statusText: String {
         let total = operations.count
@@ -92,11 +96,15 @@ class RenamerManager: ObservableObject {
         let willSkip = operations.filter { $0.type == .skip || $0.type == .alreadyPrefixed }.count
         let corrections = operations.filter { $0.type == .correct }.count
         
+        let counts: String
         if isRescanMode && corrections > 0 {
-            return "Found \(total) PDFs: \(corrections) need correction, \(willRename - corrections) will be renamed, \(willSkip) are correct/will be skipped"
+            counts = "Found \(total) PDFs: \(corrections) need correction, \(willRename - corrections) will be renamed, \(willSkip) are correct/will be skipped"
         } else {
-            return "Found \(total) PDFs: \(willRename) will be renamed, \(willSkip) will be skipped"
+            counts = "Found \(total) PDFs: \(willRename) will be renamed, \(willSkip) will be skipped"
         }
+        return renumberedAutomatically
+            ? counts + ". Renumbering them all, so no number is used twice."
+            : counts
     }
     
     var renameCount: Int {
@@ -109,8 +117,29 @@ class RenamerManager: ObservableObject {
         self.manualOverrides = [:]
         self.folderOverrides = [:]
         self.excludedNames = []
-        self.isRescanMode = false
+        renumberIfMixed(reset: true)
         scanFolder()
+    }
+
+    /// Turns renumbering on when the files mix numbered and unnumbered parts — numbering only
+    /// the new ones would repeat numbers. `reset` (a fresh load) also turns it off otherwise.
+    private func renumberIfMixed(reset: Bool) {
+        let mixed = scoreOrderNeedsRenumbering(files: currentFiles(), order: customInstrumentOrder,
+                                               numberedByHand: Set(manualOverrides.keys))
+        if mixed && !isRescanMode {
+            isRescanMode = true
+            renumberedAutomatically = true
+        } else if reset {
+            isRescanMode = mixed
+            renumberedAutomatically = mixed
+        }
+    }
+
+    /// The files being renamed: those loaded one by one, or the folder's.
+    private func currentFiles() -> [URL] {
+        if !directFiles.isEmpty { return directFiles }
+        guard let folderURL else { return [] }
+        return renamableFiles(in: folderURL, recursive: UserDefaults.standard.bool(forKey: "renamerSearchRecursively"))
     }
 
     /// Load individual files directly (no enclosing folder required). Accepts PDFs and images.
@@ -121,7 +150,7 @@ class RenamerManager: ObservableObject {
         self.manualOverrides = [:]
         self.folderOverrides = [:]
         self.excludedNames = []
-        self.isRescanMode = false
+        renumberIfMixed(reset: true)
         scanFolder()
     }
 
@@ -150,11 +179,10 @@ class RenamerManager: ObservableObject {
             guard !toAdd.isEmpty else { return }
             directFiles = (directFiles + toAdd).sorted { $0.lastPathComponent < $1.lastPathComponent }
         }
+        renumberIfMixed(reset: false)
         scanFolder()
     }
 
-    /// Marks the given filenames as excluded (won't rename) or restores them.
-    /// Excluded files remain visible in the list, sorted to the bottom in red.
     /// Puts these files in `folder` ("" for the top level), or back to ScoreSort's own choice
     /// with nil.
     func setFolder(_ folder: String?, for names: Set<String>) {
@@ -165,6 +193,8 @@ class RenamerManager: ObservableObject {
         if hasContent { scanFolder() }
     }
 
+    /// Marks the given filenames as excluded (won't rename) or restores them.
+    /// Excluded files remain visible in the list, sorted to the bottom in red.
     func setExcluded(_ names: Set<String>, excluded: Bool) {
         if excluded {
             excludedNames.formUnion(names)
@@ -182,10 +212,12 @@ class RenamerManager: ObservableObject {
         self.folderOverrides = [:]
         self.excludedNames = []
         self.isRescanMode = false
+        self.renumberedAutomatically = false
     }
 
     func setRescanMode(_ enabled: Bool) {
         isRescanMode = enabled
+        renumberedAutomatically = false
         if enabled { manualOverrides = [:] }
         if hasContent { scanFolder() }
     }
@@ -212,6 +244,8 @@ class RenamerManager: ObservableObject {
         // Assigning a manual number always un-excludes the file.
         excludedNames.remove(filename)
         manualOverrides[filename] = number
+        // A number for a file that's already numbered only takes effect by renumbering.
+        renumberIfMixed(reset: false)
         scanFolder()
     }
     
