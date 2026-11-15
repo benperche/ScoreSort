@@ -38,6 +38,8 @@ struct PartFolderGroupHeader: View {
     let fileCount: Int
     /// Some of these were put here with "Move to Folder".
     var isChosenByHand: Bool = false
+    /// Parts are being dragged over this folder.
+    var isDropTarget: Bool = false
 
     var body: some View {
         HStack(spacing: 6) {
@@ -64,6 +66,9 @@ struct PartFolderGroupHeader: View {
         .background(folder.isEmpty ? Color(NSColor.controlBackgroundColor) : Color.partFolder.opacity(0.09))
         .overlay(alignment: .leading) {
             if !folder.isEmpty { Rectangle().fill(Color.partFolder.opacity(0.55)).frame(width: 3) }
+        }
+        .overlay {
+            if isDropTarget { Rectangle().fill(Color.accentColor.opacity(0.15)).allowsHitTesting(false) }
         }
     }
 }

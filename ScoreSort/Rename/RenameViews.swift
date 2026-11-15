@@ -77,6 +77,8 @@ struct ScoreOrderSortView: View {
     @State private var lastClickedID: String? = nil
     /// NSEvent key-down monitor; installed while the file list is visible.
     @State private var keyEventMonitor: Any? = nil
+    /// The folder parts are being dragged over ("" = top level), for its highlight.
+    @State private var folderDropTarget: String? = nil
 
     /// All operations in display order (undetected → detected → excluded),
     /// used to compute shift+click ranges.
@@ -148,6 +150,43 @@ struct ScoreOrderSortView: View {
         Divider()
         Button("ScoreSort\u{2019}s Choice") { renamerManager.setFolder(nil, for: names()) }
             .disabled(names().allSatisfy { renamerManager.folderOverrides[$0] == nil })
+    }
+
+    // ── Drag between folders ──────────────────────────────────────────────
+    /// Marks a drag as a Renamer part (so text dragged in from elsewhere is ignored).
+    private static let folderDragPrefix = "scoresort-renamer-part:"
+
+    /// The files a drag of `name` moves: the selection when that file is in it, else that file.
+    private func draggedNames(for name: String) -> Set<String> {
+        guard let operation = renamerManager.operations.first(where: { $0.originalName == name }) else { return [] }
+        return selectedIDs.contains(operation.id) ? movableSelection : [name]
+    }
+
+    /// Moves dragged parts into `folder` ("" = top level), as Move to Folder does.
+    private func handleFolderDrop(_ items: [String], into folder: String) -> Bool {
+        folderDropTarget = nil
+        let moving = items.filter { $0.hasPrefix(Self.folderDragPrefix) }
+            .map { String($0.dropFirst(Self.folderDragPrefix.count)) }
+            .reduce(into: Set<String>()) { $0.formUnion(draggedNames(for: $1)) }
+        let alreadyThere = renamerManager.operations
+            .filter { moving.contains($0.originalName) }
+            .allSatisfy { ($0.folder ?? "") == folder }
+        guard !moving.isEmpty, !alreadyThere else { return false }
+        renamerManager.setFolder(folder, for: moving)
+        return true
+    }
+
+    private func setFolderDropTarget(_ folder: String, _ targeted: Bool) {
+        if targeted { folderDropTarget = folder } else if folderDropTarget == folder { folderDropTarget = nil }
+    }
+
+    private func folderDragPreview(for operation: RenameOperation) -> some View {
+        let count = selectedIDs.contains(operation.id) ? movableSelection.count : 1
+        let name = operation.newName.isEmpty ? operation.originalName : operation.newName
+        return Label(count > 1 ? "\(count) parts" : name, systemImage: count > 1 ? "doc.on.doc" : "doc")
+            .lineLimit(1)
+            .padding(6)
+            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
     }
 
     private func handleSelect(_ operation: RenameOperation, command: Bool, shift: Bool) {
@@ -393,7 +432,7 @@ struct ScoreOrderSortView: View {
                             }
                             .fixedSize()
                             .disabled(movableSelection.isEmpty)
-                            .help("Put the selected files in a different folder, where ScoreSort guessed wrong. Click, Shift-click or ⌘-click to select; right-click a file for the same choices.")
+                            .help("Put the selected files in a different folder, where ScoreSort guessed wrong. Click, Shift-click or ⌘-click to select; right-click a file for the same choices, or drag the files onto another folder.")
                         }
                         Button {
                             excludeSelected()
@@ -569,7 +608,11 @@ struct ScoreOrderSortView: View {
                     ForEach(matchedListItems) { item in
                         switch item {
                         case .folderHeader(let folder, let count, let byHand):
-                            PartFolderGroupHeader(folder: folder, fileCount: count, isChosenByHand: byHand)
+                            PartFolderGroupHeader(folder: folder, fileCount: count, isChosenByHand: byHand,
+                                                  isDropTarget: folderDropTarget == folder)
+                                .dropDestination(for: String.self) { items, _ in
+                                    handleFolderDrop(items, into: folder)
+                                } isTargeted: { setFolderDropTarget(folder, $0) }
                         case .file(let operation, let folder):
                             ScoreOrderFileRow(
                                 operation: operation,
@@ -582,6 +625,18 @@ struct ScoreOrderSortView: View {
                                     Rectangle().fill(Color.partFolder.opacity(0.55)).frame(width: 3)
                                 }
                             }
+                            .overlay {
+                                if let folder, folderDropTarget == folder {
+                                    Rectangle().fill(Color.accentColor.opacity(0.15)).allowsHitTesting(false)
+                                }
+                            }
+                            // While sorting into folders: drag a part (or the selection) to
+                            // another folder's heading or files to move it there.
+                            .modifier(PartFolderDragDrop(
+                                payload: folder == nil ? nil : Self.folderDragPrefix + operation.originalName,
+                                preview: { folderDragPreview(for: operation) },
+                                onDrop: { handleFolderDrop($0, into: folder ?? "") },
+                                onTargeted: { setFolderDropTarget(folder ?? "", $0) }))
                             .contextMenu {
                                 if folder != nil {
                                     // Acts on the selection when this file is in it, else on this file.
@@ -1718,6 +1773,25 @@ struct BulkRenameView: View {
                 message: message,
                 isError: true
             )
+        }
+    }
+}
+
+/// Makes a Score Order Sorter row draggable to another folder, and a place to drop parts
+/// into its folder — only while sorting into folders (`payload` nil otherwise).
+private struct PartFolderDragDrop<Preview: View>: ViewModifier {
+    let payload: String?
+    let preview: () -> Preview
+    let onDrop: ([String]) -> Bool
+    let onTargeted: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        if let payload {
+            content
+                .draggable(payload) { preview() }
+                .dropDestination(for: String.self) { items, _ in onDrop(items) } isTargeted: { onTargeted($0) }
+        } else {
+            content
         }
     }
 }
