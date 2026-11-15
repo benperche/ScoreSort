@@ -1,6 +1,6 @@
 # Release notes — next release (draft)
 
-_Draft for the next release after 1.10.1. Keep adding to this as more changes land._
+_Draft for 1.11.0 (build 16)._
 
 ## ✨ General Improvements
 
