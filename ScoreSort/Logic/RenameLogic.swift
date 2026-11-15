@@ -264,7 +264,8 @@ func stripScoreOrderPrefix(from filename: String, rescan: Bool) -> (clean: Strin
 func planScoreOrderRename(files: [URL], order: [String], separator: String, rescan: Bool = false,
                           manualOverrides: [String: Int] = [:], excluded: Set<String> = [],
                           folderMode: PartFolderMode = .off, ensemble: EnsembleType = .band,
-                          folderOverrides: [String: String] = [:], root: URL? = nil) -> [RenameOperation] {
+                          folderOverrides: [String: String] = [:], root: URL? = nil,
+                          numberedFolders: Bool = false) -> [RenameOperation] {
     var operations: [RenameOperation] = []
     var detectedFiles: [(order: Int, url: URL, originalName: String)] = []
     var scoreFiles: [(url: URL, originalName: String)] = []
@@ -284,7 +285,7 @@ func planScoreOrderRename(files: [URL], order: [String], separator: String, resc
         if let chosen = folderOverrides[url.lastPathComponent] {
             return partFolderDestination(for: renamed, folder: chosen)
         }
-        return partFolderDestination(for: renamed, mode: folderMode, ensemble: ensemble)
+        return partFolderDestination(for: renamed, mode: folderMode, ensemble: ensemble, numbered: numberedFolders)
     }
 
     /// The part folder `destination` puts it in, for showing; nil when it goes in the piece's

@@ -112,7 +112,7 @@ enum ScoreSortMCPServer {
                           Param(key: "scoreOrder", option: "score-order", kind: .string, description: "Number the files in this ensemble's score order.", choices: ["band", "jazz", "orchestra"]),
                           Param(key: "stamp", option: "stamp", kind: .string, description: "A saved stamp design to stamp onto each part (see scoresort_stamps)."),
                           Param(key: "stampScope", option: "stamp-scope", kind: .string, description: "first (default) or every page.", choices: ["first", "every"]),
-                          Param(key: "folders", option: "folders", kind: .string, description: "Save each part into a folder inside out for its section (Woodwind, Brass, Percussion, Strings, Rhythm; jazz: Saxophones, Trumpets, Trombones, Rhythm) or its instrument (Flute, Clarinet…), so each group of players can be given just their folder. Only when the person asks for folders.", choices: ["section", "instrument", "off"]),
+                          Param(key: "folders", option: "folders", kind: .string, description: "Save each part into a folder inside out for its section (Woodwind, Brass — a band's piano and basses too — Percussion, Strings, plus Rhythm for an orchestra; jazz: Saxophones, Trumpets, Trombones, Rhythm) or its instrument (Flute, Clarinet…), so each group of players can be given just their folder. Only when the person asks for folders.", choices: ["section", "instrument", "off"]),
                           Param(key: "ensemble", option: "ensemble", kind: .string, description: "The ensemble the folders' sections follow (default: scoreOrder's, else band).", choices: ["band", "jazz", "orchestra"]),
                           Param(key: "dryRun", option: "dry-run", kind: .boolean, description: "Show the files that would be written; write nothing."),
                           Param(key: "overwrite", option: "overwrite", kind: .boolean, description: "Replace files that already exist.")]),
@@ -428,8 +428,9 @@ Ground rules
         doesn't recognise (they'd be numbered last — rename the part, e.g. "Bari Sax" →
         "Baritone Saxophone"). --score-order is band, jazz or orchestra.
    e. Run the same command without --dry-run.
-   To give each section only its own parts, add --folders section (Woodwind, Brass,
-   Percussion, Strings, Rhythm; jazz: Saxophones, Trumpets, Trombones, Rhythm) or
+   To give each section only its own parts, add --folders section (Woodwind, Brass —
+   a band's piano and basses too — Percussion, Strings, plus Rhythm for an orchestra;
+   jazz: Saxophones, Trumpets, Trombones, Rhythm) or
    --folders instrument: the files go into those folders inside --out.
 
 2. Scans with two pages side by side (A3 sheets, or a book scanner)

@@ -34,6 +34,15 @@ nonisolated enum PartFolderMode: String, CaseIterable, Sendable {
     static var savedDefault: PartFolderMode {
         PartFolderMode(rawValue: UserDefaults.standard.string(forKey: defaultsKey) ?? "") ?? .off
     }
+
+    /// Settings ▸ Renamer ▸ "Number section folders" ("1 Woodwind", "2 Brass"…).
+    static let numberedDefaultsKey = "partFolderNumbered"
+
+    /// That setting — always off under the test runner, so tests never depend on it.
+    static var numbersSections: Bool {
+        guard ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] == nil else { return false }
+        return UserDefaults.standard.bool(forKey: numberedDefaultsKey)
+    }
 }
 
 /// What kind of instrument a phrase names — enough to place it in a section for any ensemble.
@@ -112,7 +121,7 @@ private let partFolderEntries: [PartFolderEntry] = [
                               "concert toms", "tenor drum"], family: .percussion, instrument: "Percussion"),
     PartFolderEntry(phrases: ["drums", "drum set", "drumset", "drum kit", "drumkit", "kit"], family: .drumKit, instrument: "Drums"),
 
-    // Rhythm
+    // Rhythm (in a band these go in Brass)
     PartFolderEntry(phrases: ["piano", "pno"], family: .keyboard, instrument: "Piano"),
     PartFolderEntry(phrases: ["keyboard", "keyboards", "keys", "kbd", "synth", "synthesizer"], family: .keyboard, instrument: "Keyboard"),
     PartFolderEntry(phrases: ["organ"], family: .keyboard, instrument: "Organ"),
@@ -132,10 +141,28 @@ private let partFolderEntries: [PartFolderEntry] = [
 ]
 
 /// The section folders for an ensemble, in score order — offered by "Move to Folder".
-func partFolderSections(for ensemble: EnsembleType) -> [String] {
-    ensemble == .jazz
-        ? ["Saxophones", "Trumpets", "Trombones", "Rhythm", "Strings", "Vocals"]
-        : ["Woodwind", "Brass", "Percussion", "Rhythm", "Strings", "Vocals"]
+/// `numbered`: "1 Woodwind", "2 Brass"… (each section keeps its number whichever are used,
+/// so pieces split into one folder share the same folders).
+func partFolderSections(for ensemble: EnsembleType, numbered: Bool = false) -> [String] {
+    let sections: [String]
+    switch ensemble {
+    case .jazz:      sections = ["Saxophones", "Trumpets", "Trombones", "Rhythm", "Strings", "Vocals"]
+    case .band:      sections = ["Woodwind", "Brass", "Percussion", "Strings", "Vocals"]
+    case .orchestra: sections = ["Woodwind", "Brass", "Percussion", "Rhythm", "Strings", "Vocals"]
+    }
+    return numbered ? sections.enumerated().map { "\($0.offset + 1) \($0.element)" } : sections
+}
+
+/// A section folder's numbered name ("2 Brass"), or `section` if it isn't one of the ensemble's.
+func numberedPartSection(_ section: String, ensemble: EnsembleType) -> String {
+    guard let index = partFolderSections(for: ensemble).firstIndex(of: section) else { return section }
+    return "\(index + 1) \(section)"
+}
+
+/// A folder name without a leading section number: "2 Brass" → "Brass".
+func partFolderBaseName(_ name: String) -> String {
+    guard let match = name.firstMatch(of: /^\d+\s+(.+)$/) else { return name }
+    return String(match.output.1)
 }
 
 /// Why a folder name typed by the person can't be used, or nil when it's fine.
@@ -161,13 +188,17 @@ private func partSection(_ family: PartFamily, ensemble: EnsembleType) -> String
         case .voice:                                    return "Vocals"
         }
     }
+    // A concert band's piano, string bass and other rhythm parts sit with the brass (Ben,
+    // 2026-11-16); an orchestra keeps a Rhythm folder and its basses in Strings.
+    let band = ensemble == .band
     switch family {
     case .score:                                        return nil
     case .woodwind, .saxophone:                         return "Woodwind"
     case .trumpet, .horn, .lowBrass:                    return "Brass"
     case .percussion, .drumKit:                         return "Percussion"
-    case .keyboard, .guitar, .bassGuitar:               return "Rhythm"
-    case .strings, .stringBass:                         return "Strings"
+    case .keyboard, .guitar, .bassGuitar:               return band ? "Brass" : "Rhythm"
+    case .stringBass:                                   return band ? "Brass" : "Strings"
+    case .strings:                                      return "Strings"
     case .voice:                                        return "Vocals"
     }
 }
@@ -183,7 +214,8 @@ private func partFolderWords(_ fileName: String) -> String {
 
 /// The folder a part named `fileName` belongs in, or nil for the score, an unrecognised name,
 /// or `.off`.
-func partFolderName(forFileName fileName: String, mode: PartFolderMode, ensemble: EnsembleType) -> String? {
+func partFolderName(forFileName fileName: String, mode: PartFolderMode, ensemble: EnsembleType,
+                    numbered: Bool = false) -> String? {
     guard mode != .off else { return nil }
     var words = partFolderWords(fileName)
     // A clef ("Baritone B.C.", "Bass Clef Euphonium") marks the brass baritone, and its
@@ -213,6 +245,7 @@ func partFolderName(forFileName fileName: String, mode: PartFolderMode, ensemble
     switch mode {
     case .off:        return nil
     case .section:    return partSection(entry.family, ensemble: ensemble)
+                            .map { numbered ? numberedPartSection($0, ensemble: ensemble) : $0 }
     case .instrument: return entry.family == .score ? nil : entry.instrument
     }
 }
@@ -221,9 +254,11 @@ func partFolderName(forFileName fileName: String, mode: PartFolderMode, ensemble
 /// than the whole file name, whose piece name can name an instrument ("Trumpet Voluntary -
 /// Flute 1"). A part with no name of its own (a single file kept under its own name) goes by
 /// the whole file name.
-func partFolderName(partName: String, fileName: String, mode: PartFolderMode, ensemble: EnsembleType) -> String? {
+func partFolderName(partName: String, fileName: String, mode: PartFolderMode, ensemble: EnsembleType,
+                    numbered: Bool = false) -> String? {
     let part = partName.trimmingCharacters(in: .whitespaces)
-    return partFolderName(forFileName: part.isEmpty ? fileName : part, mode: mode, ensemble: ensemble)
+    return partFolderName(forFileName: part.isEmpty ? fileName : part, mode: mode, ensemble: ensemble,
+                          numbered: numbered)
 }
 
 /// `fileName` inside `folder` ("Woodwind/01 - Flute 1.pdf"), or unchanged with no folder.
@@ -235,20 +270,21 @@ func partFolderPath(_ fileName: String, folder: String?) -> String {
 /// Where a file at `url` goes when sorted: into its folder beside it — unless it's already in
 /// a folder of that name, so sorting a sorted folder again doesn't nest them. `partName`, when
 /// known, decides the folder (see `partFolderName(partName:…)`).
-func partFolderDestination(for url: URL, partName: String? = nil, mode: PartFolderMode, ensemble: EnsembleType) -> URL {
+func partFolderDestination(for url: URL, partName: String? = nil, mode: PartFolderMode, ensemble: EnsembleType,
+                           numbered: Bool = false) -> URL {
     partFolderDestination(for: url, folder: partFolderName(partName: partName ?? "", fileName: url.lastPathComponent,
-                                                           mode: mode, ensemble: ensemble))
+                                                           mode: mode, ensemble: ensemble, numbered: numbered))
 }
 
 /// Every folder name "Sort into folders" makes, lowercased: each ensemble's sections and
 /// every instrument folder.
 let allPartFolderNames: Set<String> = Set(
-    ([EnsembleType.band, .jazz, .orchestra].flatMap(partFolderSections) + partFolderEntries.map(\.instrument))
+    ([EnsembleType.band, .jazz, .orchestra].flatMap { partFolderSections(for: $0) } + partFolderEntries.map(\.instrument))
         .map { $0.lowercased() })
 
-/// A folder named like one "Sort into folders" makes (Woodwind, Saxophones, Trumpet…).
+/// A folder named like one "Sort into folders" makes (Woodwind, "2 Brass", Trumpet…).
 func isPartFolderName(_ name: String) -> Bool {
-    allPartFolderNames.contains(name.lowercased())
+    allPartFolderNames.contains(partFolderBaseName(name).lowercased())
 }
 
 /// The part folders directly inside `folder` that hold parts: a piece's Woodwind, Brass…
@@ -272,10 +308,11 @@ func partPieceFolder(of url: URL, root: URL?) -> URL {
 }
 
 /// `url` moved into `folder` beside it (nil: left where it is), without nesting a file
-/// already in a folder of that name.
+/// already in a folder of that name — numbered or not ("Brass" and "2 Brass" count as one).
 func partFolderDestination(for url: URL, folder: String?) -> URL {
     let parent = url.deletingLastPathComponent()
     guard let folder, !folder.isEmpty,
-          parent.lastPathComponent.caseInsensitiveCompare(folder) != .orderedSame else { return url }
+          partFolderBaseName(parent.lastPathComponent).caseInsensitiveCompare(partFolderBaseName(folder)) != .orderedSame
+    else { return url }
     return parent.appendingPathComponent(folder, isDirectory: true).appendingPathComponent(url.lastPathComponent)
 }

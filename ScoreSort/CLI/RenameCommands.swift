@@ -43,8 +43,10 @@ extension ScoreSortCLI {
               --separator   Between the number and the name (default: the app's setting, " - ").
               --folders     Also move each numbered part into a folder beside it, so each
                             group of players can be given just their folder. section:
-                            Woodwind, Brass, Percussion, Strings, Rhythm (jazz: Saxophones,
-                            Trumpets, Trombones, Rhythm). instrument: Flute, Clarinet…
+                            Woodwind, Brass (a band's piano and basses too), Percussion,
+                            Strings, and Rhythm for an orchestra (jazz: Saxophones, Trumpets,
+                            Trombones, Rhythm); numbered ("2 Brass") if ScoreSort's settings
+                            say so. instrument: Flute, Clarinet…
                             Parts already numbered move too. The score and unrecognised
                             files stay put. A piece already sorted this way (its parts in
                             Woodwind, Brass… inside the folder) is numbered as one, and
@@ -132,7 +134,8 @@ extension ScoreSortCLI {
             files: files, order: InstrumentOrders.getOrder(for: ensemble),
             separator: separator ?? UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - ",
             rescan: rescan, manualOverrides: overrides, excluded: excluded,
-            folderMode: folders ?? .off, ensemble: ensemble, folderOverrides: folderOverrides, root: root)
+            folderMode: folders ?? .off, ensemble: ensemble, folderOverrides: folderOverrides, root: root,
+            numberedFolders: PartFolderMode.numbersSections)
 
         var report = RenameReport()
         if apply { report = performRenames(operations) }

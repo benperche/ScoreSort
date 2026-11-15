@@ -70,6 +70,10 @@ class RenamerManager: ObservableObject {
             if hasContent { scanFolder() }
         }
     }
+    /// "Number section folders" ("1 Woodwind", "2 Brass"…), from Settings ▸ Renamer.
+    @Published var numberedFolders: Bool = PartFolderMode.numbersSections {
+        didSet { if numberedFolders != oldValue && hasContent { scanFolder() } }
+    }
     /// Under the test runner a manager's choice stays in memory, so tests never change the
     /// person's own setting.
     private let isTesting = ProcessInfo.processInfo.environment["XCTestConfigurationFilePath"] != nil
@@ -304,7 +308,8 @@ class RenamerManager: ObservableObject {
                                           folderMode: partFolderMode,
                                           ensemble: ensembleType,
                                           folderOverrides: folderOverrides,
-                                          root: rootFolder)
+                                          root: rootFolder,
+                                          numberedFolders: numberedFolders)
     }
 
     func detectInstrument(in filename: String) -> (Int, String)? {

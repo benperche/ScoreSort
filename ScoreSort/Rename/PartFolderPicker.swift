@@ -94,8 +94,8 @@ func askForPartFolderName() -> String? {
 
 /// The folders Move to Folder offers: the ensemble's sections (By Section), then any other
 /// folder already in use.
-func partFolderChoices(mode: PartFolderMode, ensemble: EnsembleType, inUse: [String]) -> [String] {
-    var choices = mode == .section ? partFolderSections(for: ensemble) : []
+func partFolderChoices(mode: PartFolderMode, ensemble: EnsembleType, inUse: [String], numbered: Bool) -> [String] {
+    var choices = mode == .section ? partFolderSections(for: ensemble, numbered: numbered) : []
     for folder in inUse
     where !folder.isEmpty && !choices.contains(where: { $0.caseInsensitiveCompare(folder) == .orderedSame }) {
         choices.append(folder)

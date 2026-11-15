@@ -58,9 +58,11 @@ extension ScoreSortCLI {
               --stamp-scope  first (default): each part's first page; every: every page.
 
             Sorting into folders (so each group of players can be given just their folder):
-              --folders      section: Woodwind, Brass, Percussion, Strings, Rhythm (piano,
-                             guitar, bass guitar) — for a jazz band Saxophones, Trumpets,
-                             Trombones, Rhythm. instrument: Flute, Clarinet, Alto Saxophone…
+              --folders      section: Woodwind, Brass (a band's piano and basses too),
+                             Percussion, Strings — an orchestra adds Rhythm (piano, guitar);
+                             a jazz band has Saxophones, Trumpets, Trombones, Rhythm.
+                             Numbered ("2 Brass") if ScoreSort's settings say so.
+                             instrument: Flute, Clarinet, Alto Saxophone…
                              Folders are made inside --out; the score and unrecognised
                              parts stay at the top. off (the default) puts every file in --out.
               --ensemble     The ensemble the sections follow (default: --score-order's, else band).
@@ -197,7 +199,8 @@ extension ScoreSortCLI {
             SplitFilePlan(name: partFolderPath(finalNames[item.id] ?? item.proposedName,
                                                folder: partFolderName(partName: parts[item.id].name,
                                                                       fileName: item.proposedName,
-                                                                      mode: options.folders, ensemble: folderEnsemble)),
+                                                                      mode: options.folders, ensemble: folderEnsemble,
+                                                                      numbered: PartFolderMode.numbersSections)),
                           pages: parts[item.id].pages.filter { !skipped.contains($0) })
         }
         let empty = plans.filter { $0.pages.isEmpty }.map(\.name)

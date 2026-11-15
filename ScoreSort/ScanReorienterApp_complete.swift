@@ -1014,6 +1014,7 @@ struct PreferencesView: View {
     @Environment(\.dismiss) private var dismiss
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage(PartFolderMode.defaultsKey) private var partFolderDefault: PartFolderMode = .off
+    @AppStorage(PartFolderMode.numberedDefaultsKey) private var numberedFolders: Bool = false
 
     private var partFolderSettingDescription: String {
         let what: String
@@ -1021,7 +1022,7 @@ struct PreferencesView: View {
         case .off:
             what = "Parts are saved and renamed side by side, as usual."
         case .section:
-            what = "Each part goes into a folder for its section: Woodwind, Brass, Percussion, Strings and Rhythm (piano, guitar, bass guitar) — or Saxophones, Trumpets, Trombones and Rhythm for a jazz band."
+            what = "Each part goes into a folder for its section: Woodwind, Brass, Percussion and Strings, with a concert band's piano, string bass and other rhythm parts in Brass. An orchestra adds a Rhythm folder (piano, guitar); a jazz band has Saxophones, Trumpets, Trombones and Rhythm."
         case .instrument:
             what = "Each part goes into a folder for its instrument: Flute, Clarinet, Alto Saxophone… (Clarinet 1, 2 and 3 share one)."
         }
@@ -1206,6 +1207,12 @@ struct PreferencesView: View {
                         .fixedSize()
                         .font(.headline)
                         Text(partFolderSettingDescription)
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Toggle("Number section folders (1 Woodwind, 2 Brass, 3 Percussion…)", isOn: $numberedFolders)
+                            .toggleStyle(.checkbox)
+                            .padding(.top, 4)
+                        Text("So the folders list in score order in Finder, not alphabetically. Each section always has the same number, even when a piece has no parts for some sections.")
                             .font(.caption)
                             .foregroundColor(.secondary)
                     }

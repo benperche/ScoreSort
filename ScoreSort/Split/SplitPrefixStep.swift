@@ -113,6 +113,8 @@ private struct PrefixOrderRow: View {
 /// ScoreSort picks for a file (by item id) in a mode and ensemble.
 struct PrefixFolderSorting {
     let mode: Binding<PartFolderMode>
+    /// Section folders are numbered ("1 Woodwind", "2 Brass"…).
+    var numbered: Bool = false
     let defaultFolder: (_ id: Int, _ mode: PartFolderMode, _ ensemble: EnsembleType) -> String?
 }
 
@@ -254,7 +256,8 @@ struct PrefixOrderStepView: View {
     /// The folders Move to Folder offers.
     private var folderChoices: [String] {
         partFolderChoices(mode: folderSorting?.mode.wrappedValue ?? .off, ensemble: ensembleType,
-                          inUse: items.compactMap { folder(for: $0) } + folderOverrides.values.sorted())
+                          inUse: items.compactMap { folder(for: $0) } + folderOverrides.values.sorted(),
+                          numbered: folderSorting?.numbered ?? false)
     }
 
     /// Marks a drag as a Step 3 part (so text dragged in from elsewhere is ignored).

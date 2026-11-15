@@ -53,6 +53,7 @@ enum MatchedListItem: Identifiable {
 
 struct ScoreOrderSortView: View {
     @AppStorage(PartFolderMode.defaultsKey) private var partFolderDefault: PartFolderMode = .off
+    @AppStorage(PartFolderMode.numberedDefaultsKey) private var numberedFoldersSetting: Bool = false
     @EnvironmentObject private var renamerManager: RenamerManager
     @EnvironmentObject private var appState: AppState
     @Environment(\.openSettings) private var openSettings
@@ -129,7 +130,8 @@ struct ScoreOrderSortView: View {
     /// Folders offered: the ensemble's sections (By Section), then any folder already in use.
     private var folderChoices: [String] {
         partFolderChoices(mode: renamerManager.partFolderMode, ensemble: renamerManager.ensembleType,
-                          inUse: folderGroups.map(\.folder) + renamerManager.folderOverrides.values.sorted())
+                          inUse: folderGroups.map(\.folder) + renamerManager.folderOverrides.values.sorted(),
+                          numbered: renamerManager.numberedFolders)
     }
 
     /// The menu items that move `names` (the selection, or a right-clicked file).
@@ -319,6 +321,9 @@ struct ScoreOrderSortView: View {
             // "Sort into folders" changed elsewhere (Split, Bulk Rename, Settings): follow it.
             .onChange(of: partFolderDefault) { _, newDefault in
                 DispatchQueue.main.async { renamerManager.partFolderMode = newDefault }
+            }
+            .onChange(of: numberedFoldersSetting) { _, numbered in
+                DispatchQueue.main.async { renamerManager.numberedFolders = numbered }
             }
     }
 
@@ -1235,6 +1240,7 @@ struct BulkRenameView: View {
     @AppStorage("prefixEnsembleType") private var prefixEnsembleType: EnsembleType = .band
     /// "Sort into folders": one remembered setting, shared with Split and Settings ▸ Renamer.
     @AppStorage(PartFolderMode.defaultsKey) private var partFolderMode: PartFolderMode = .off
+    @AppStorage(PartFolderMode.numberedDefaultsKey) private var numberedFolders: Bool = false
 
     // ── Instrument names — the selected ensemble's score order (so suggestions
     // follow that ensemble; e.g. in a band, Horn comes right after Trumpet) ──
@@ -1296,9 +1302,10 @@ struct BulkRenameView: View {
                 stepLabel: "Step 2",
                 initialItems: prefixItems,
                 ensembleType: $prefixEnsembleType,
-                folderSorting: PrefixFolderSorting(mode: $partFolderMode) { id, mode, ensemble in
+                folderSorting: PrefixFolderSorting(mode: $partFolderMode, numbered: numberedFolders) { id, mode, ensemble in
                     let proposed = prefixItems.first { $0.id == id }?.proposedName ?? ""
-                    return partFolderName(partName: suffixes[id] ?? "", fileName: proposed, mode: mode, ensemble: ensemble)
+                    return partFolderName(partName: suffixes[id] ?? "", fileName: proposed, mode: mode,
+                                          ensemble: ensemble, numbered: numberedFolders)
                 },
                 onBack: { bulkStage = .base },
                 onApply: { orderedItems in applyPrefixAndRenameBulk(orderedItems: orderedItems) }
@@ -1635,7 +1642,7 @@ struct BulkRenameView: View {
                     : "\(baseFileName)\(sep)\(sfx).pdf"
                 let newURL = partFolderDestination(
                     for: item.url.deletingLastPathComponent().appendingPathComponent(newName), partName: sfx,
-                    mode: partFolderMode, ensemble: prefixEnsembleType)
+                    mode: partFolderMode, ensemble: prefixEnsembleType, numbered: numberedFolders)
                 let shownName = sortedName(newName, from: item.url, to: newURL)
                 try? FileManager.default.createDirectory(at: newURL.deletingLastPathComponent(),
                                                          withIntermediateDirectories: true)

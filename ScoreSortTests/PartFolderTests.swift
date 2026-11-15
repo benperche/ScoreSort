@@ -22,7 +22,7 @@ struct PartFolderNameTests {
         partFolderName(forFileName: name, mode: .instrument, ensemble: ensemble)
     }
 
-    @Test("Concert band sections, with piano, guitar and bass guitar in Rhythm")
+    @Test("Concert band sections, with piano, basses and guitar in Brass")
     func bandSections() {
         #expect(section("01 - Flute 1.pdf") == "Woodwind")
         #expect(section("Holst - First Suite - Alto Sax 2.pdf") == "Woodwind")
@@ -39,11 +39,46 @@ struct PartFolderNameTests {
         #expect(section("Bass Drum.pdf") == "Percussion")
         #expect(section("Drum Kit.pdf") == "Percussion")
         #expect(section("Mallet Percussion.pdf") == "Percussion")
-        #expect(section("Piano.pdf") == "Rhythm")
-        #expect(section("Electric Guitar.pdf") == "Rhythm")
-        #expect(section("Bass Guitar.pdf") == "Rhythm")
-        #expect(section("String Bass.pdf") == "Strings")
+        #expect(section("Piano.pdf") == "Brass")
+        #expect(section("Keyboard.pdf") == "Brass")
+        #expect(section("Electric Guitar.pdf") == "Brass")
+        #expect(section("Bass Guitar.pdf") == "Brass")
+        #expect(section("String Bass.pdf") == "Brass")
+        #expect(section("Bass.pdf") == "Brass")
         #expect(section("Violin II.pdf") == "Strings")
+        #expect(!partFolderSections(for: .band).contains("Rhythm"))
+    }
+
+    @Test("An orchestra keeps a Rhythm folder, and its basses in Strings")
+    func orchestraSections() {
+        #expect(section("Piano.pdf", .orchestra) == "Rhythm")
+        #expect(section("String Bass.pdf", .orchestra) == "Strings")
+        #expect(section("Cello.pdf", .orchestra) == "Strings")
+    }
+
+    @Test("Numbered section folders: each section keeps its number")
+    func numberedSections() {
+        func numbered(_ name: String, _ ensemble: EnsembleType = .band) -> String? {
+            partFolderName(forFileName: name, mode: .section, ensemble: ensemble, numbered: true)
+        }
+        #expect(numbered("Flute 1.pdf") == "1 Woodwind")
+        #expect(numbered("Piano.pdf") == "2 Brass")
+        #expect(numbered("Timpani.pdf") == "3 Percussion")
+        #expect(numbered("Violin.pdf") == "4 Strings")
+        #expect(numbered("Drums.pdf", .jazz) == "4 Rhythm")
+        #expect(numbered("Piano.pdf", .orchestra) == "4 Rhythm")
+        #expect(numbered("Score.pdf") == nil)
+        #expect(partFolderName(forFileName: "Flute 1.pdf", mode: .instrument, ensemble: .band, numbered: true) == "Flute")
+        #expect(partFolderSections(for: .band, numbered: true) == ["1 Woodwind", "2 Brass", "3 Percussion", "4 Strings", "5 Vocals"])
+        #expect(isPartFolderName("2 Brass"))
+        #expect(!isPartFolderName("2 Copies"))
+        #expect(partFolderBaseName("12 Saxophones") == "Saxophones")
+        #expect(partFolderBaseName("Brass") == "Brass")
+        // A part already in Brass isn't nested in "2 Brass" (nor the other way round).
+        let inBrass = URL(fileURLWithPath: "/tmp/Piece/Brass/03 - Tuba.pdf")
+        #expect(partFolderDestination(for: inBrass, folder: "2 Brass") == inBrass)
+        let inNumbered = URL(fileURLWithPath: "/tmp/Piece/2 Brass/03 - Tuba.pdf")
+        #expect(partFolderDestination(for: inNumbered, folder: "Brass") == inNumbered)
     }
 
     @Test("The score and unrecognised parts stay at the top")
@@ -165,7 +200,7 @@ struct PartFolderWritingTests {
                                               folderOverrides: ["Bass.pdf": "Rhythm", "Flute 1.pdf": "",
                                                                 "01 - Piano.pdf": "Keys & Synths"])
         let bass = try #require(operations.first { $0.originalName == "Bass.pdf" })
-        #expect(bass.folder == "Rhythm")                      // not Strings
+        #expect(bass.folder == "Rhythm")                      // not Brass
         let flute = try #require(operations.first { $0.originalName == "Flute 1.pdf" })
         #expect(flute.folder == nil)                          // kept at the top
         _ = performRenames(operations)
@@ -270,11 +305,28 @@ struct SortedPieceTests {
     }
 
     private func plan(_ dir: URL, mode: PartFolderMode, rescan: Bool = false,
-                      overrides: [String: String] = [:]) -> [RenameOperation] {
+                      overrides: [String: String] = [:], numbered: Bool = false) -> [RenameOperation] {
         InstrumentOrders.setup()
         return planScoreOrderRename(files: renamerJobFiles(in: dir, recursive: false),
                                     order: InstrumentOrders.getOrder(for: .band), separator: " - ", rescan: rescan,
-                                    folderMode: mode, ensemble: .band, folderOverrides: overrides, root: dir)
+                                    folderMode: mode, ensemble: .band, folderOverrides: overrides, root: dir,
+                                    numberedFolders: numbered)
+    }
+
+    @Test("Numbering the folders of a sorted piece moves each section into its numbered folder; Off gathers them back")
+    func numberedFolders() {
+        let piece = sortedPiece()
+        #expect(expandToRenameJobFolders([piece]).map(\.lastPathComponent) == ["Spring Overture"])
+        #expect(performRenames(plan(piece, mode: .section, numbered: true)).errors.isEmpty)
+        #expect(contents(piece) == ["00 - Score.pdf", "1 Woodwind/01 - Flute 1.pdf", "1 Woodwind/02 - Clarinet 1.pdf",
+                                    "2 Brass/03 - Trumpet 1.pdf", "3 Percussion/04 - Snare Drum.pdf"])
+        #expect(!FileManager.default.fileExists(atPath: piece.appendingPathComponent("Brass").path))
+
+        // Still one piece, and numbered sections gather back like any others.
+        #expect(renamerJobFiles(in: piece, recursive: false).count == 5)
+        #expect(performRenames(plan(piece, mode: .off)).errors.isEmpty)
+        #expect(contents(piece) == ["00 - Score.pdf", "01 - Flute 1.pdf", "02 - Clarinet 1.pdf", "03 - Trumpet 1.pdf",
+                                    "04 - Snare Drum.pdf"])
     }
 
     @Test("Dropping the piece folder is one job, its section folders included; a section on its own is still a job")

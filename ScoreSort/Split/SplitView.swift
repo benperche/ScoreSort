@@ -120,6 +120,7 @@ struct SplitView: View {
     /// "Sort into folders" (Step 2's menu). One remembered setting, shared with the Renamer and
     /// Settings ▸ Renamer: it stays as last chosen, across pieces and launches.
     @AppStorage(PartFolderMode.defaultsKey) private var partFolderMode: PartFolderMode = .off
+    @AppStorage(PartFolderMode.numberedDefaultsKey) private var numberedFolders: Bool = false
     @AppStorage("splitStampEnabled") private var stampEnabled: Bool = false
     @AppStorage("splitStampScope") private var stampScope: StampScope = .firstPageOfEachPart
     /// Set true after a successful save when the source file was actually trashed, so the
@@ -219,7 +220,7 @@ struct SplitView: View {
                     stepLabel: "Step 3",
                     initialItems: prefixItems,
                     ensembleType: $prefixEnsembleType,
-                    folderSorting: PrefixFolderSorting(mode: $partFolderMode) { id, mode, ensemble in
+                    folderSorting: PrefixFolderSorting(mode: $partFolderMode, numbered: numberedFolders) { id, mode, ensemble in
                         defaultPartFolder(forFile: id, mode: mode, ensemble: ensemble)
                     },
                     onBack: { splitStage = .naming },
@@ -1379,7 +1380,8 @@ struct SplitView: View {
         let suffix = customFileNames[i] ?? ""
         let fileName = splitOutputFileName(base: baseFileName, separator: filenameSeparator, suffix: suffix,
                                            fileIndex: i, onlyFile: activeFileCount == 1)
-        return partFolderName(partName: suffix, fileName: fileName, mode: mode, ensemble: ensemble)
+        return partFolderName(partName: suffix, fileName: fileName, mode: mode, ensemble: ensemble,
+                              numbered: numberedFolders)
     }
 
     /// Each file's folder when saving straight from Step 2 (no prefix step).
