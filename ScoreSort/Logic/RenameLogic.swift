@@ -38,14 +38,17 @@ func folderHasDirectRenamableFiles(_ url: URL) -> Bool {
 /// directory at any depth that directly contains renamable files becomes a job. A folder
 /// of PDFs is one job; a (nested) parent folder of piece folders batches them all.
 /// Result is sorted by full path so siblings group together.
+/// A piece's part folders (Woodwind, Brass… from "Sort into folders") belong to the piece's
+/// job rather than being jobs of their own, so its parts are numbered together.
 func expandToRenameJobFolders(_ folders: [URL]) -> [URL] {
     var jobs: [URL] = []
     func collect(_ folder: URL) {
-        if folderHasDirectRenamableFiles(folder) { jobs.append(folder) }
+        let parts = Set(partSubfolders(of: folder).map(\.standardizedFileURL))
+        if folderHasDirectRenamableFiles(folder) || !parts.isEmpty { jobs.append(folder) }
         let subs = (try? FileManager.default.contentsOfDirectory(
             at: folder, includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants])) ?? []
-        for sub in subs where urlIsDirectory(sub) { collect(sub) }
+        for sub in subs where urlIsDirectory(sub) && !parts.contains(sub.standardizedFileURL) { collect(sub) }
     }
     for folder in folders { collect(folder) }
     return jobs.sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
@@ -170,6 +173,15 @@ func scoreOrderNumbers(forOrderedItems items: [PrefixItem]) -> [Int: Int] {
 
 /// The renamable files in `folder`, sorted by name: its immediate children, or everything
 /// inside it with `recursive`.
+/// A rename job's files: those in `folder` (and every subfolder when `recursive`), plus — a
+/// piece sorted into folders being one job — those in its part folders (Woodwind, Brass…).
+func renamerJobFiles(in folder: URL, recursive: Bool) -> [URL] {
+    guard !recursive else { return renamableFiles(in: folder, recursive: true) }
+    return (renamableFiles(in: folder, recursive: false)
+            + partSubfolders(of: folder).flatMap { renamableFiles(in: $0, recursive: false) })
+        .sorted { $0.lastPathComponent < $1.lastPathComponent }
+}
+
 func renamableFiles(in folder: URL, recursive: Bool) -> [URL] {
     let fileManager = FileManager.default
     var files: [URL] = []
@@ -249,17 +261,22 @@ func stripScoreOrderPrefix(from filename: String, rescan: Bool) -> (clean: Strin
 func planScoreOrderRename(files: [URL], order: [String], separator: String, rescan: Bool = false,
                           manualOverrides: [String: Int] = [:], excluded: Set<String> = [],
                           folderMode: PartFolderMode = .off, ensemble: EnsembleType = .band,
-                          folderOverrides: [String: String] = [:]) -> [RenameOperation] {
+                          folderOverrides: [String: String] = [:], root: URL? = nil) -> [RenameOperation] {
     var operations: [RenameOperation] = []
     var detectedFiles: [(order: Int, url: URL, originalName: String)] = []
     var scoreFiles: [(url: URL, originalName: String)] = []
     var undetectedFiles: [(url: URL, originalName: String)] = []
     var manuallyAssigned: [(number: Int, url: URL, originalName: String)] = []
 
+    /// The piece folder a file belongs to (`root` for one already in a part folder in it).
+    func home(_ url: URL) -> URL { partPieceFolder(of: url, root: root) }
+    func samePlace(_ a: URL, _ b: URL) -> Bool { a.standardizedFileURL.path == b.standardizedFileURL.path }
+
     /// Where the file at `url` goes once named `name`: its folder — the person's choice, else
-    /// ScoreSort's — when sorting into folders.
+    /// ScoreSort's — when sorting into folders; with folders off, its piece folder (so parts
+    /// in Woodwind, Brass… are gathered back into it).
     func destination(_ url: URL, _ name: String) -> URL {
-        let renamed = url.deletingLastPathComponent().appendingPathComponent(name)
+        let renamed = home(url).appendingPathComponent(name)
         guard folderMode != .off else { return renamed }
         if let chosen = folderOverrides[url.lastPathComponent] {
             return partFolderDestination(for: renamed, folder: chosen)
@@ -267,17 +284,37 @@ func planScoreOrderRename(files: [URL], order: [String], separator: String, resc
         return partFolderDestination(for: renamed, mode: folderMode, ensemble: ensemble)
     }
 
-    /// A file whose name stays as it is but which moves into its folder; nil when it doesn't move.
+    /// The part folder `destination` puts it in, for showing; nil when it goes in the piece's
+    /// own folder.
+    func folderName(_ url: URL, _ destination: URL) -> String? {
+        let folder = destination.deletingLastPathComponent()
+        return samePlace(folder, home(url)) ? nil : folder.lastPathComponent
+    }
+
+    /// The part folder it leaves, when it moves out of one.
+    func leaving(_ url: URL, _ destination: URL) -> String? {
+        let from = url.deletingLastPathComponent()
+        guard !samePlace(from, home(url)), !samePlace(from, destination.deletingLastPathComponent()) else { return nil }
+        return from.lastPathComponent
+    }
+
+    /// A file whose name stays as it is but which moves into its folder (or back out of one);
+    /// nil when it doesn't move.
     func movedIntoFolder(_ url: URL) -> RenameOperation? {
         let target = destination(url, url.lastPathComponent)
-        guard target != url else { return nil }
+        guard !samePlace(target, url) else { return nil }
         let name = url.lastPathComponent
         if FileManager.default.fileExists(atPath: target.path) {
             return RenameOperation(originalURL: url, originalName: name, newName: name, type: .skip,
-                                   statusOverride: "Target exists", folder: target.deletingLastPathComponent().lastPathComponent)
+                                   statusOverride: "Target exists", folder: folderName(url, target))
         }
         return RenameOperation(originalURL: url, originalName: name, newName: name, newURL: target, type: .rename,
-                               folder: target.deletingLastPathComponent().lastPathComponent)
+                               folder: folderName(url, target), fromFolder: leaving(url, target))
+    }
+
+    /// A file that stays where it is: shown in the part folder it's already in.
+    func staying(_ url: URL, _ name: String, _ type: RenameOperationType) -> RenameOperation {
+        RenameOperation(originalURL: url, originalName: name, newName: "", type: type, folder: folderName(url, url))
     }
 
     for fileURL in files {
@@ -297,8 +334,7 @@ func planScoreOrderRename(files: [URL], order: [String], separator: String, resc
 
         // Already numbered: left alone outside rescan mode (but moved into its folder).
         if !rescan, filename.range(of: "^\\d{2}[-_\\s]", options: .regularExpression) != nil {
-            operations.append(movedIntoFolder(fileURL) ?? RenameOperation(originalURL: fileURL, originalName: filename,
-                                                                         newName: "", type: .alreadyPrefixed))
+            operations.append(movedIntoFolder(fileURL) ?? staying(fileURL, filename, .alreadyPrefixed))
             continue
         }
 
@@ -328,12 +364,6 @@ func planScoreOrderRename(files: [URL], order: [String], separator: String, resc
     }
     let fileManager = FileManager.default
 
-    /// The folder `destination` put it in, for showing; nil when it stays beside the others.
-    func folderName(_ url: URL, _ destination: URL) -> String? {
-        let folder = destination.deletingLastPathComponent()
-        return folder == url.deletingLastPathComponent() ? nil : folder.lastPathComponent
-    }
-
     /// One numbered rename, or a skip when it's already right or the target is taken.
     func numbered(_ url: URL, _ originalName: String, prefix: String) -> RenameOperation {
         let (cleanName, oldPrefix) = stripScoreOrderPrefix(from: originalName, rescan: rescan)
@@ -341,13 +371,14 @@ func planScoreOrderRename(files: [URL], order: [String], separator: String, resc
         let newURL = destination(url, newFilename)
         let folder = folderName(url, newURL)
         if oldPrefix == prefix {
-            return movedIntoFolder(url) ?? RenameOperation(originalURL: url, originalName: originalName, newName: "", type: .skip)
-        } else if fileManager.fileExists(atPath: newURL.path) && newURL != url {
+            return movedIntoFolder(url) ?? staying(url, originalName, .skip)
+        } else if fileManager.fileExists(atPath: newURL.path) && !samePlace(newURL, url) {
             return RenameOperation(originalURL: url, originalName: originalName, newName: newFilename,
                                    type: .skip, statusOverride: "Target exists", folder: folder)
         } else {
             return RenameOperation(originalURL: url, originalName: originalName, newName: newFilename, newURL: newURL,
-                                   type: oldPrefix != nil ? .correct : .rename, oldPrefix: oldPrefix, folder: folder)
+                                   type: oldPrefix != nil ? .correct : .rename, oldPrefix: oldPrefix, folder: folder,
+                                   fromFolder: leaving(url, newURL))
         }
     }
 
@@ -374,12 +405,13 @@ func planScoreOrderRename(files: [URL], order: [String], separator: String, resc
         let newFilename = "\(prefix)\(separator)\(cleanName)"
         let newURL = destination(url, newFilename)
         let folder = folderName(url, newURL)
-        if fileManager.fileExists(atPath: newURL.path) && newURL != url {
+        if fileManager.fileExists(atPath: newURL.path) && !samePlace(newURL, url) {
             operations.append(RenameOperation(originalURL: url, originalName: originalName, newName: newFilename,
                                               type: .skip, statusOverride: "Target exists", folder: folder))
         } else {
             operations.append(RenameOperation(originalURL: url, originalName: originalName, newName: newFilename,
-                                              newURL: newURL, type: .manual, folder: folder))
+                                              newURL: newURL, type: .manual, folder: folder,
+                                              fromFolder: leaving(url, newURL)))
         }
     }
 
@@ -435,5 +467,18 @@ func performRenames(_ operations: [RenameOperation]) -> RenameReport {
             report.errors.append("\(operation.originalName): \(error.localizedDescription)")
         }
     }
+    removeEmptiedPartFolders(report.renamed.map { $0.from.deletingLastPathComponent() })
     return report
+}
+
+/// Part folders (Woodwind, Brass…) left empty once their parts have moved out are removed,
+/// so gathering parts back doesn't leave a trail of empty folders. Only folders with nothing
+/// in them but Finder's own `.DS_Store`.
+func removeEmptiedPartFolders(_ folders: [URL]) {
+    let fm = FileManager.default
+    for folder in Set(folders.map(\.standardizedFileURL)) where isPartFolderName(folder.lastPathComponent) {
+        guard let items = try? fm.contentsOfDirectory(atPath: folder.path),
+              items.allSatisfy({ $0 == ".DS_Store" }) else { continue }
+        try? fm.removeItem(at: folder)
+    }
 }

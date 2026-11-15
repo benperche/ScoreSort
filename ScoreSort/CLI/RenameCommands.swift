@@ -46,7 +46,10 @@ extension ScoreSortCLI {
                             Woodwind, Brass, Percussion, Strings, Rhythm (jazz: Saxophones,
                             Trumpets, Trombones, Rhythm). instrument: Flute, Clarinet…
                             Parts already numbered move too. The score and unrecognised
-                            files stay put.
+                            files stay put. A piece already sorted this way (its parts in
+                            Woodwind, Brass… inside the folder) is numbered as one, and
+                            --folders off gathers its parts back into the folder. Without
+                            --folders, parts stay in whatever folder they're in.
               --folder      With --folders: put a file in a folder of your choosing where
                             ScoreSort's guess is wrong, e.g. --folder "Bass.pdf=Rhythm".
                             An empty folder ("Bass.pdf=") leaves it at the top.
@@ -87,7 +90,7 @@ extension ScoreSortCLI {
                                      recursive: args.has("recursive"),
                                      rescan: args.has("rescan"),
                                      separator: args.value("separator"),
-                                     folders: parsePartFolderMode(args.value("folders")),
+                                     folders: try args.value("folders").map { try parsePartFolderMode($0) },
                                      folderOverrides: folderOverrides,
                                      apply: args.has("apply"))
             })
@@ -95,13 +98,17 @@ extension ScoreSortCLI {
 
     static func runRename(paths: [String], ensemble: EnsembleType, overrides: [String: Int] = [:],
                           excluded: Set<String> = [], recursive: Bool = false, rescan: Bool = false,
-                          separator: String? = nil, folders: PartFolderMode = .off,
+                          separator: String? = nil, folders: PartFolderMode? = nil,
                           folderOverrides: [String: String] = [:], apply: Bool) throws -> CommandResult {
         // The files: one folder, or files given one by one.
         let urls = paths.map { URL(fileURLWithPath: ($0 as NSString).expandingTildeInPath).standardizedFileURL }
         var files: [URL]
+        // A folder's part folders (Woodwind, Brass…) come with it; with --folders the plan
+        // works from that folder, so parts can move between them or back out.
+        var root: URL? = nil
         if urls.count == 1, urlIsDirectory(urls[0]) {
-            files = renamableFiles(in: urls[0], recursive: recursive)
+            files = renamerJobFiles(in: urls[0], recursive: recursive)
+            if folders != nil { root = urls[0] }
         } else {
             for url in urls where !FileManager.default.fileExists(atPath: url.path) {
                 throw CommandError("No file at \(url.path).")
@@ -125,7 +132,7 @@ extension ScoreSortCLI {
             files: files, order: InstrumentOrders.getOrder(for: ensemble),
             separator: separator ?? UserDefaults.standard.string(forKey: "prefixSeparator") ?? " - ",
             rescan: rescan, manualOverrides: overrides, excluded: excluded,
-            folderMode: folders, ensemble: ensemble, folderOverrides: folderOverrides)
+            folderMode: folders ?? .off, ensemble: ensemble, folderOverrides: folderOverrides, root: root)
 
         var report = RenameReport()
         if apply { report = performRenames(operations) }
@@ -136,7 +143,8 @@ extension ScoreSortCLI {
 
         func status(_ op: RenameOperation) -> String {
             switch op.type {
-            case .rename where op.newName == op.originalName: return "move into folder"
+            case .rename where op.newName == op.originalName:
+                return op.folder == nil ? "move out of folder" : "move into folder"
             case .rename, .manual: return "rename"
             case .correct: return "correct"
             case .skip: return op.statusOverride == "Target exists" ? "target exists" : "already correct"

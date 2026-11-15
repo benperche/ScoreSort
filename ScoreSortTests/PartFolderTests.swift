@@ -246,3 +246,150 @@ struct PartFolderWritingTests {
         }
     }
 }
+
+@Suite("A piece sorted into folders, renamed again or gathered back")
+@MainActor
+struct SortedPieceTests {
+
+    /// A piece folder as "Sort into folders" leaves it: the score at the top, parts in sections.
+    private func sortedPiece(_ names: [String] = ["00 - Score.pdf", "Woodwind/01 - Flute 1.pdf",
+                                                  "Woodwind/02 - Clarinet 1.pdf", "Brass/03 - Trumpet 1.pdf",
+                                                  "Percussion/04 - Snare Drum.pdf"]) -> URL {
+        let dir = temporaryFolder("piece").appendingPathComponent("Spring Overture")
+        for name in names {
+            let url = dir.appendingPathComponent(name)
+            try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            writePDF(pages: 1, to: url)
+        }
+        return dir
+    }
+
+    private func contents(_ dir: URL) -> [String] {
+        let enumerator = FileManager.default.enumerator(atPath: dir.path)
+        return ((enumerator?.allObjects as? [String]) ?? []).filter { $0.hasSuffix(".pdf") }.sorted()
+    }
+
+    private func plan(_ dir: URL, mode: PartFolderMode, rescan: Bool = false,
+                      overrides: [String: String] = [:]) -> [RenameOperation] {
+        InstrumentOrders.setup()
+        return planScoreOrderRename(files: renamerJobFiles(in: dir, recursive: false),
+                                    order: InstrumentOrders.getOrder(for: .band), separator: " - ", rescan: rescan,
+                                    folderMode: mode, ensemble: .band, folderOverrides: overrides, root: dir)
+    }
+
+    @Test("Dropping the piece folder is one job, its section folders included; a section on its own is still a job")
+    func oneJob() {
+        let piece = sortedPiece()
+        #expect(expandToRenameJobFolders([piece]).map(\.lastPathComponent) == ["Spring Overture"])
+        #expect(renamerJobFiles(in: piece, recursive: false).count == 5)
+        #expect(expandToRenameJobFolders([piece.appendingPathComponent("Brass")]).map(\.lastPathComponent) == ["Brass"])
+
+        // A concert folder of two sorted pieces: two jobs, not one per section.
+        let concert = piece.deletingLastPathComponent()
+        let second = concert.appendingPathComponent("March")
+        try? FileManager.default.createDirectory(at: second.appendingPathComponent("Brass"), withIntermediateDirectories: true)
+        writePDF(pages: 1, to: second.appendingPathComponent("Brass/Tuba.pdf"))
+        #expect(expandToRenameJobFolders([concert]).map(\.lastPathComponent) == ["March", "Spring Overture"])
+    }
+
+    @Test("By Section again: nothing moves, and the parts are listed in their folders")
+    func bySectionLeavesThem() {
+        let operations = plan(sortedPiece(), mode: .section)
+        #expect(operations.allSatisfy { $0.type == .alreadyPrefixed })
+        #expect(operations.first { $0.originalName.hasSuffix("Trumpet 1.pdf") }?.folder == "Brass")
+        #expect(operations.first { $0.originalName.hasSuffix("Score.pdf") }?.folder == nil)
+    }
+
+    @Test("Renumbering numbers the sections as one piece")
+    func renumberedTogether() {
+        let operations = plan(sortedPiece(["Score.pdf", "Woodwind/Flute 1.pdf", "Brass/Trumpet 1.pdf", "Brass/Tuba.pdf"]),
+                              mode: .section)
+        let names = operations.map(\.newPathForDisplay).sorted()
+        #expect(names == ["00 - Score.pdf", "Brass/02 - Trumpet 1.pdf", "Brass/03 - Tuba.pdf", "Woodwind/01 - Flute 1.pdf"])
+    }
+
+    @Test("Sort into folders Off gathers the parts back into the piece folder, and the empty folders go")
+    func offGathersBack() {
+        let piece = sortedPiece()
+        // A file that isn't a part stays in its folder, and so does the folder.
+        writePDF(pages: 1, to: piece.appendingPathComponent("Percussion/Setup notes.pdf"))
+        let operations = plan(piece, mode: .off)
+        let flute = operations.first { $0.originalName == "01 - Flute 1.pdf" }
+        #expect(flute?.newPathForDisplay == "01 - Flute 1.pdf (out of Woodwind)")
+        let report = performRenames(operations)
+        #expect(report.errors.isEmpty)
+        #expect(contents(piece) == ["00 - Score.pdf", "01 - Flute 1.pdf", "02 - Clarinet 1.pdf", "03 - Trumpet 1.pdf",
+                                    "04 - Snare Drum.pdf", "Percussion/Setup notes.pdf"])
+        #expect(!FileManager.default.fileExists(atPath: piece.appendingPathComponent("Woodwind").path))
+        #expect(FileManager.default.fileExists(atPath: piece.appendingPathComponent("Percussion").path))
+    }
+
+    @Test("Move to Folder ▸ Top Level takes a part out of its section folder; another section moves it across")
+    func handChosenFromSorted() {
+        let piece = sortedPiece()
+        let operations = plan(piece, mode: .section,
+                              overrides: ["03 - Trumpet 1.pdf": "", "04 - Snare Drum.pdf": "Rhythm"])
+        #expect(operations.first { $0.originalName == "03 - Trumpet 1.pdf" }?.newPathForDisplay
+                == "03 - Trumpet 1.pdf (out of Brass)")
+        #expect(operations.first { $0.originalName == "04 - Snare Drum.pdf" }?.newPathForDisplay
+                == "Rhythm/04 - Snare Drum.pdf")
+        _ = performRenames(operations)
+        #expect(contents(piece) == ["00 - Score.pdf", "03 - Trumpet 1.pdf", "Rhythm/04 - Snare Drum.pdf",
+                                    "Woodwind/01 - Flute 1.pdf", "Woodwind/02 - Clarinet 1.pdf"])
+    }
+
+    @Test("The Renamer loads a sorted piece as one, and Off gathers it")
+    func renamerManager() {
+        let piece = sortedPiece()
+        let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's setting
+        manager.loadFolder(url: piece)
+        #expect(manager.operations.count == 5)
+        #expect(manager.renameCount == 4)   // every part but the score moves up
+    }
+
+    @Test("The command line leaves parts in their folders unless --folders is given")
+    func commandLine() throws {
+        let piece = sortedPiece()
+        _ = try ScoreSortCLI.runRename(paths: [piece.path], ensemble: .band, separator: " - ", apply: true)
+        #expect(contents(piece).contains("Woodwind/01 - Flute 1.pdf"))
+        _ = try ScoreSortCLI.runRename(paths: [piece.path], ensemble: .band, separator: " - ", folders: .off, apply: true)
+        #expect(contents(piece) == ["00 - Score.pdf", "01 - Flute 1.pdf", "02 - Clarinet 1.pdf", "03 - Trumpet 1.pdf",
+                                    "04 - Snare Drum.pdf"])
+    }
+}
+
+@Suite("Renumber prefixed files stays as you set it")
+@MainActor
+struct StickyRenumberTests {
+    private func folder(_ names: [String]) -> URL {
+        let dir = temporaryFolder("sticky")
+        for name in names { writePDF(pages: 1, to: dir.appendingPathComponent(name)) }
+        return dir
+    }
+
+    @Test("Ticked, it stays ticked for the next folder, and after Clear")
+    func staysTicked() {
+        let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's setting
+        manager.customInstrumentOrder = ["flute", "clarinet", "trumpet"]
+        manager.loadFolder(url: folder(["01 - Flute.pdf", "02 - Clarinet 1.pdf"]))
+        manager.setRescanMode(true)
+        manager.loadFolder(url: folder(["01 - Flute.pdf", "02 - Trumpet 1.pdf"]))
+        #expect(manager.isRescanMode && !manager.renumberedAutomatically)
+        manager.clearFolder()
+        manager.loadFolder(url: folder(["01 - Clarinet 1.pdf"]))
+        #expect(manager.isRescanMode)
+    }
+
+    @Test("Unticked, a mixed folder still turns it on — for that folder only")
+    func automaticOnlyForThatFolder() {
+        let manager = RenamerManager()
+        manager.partFolderMode = .off   // not the user's setting
+        manager.customInstrumentOrder = ["flute", "clarinet", "trumpet"]
+        manager.loadFolder(url: folder(["01 - Flute.pdf", "Clarinet 1.pdf"]))
+        #expect(manager.isRescanMode && manager.renumberedAutomatically)
+        manager.loadFolder(url: folder(["01 - Flute.pdf", "02 - Clarinet 1.pdf"]))
+        #expect(!manager.isRescanMode)
+    }
+}

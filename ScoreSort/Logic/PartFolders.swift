@@ -240,6 +240,37 @@ func partFolderDestination(for url: URL, partName: String? = nil, mode: PartFold
                                                            mode: mode, ensemble: ensemble))
 }
 
+/// Every folder name "Sort into folders" makes, lowercased: each ensemble's sections and
+/// every instrument folder.
+let allPartFolderNames: Set<String> = Set(
+    ([EnsembleType.band, .jazz, .orchestra].flatMap(partFolderSections) + partFolderEntries.map(\.instrument))
+        .map { $0.lowercased() })
+
+/// A folder named like one "Sort into folders" makes (Woodwind, Saxophones, Trumpet…).
+func isPartFolderName(_ name: String) -> Bool {
+    allPartFolderNames.contains(name.lowercased())
+}
+
+/// The part folders directly inside `folder` that hold parts: a piece's Woodwind, Brass…
+func partSubfolders(of folder: URL) -> [URL] {
+    let items = (try? FileManager.default.contentsOfDirectory(
+        at: folder, includingPropertiesForKeys: [.isDirectoryKey], options: [.skipsHiddenFiles])) ?? []
+    return items.filter { urlIsDirectory($0) && isPartFolderName($0.lastPathComponent) }
+        .filter { !renamableFiles(in: $0, recursive: false).isEmpty }
+        .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+}
+
+/// The piece folder a part belongs to: the folder it's in — or, for a part in a part folder
+/// (Woodwind, Trumpet…) directly inside `root`, `root` itself. Sorting into folders and
+/// gathering parts back out both work from here. With no `root`, always the file's folder.
+func partPieceFolder(of url: URL, root: URL?) -> URL {
+    let parent = url.deletingLastPathComponent()
+    guard let root, isPartFolderName(parent.lastPathComponent),
+          parent.deletingLastPathComponent().resolvingSymlinksInPath().path == root.resolvingSymlinksInPath().path
+    else { return parent }
+    return root
+}
+
 /// `url` moved into `folder` beside it (nil: left where it is), without nesting a file
 /// already in a folder of that name.
 func partFolderDestination(for url: URL, folder: String?) -> URL {

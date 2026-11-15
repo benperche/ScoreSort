@@ -125,7 +125,7 @@ enum ScoreSortMCPServer {
                           Param(key: "exclude", option: "exclude", kind: .strings, description: "File names to leave alone."),
                           Param(key: "recursive", option: "recursive", kind: .boolean, description: "Include subfolders."),
                           Param(key: "rescan", option: "rescan", kind: .boolean, description: "Re-number files that already have numbers."),
-                          Param(key: "folders", option: "folders", kind: .string, description: "Also move each part into a folder beside it for its section (Woodwind, Brass…; jazz: Saxophones, Trumpets…) or instrument. Parts already numbered move too. Only when the person asks for folders.", choices: ["section", "instrument", "off"]),
+                          Param(key: "folders", option: "folders", kind: .string, description: "Also move each part into a folder beside it for its section (Woodwind, Brass…; jazz: Saxophones, Trumpets…) or instrument. Parts already numbered move too. A folder already sorted this way is numbered as one piece; \"off\" gathers its parts back out of those folders. Leave out unless the person asks about folders (then parts stay where they are).", choices: ["section", "instrument", "off"]),
                           Param(key: "folderChoices", option: "folder", kind: .pairs(key: "file", value: "folder", valueIsNumber: false),
                                 description: "With folders: put a file in another folder where the plan's guess is wrong (folder \"\" = top level)."),
                           Param(key: "apply", option: "apply", kind: .boolean, description: "Rename the files (otherwise only plan).")]),

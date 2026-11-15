@@ -85,6 +85,12 @@ class RenamerManager: ObservableObject {
     /// where ScoreSort's guess was wrong. Used while sorting into folders.
     @Published private(set) var folderOverrides: [String: String] = [:]
     @Published private(set) var isRescanMode = false
+    /// "Renumber prefixed files" as the person last set it. It stays for every folder after
+    /// (until ScoreSort quits); ScoreSort only ever adds to it, for a folder that needs it.
+    private var rescanChosen = false
+    /// The folder the files were loaded from, kept when more files are added: parts in its
+    /// Woodwind, Brass… folders belong to it, and with folders off are gathered back into it.
+    private var rootFolder: URL?
     /// "Renumber prefixed files" was turned on by ScoreSort, because the files mix numbered and
     /// unnumbered parts or a numbered file was given a number by hand
     /// (`scoreOrderNeedsRenumbering`); cleared when the person sets it.
@@ -113,6 +119,7 @@ class RenamerManager: ObservableObject {
     
     func loadFolder(url: URL) {
         self.folderURL = url
+        self.rootFolder = url
         self.directFiles = []
         self.manualOverrides = [:]
         self.folderOverrides = [:]
@@ -130,8 +137,8 @@ class RenamerManager: ObservableObject {
             isRescanMode = true
             renumberedAutomatically = true
         } else if reset {
-            isRescanMode = mixed
-            renumberedAutomatically = mixed
+            isRescanMode = rescanChosen || mixed
+            renumberedAutomatically = mixed && !rescanChosen
         }
     }
 
@@ -139,12 +146,13 @@ class RenamerManager: ObservableObject {
     private func currentFiles() -> [URL] {
         if !directFiles.isEmpty { return directFiles }
         guard let folderURL else { return [] }
-        return renamableFiles(in: folderURL, recursive: UserDefaults.standard.bool(forKey: "renamerSearchRecursively"))
+        return renamerJobFiles(in: folderURL, recursive: UserDefaults.standard.bool(forKey: "renamerSearchRecursively"))
     }
 
     /// Load individual files directly (no enclosing folder required). Accepts PDFs and images.
     func loadFiles(urls: [URL]) {
         self.folderURL = nil
+        self.rootFolder = nil
         self.directFiles = urls.filter(isRenamableFile)
             .sorted { $0.lastPathComponent < $1.lastPathComponent }
         self.manualOverrides = [:]
@@ -162,13 +170,9 @@ class RenamerManager: ObservableObject {
         let newPDFs = urls.filter(isRenamableFile)
         guard !newPDFs.isEmpty else { return }
 
-        if let folder = folderURL {
+        if folderURL != nil {
             // Expand folder mode → direct-files mode, then append new files.
-            let existing = (try? FileManager.default.contentsOfDirectory(
-                at: folder, includingPropertiesForKeys: nil,
-                options: [.skipsHiddenFiles, .skipsSubdirectoryDescendants]
-            ))?.filter(isRenamableFile)
-              .sorted { $0.lastPathComponent < $1.lastPathComponent } ?? []
+            let existing = currentFiles()
             folderURL = nil
             let existingSet = Set(existing.map { $0.standardizedFileURL })
             let toAdd = newPDFs.filter { !existingSet.contains($0.standardizedFileURL) }
@@ -211,11 +215,13 @@ class RenamerManager: ObservableObject {
         self.manualOverrides = [:]
         self.folderOverrides = [:]
         self.excludedNames = []
-        self.isRescanMode = false
+        self.rootFolder = nil
+        self.isRescanMode = rescanChosen
         self.renumberedAutomatically = false
     }
 
     func setRescanMode(_ enabled: Bool) {
+        rescanChosen = enabled
         isRescanMode = enabled
         renumberedAutomatically = false
         if enabled { manualOverrides = [:] }
@@ -282,8 +288,8 @@ class RenamerManager: ObservableObject {
         if !directFiles.isEmpty {
             pdfFiles = directFiles
         } else if let folderURL = folderURL {
-            pdfFiles = renamableFiles(in: folderURL,
-                                      recursive: UserDefaults.standard.bool(forKey: "renamerSearchRecursively"))
+            pdfFiles = renamerJobFiles(in: folderURL,
+                                       recursive: UserDefaults.standard.bool(forKey: "renamerSearchRecursively"))
         } else {
             return
         }
@@ -297,7 +303,8 @@ class RenamerManager: ObservableObject {
                                           excluded: excludedNames,
                                           folderMode: partFolderMode,
                                           ensemble: ensembleType,
-                                          folderOverrides: folderOverrides)
+                                          folderOverrides: folderOverrides,
+                                          root: rootFolder)
     }
 
     func detectInstrument(in filename: String) -> (Int, String)? {
@@ -747,11 +754,15 @@ struct RenameOperation: Identifiable {
     let type: RenameOperationType
     var statusOverride: String?
     var oldPrefix: String?
-    /// The section or instrument folder it moves into ("Sort into folders"); nil when it stays put.
+    /// The section or instrument folder it ends up in ("Sort into folders"); nil when it's in
+    /// the piece's own folder.
     var folder: String?
+    /// The section or instrument folder it moves out of, when it does.
+    var fromFolder: String?
 
     init(originalURL: URL, originalName: String, newName: String, newURL: URL? = nil,
-         type: RenameOperationType, statusOverride: String? = nil, oldPrefix: String? = nil, folder: String? = nil) {
+         type: RenameOperationType, statusOverride: String? = nil, oldPrefix: String? = nil, folder: String? = nil,
+         fromFolder: String? = nil) {
         self.id = originalURL.standardizedFileURL.path
         self.originalURL = originalURL
         self.originalName = originalName
@@ -761,12 +772,15 @@ struct RenameOperation: Identifiable {
         self.statusOverride = statusOverride
         self.oldPrefix = oldPrefix
         self.folder = folder
+        self.fromFolder = fromFolder
     }
 
-    /// The new name as shown, with its folder: "Woodwind/01 - Flute.pdf".
+    /// The new name as shown, with its folder: "Woodwind/01 - Flute.pdf", or
+    /// "01 - Flute.pdf (out of Woodwind)" for a part gathered back into the piece's folder.
     var newPathForDisplay: String {
-        guard let folder else { return newName }
-        return "\(folder)/\(newName)"
+        if let folder { return "\(folder)/\(newName)" }
+        if let fromFolder { return "\(newName) (out of \(fromFolder))" }
+        return newName
     }
     
     var statusText: String {
