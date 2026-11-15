@@ -74,24 +74,26 @@ extension ScoreSortCLI {
 
     // MARK: - Shared lookups
 
-    /// The files to work with: each path as given, or a folder's PDFs and images in name
-    /// order (so score-ordered names come out in score order). `excluding` drops a previous
-    /// output sitting in the same folder.
+    /// The files to work with: each path as given, or a folder's PDFs and images — subfolders
+    /// included, in file-name order, exactly as a folder dropped on the Combine tab
+    /// (`expandToFiles`). Subfolders matter: parts sorted into section folders ("Woodwind/01 -
+    /// Flute 1.pdf") still sort into score order by name. `excluding` drops a previous output
+    /// sitting in the same folder.
     static func collectPartFiles(_ paths: [String], excluding: URL? = nil) throws -> [URL] {
         var files: [URL] = []
         for path in paths {
             let url = URL(fileURLWithPath: (path as NSString).expandingTildeInPath).standardizedFileURL
             if urlIsDirectory(url) {
-                files += ((try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: nil,
-                                                                         options: [.skipsHiddenFiles])) ?? [])
-                    .filter { pageableFileExtensions.contains($0.pathExtension.lowercased()) }
-                    .sorted { $0.lastPathComponent.localizedStandardCompare($1.lastPathComponent) == .orderedAscending }
+                files += expandToFiles([url], extensions: pageableFileExtensions)
             } else {
                 guard FileManager.default.fileExists(atPath: url.path) else { throw CommandError("No file at \(url.path).") }
                 files.append(url)
             }
         }
-        if let excluding { files.removeAll { $0 == excluding } }
+        if let excluding {
+            let skip = excluding.resolvingSymlinksInPath().path
+            files.removeAll { $0.resolvingSymlinksInPath().path == skip }
+        }
         guard !files.isEmpty else { throw CommandError("No PDFs or images there.") }
         return files
     }
@@ -299,7 +301,7 @@ extension ScoreSortCLI {
             run: { args in
                 guard !args.positionals.isEmpty else { throw CommandError("Give the folder of parts (or the files).") }
                 return try runAllocate(paths: args.positionals, preset: args.required("preset"),
-                                       allocations: args.all("allocate").map(AllocationChoice.init),
+                                       allocations: args.all("allocate").map { try AllocationChoice($0) },
                                        copies: args.all("copies"))
             })
     }

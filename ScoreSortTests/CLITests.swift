@@ -462,6 +462,26 @@ struct CLICombineTests {
         #expect(bookmarkSections(in: doc)?.count == 4)
     }
 
+    @Test("Parts sorted into section folders are still found, in score order, like a folder dropped on Combine")
+    func combineSectionFolders() throws {
+        let dir = temporaryFolder("sections")
+        for name in ["00 - Score.pdf", "Woodwind/01 - Flute.pdf", "Brass/02 - Trumpet.pdf"] {
+            let url = dir.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            writeDrawnPDF(pages: 2, to: url)
+        }
+        let out = dir.appendingPathComponent("All.pdf")
+        let result = try ScoreSortCLI.runCombine(paths: [dir.path], out: out.path, preset: nil, copies: [],
+                                                 options: CombineOutputOptions(), stamp: nil, stampScope: .everyPage,
+                                                 dryRun: false, overwrite: false)
+        #expect(result.exitCode == 0)
+        let doc = try #require(PDFDocument(url: out))
+        #expect(doc.pageCount == 6)
+        #expect(bookmarkSections(in: doc)?.count == 3)
+        #expect(try ScoreSortCLI.collectPartFiles([dir.path], excluding: out).map(\.lastPathComponent)
+                == ["00 - Score.pdf", "01 - Flute.pdf", "02 - Trumpet.pdf"])
+    }
+
     @Test("A dry run writes nothing; an existing output needs --overwrite")
     func safety() throws {
         let dir = parts(["Flute.pdf"])

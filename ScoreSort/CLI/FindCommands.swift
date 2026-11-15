@@ -97,7 +97,7 @@ extension ScoreSortCLI {
     static func runFind(words: [String], folders: [String], kind: String, limit: Int,
                         shared: [URL]? = nil, timeLimit: TimeInterval = 4) throws -> CommandResult {
         guard (1...200).contains(limit) else { throw CommandError("--limit is between 1 and 200.") }
-        let query = words.flatMap(searchWords)
+        let query = words.flatMap { searchWords($0) }
         let sharedFolders = (shared ?? AIConnection.sharedFolders).filter(urlIsDirectory)
         if folders.isEmpty && sharedFolders.isEmpty {
             return CommandResult(

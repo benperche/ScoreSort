@@ -210,7 +210,7 @@ extension ScoreSortCLI {
                 options.addBlankPages = args.has("blank-pages")
                 return try runCombine(paths: args.positionals, out: args.required("out"),
                                       preset: args.value("preset"), copies: args.all("copies"),
-                                      allocations: args.all("allocate").map(AllocationChoice.init),
+                                      allocations: args.all("allocate").map { try AllocationChoice($0) },
                                       options: options, stamp: args.value("stamp"),
                                       stampScope: parseStampScope(args.value("stamp-scope"), default: .firstPageOfEachPart),
                                       dryRun: args.has("dry-run"), overwrite: args.has("overwrite"))
