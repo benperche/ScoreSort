@@ -128,28 +128,15 @@ struct ScoreOrderSortView: View {
 
     /// Folders offered: the ensemble's sections (By Section), then any folder already in use.
     private var folderChoices: [String] {
-        var choices = renamerManager.partFolderMode == .section
-            ? partFolderSections(for: renamerManager.ensembleType) : []
-        for folder in folderGroups.map(\.folder) + renamerManager.folderOverrides.values.sorted()
-        where !folder.isEmpty && !choices.contains(where: { $0.caseInsensitiveCompare(folder) == .orderedSame }) {
-            choices.append(folder)
-        }
-        return choices
+        partFolderChoices(mode: renamerManager.partFolderMode, ensemble: renamerManager.ensembleType,
+                          inUse: folderGroups.map(\.folder) + renamerManager.folderOverrides.values.sorted())
     }
 
     /// The menu items that move `names` (the selection, or a right-clicked file).
-    @ViewBuilder private func moveToFolderItems(_ names: @escaping () -> Set<String>) -> some View {
-        ForEach(folderChoices, id: \.self) { folder in
-            Button(folder) { renamerManager.setFolder(folder, for: names()) }
-        }
-        Divider()
-        Button("New Folder\u{2026}") {
-            if let folder = askForPartFolderName() { renamerManager.setFolder(folder, for: names()) }
-        }
-        Button("Top Level (No Folder)") { renamerManager.setFolder("", for: names()) }
-        Divider()
-        Button("ScoreSort\u{2019}s Choice") { renamerManager.setFolder(nil, for: names()) }
-            .disabled(names().allSatisfy { renamerManager.folderOverrides[$0] == nil })
+    private func moveToFolderItems(_ names: @escaping () -> Set<String>) -> some View {
+        PartFolderMenuItems(choices: folderChoices,
+                            canRestore: names().contains { renamerManager.folderOverrides[$0] != nil },
+                            choose: { renamerManager.setFolder($0, for: names()) })
     }
 
     // ── Drag between folders ──────────────────────────────────────────────
@@ -181,12 +168,8 @@ struct ScoreOrderSortView: View {
     }
 
     private func folderDragPreview(for operation: RenameOperation) -> some View {
-        let count = selectedIDs.contains(operation.id) ? movableSelection.count : 1
-        let name = operation.newName.isEmpty ? operation.originalName : operation.newName
-        return Label(count > 1 ? "\(count) parts" : name, systemImage: count > 1 ? "doc.on.doc" : "doc")
-            .lineLimit(1)
-            .padding(6)
-            .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+        partFolderDragPreview(name: operation.newName.isEmpty ? operation.originalName : operation.newName,
+                              count: selectedIDs.contains(operation.id) ? movableSelection.count : 1)
     }
 
     private func handleSelect(_ operation: RenameOperation, command: Bool, shift: Bool) {
@@ -1313,6 +1296,10 @@ struct BulkRenameView: View {
                 stepLabel: "Step 2",
                 initialItems: prefixItems,
                 ensembleType: $prefixEnsembleType,
+                folderSorting: PrefixFolderSorting(mode: $partFolderMode) { id, mode, ensemble in
+                    let proposed = prefixItems.first { $0.id == id }?.proposedName ?? ""
+                    return partFolderName(partName: suffixes[id] ?? "", fileName: proposed, mode: mode, ensemble: ensemble)
+                },
                 onBack: { bulkStage = .base },
                 onApply: { orderedItems in applyPrefixAndRenameBulk(orderedItems: orderedItems) }
             )
@@ -1496,8 +1483,11 @@ struct BulkRenameView: View {
                 }
                 HStack {
                     Spacer()
-                    PartFolderPicker(mode: $partFolderMode)
-                        .padding(.trailing, 8)
+                    // With the prefix step, the folders are chosen (and shown) there.
+                    if !prefixEnabled {
+                        PartFolderPicker(mode: $partFolderMode)
+                            .padding(.trailing, 8)
+                    }
                     Button(action: executeRename) {
                         Label(prefixEnabled
                               ? "Next: Prefix Order"
@@ -1726,10 +1716,10 @@ struct BulkRenameView: View {
             guard let number = numbers[item.id] else { continue }  // skipped → leave unrenamed
             let prefix = String(format: "%02d", number)
             let finalName = "\(prefix)\(sep)\(item.proposedName)"
+            // The folder Step 2 showed, including any chosen there.
             let targetURL = partFolderDestination(
                 for: originalURL.deletingLastPathComponent().appendingPathComponent(finalName),
-                partName: suffixes[item.id] ?? "",
-                mode: partFolderMode, ensemble: prefixEnsembleType)
+                folder: item.folder)
             let shownName = sortedName(finalName, from: originalURL, to: targetURL)
             try? FileManager.default.createDirectory(at: targetURL.deletingLastPathComponent(),
                                                      withIntermediateDirectories: true)
@@ -1773,25 +1763,6 @@ struct BulkRenameView: View {
                 message: message,
                 isError: true
             )
-        }
-    }
-}
-
-/// Makes a Score Order Sorter row draggable to another folder, and a place to drop parts
-/// into its folder — only while sorting into folders (`payload` nil otherwise).
-private struct PartFolderDragDrop<Preview: View>: ViewModifier {
-    let payload: String?
-    let preview: () -> Preview
-    let onDrop: ([String]) -> Bool
-    let onTargeted: (Bool) -> Void
-
-    func body(content: Content) -> some View {
-        if let payload {
-            content
-                .draggable(payload) { preview() }
-                .dropDestination(for: String.self) { items, _ in onDrop(items) } isTargeted: { onTargeted($0) }
-        } else {
-            content
         }
     }
 }

@@ -50,6 +50,23 @@ struct ViewSmokeTests {
         render(SplitView())
     }
 
+    @Test("Split Step 3 renders, sorting into folders and not")
+    func prefixStepWithFolders() {
+        let items = ["Score.pdf", "Flute 1.pdf", "Trumpet 1.pdf", "Snare Drum.pdf", "Notes.pdf"].enumerated()
+            .map { PrefixItem(id: $0.offset, proposedName: $0.element, page: nil) }
+        for mode in [PartFolderMode.section, .off] {
+            render(PrefixOrderStepView(
+                toolTitle: "Split PDF", stepLabel: "Step 3", initialItems: items,
+                ensembleType: .constant(.band),
+                folderSorting: PrefixFolderSorting(mode: .constant(mode)) { id, mode, ensemble in
+                    partFolderName(forFileName: items[id].proposedName, mode: mode, ensemble: ensemble)
+                },
+                onBack: {}, onApply: { _ in }))
+        }
+        render(PrefixOrderStepView(toolTitle: "Bulk Part Rename", stepLabel: "Step 2", initialItems: items,
+                                   ensembleType: .constant(.band), onBack: {}, onApply: { _ in }))
+    }
+
     @Test("Bookmark split sheet renders")
     func bookmarkSplitSheet() {
         let offer = BookmarkOffer(sections: [BookmarkSection(startPage: 0, pageCount: 4, title: "Score"),

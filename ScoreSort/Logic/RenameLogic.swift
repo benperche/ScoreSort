@@ -105,6 +105,9 @@ struct PrefixItem: Identifiable {
     var manualNumber: Int? = nil
     /// Excluded from output and from numbering.
     var isSkipped: Bool = false
+    /// The folder it's saved into while sorting into folders (Split's Step 3 sets this when
+    /// it hands the items back); nil = beside the others.
+    var folder: String? = nil
 }
 
 /// Items sorted into score order, as Step 3 (and the command line's `--score-order`) shows

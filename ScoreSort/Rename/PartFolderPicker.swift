@@ -91,3 +91,65 @@ func askForPartFolderName() -> String? {
     }
     return nil
 }
+
+/// The folders Move to Folder offers: the ensemble's sections (By Section), then any other
+/// folder already in use.
+func partFolderChoices(mode: PartFolderMode, ensemble: EnsembleType, inUse: [String]) -> [String] {
+    var choices = mode == .section ? partFolderSections(for: ensemble) : []
+    for folder in inUse
+    where !folder.isEmpty && !choices.contains(where: { $0.caseInsensitiveCompare(folder) == .orderedSame }) {
+        choices.append(folder)
+    }
+    return choices
+}
+
+/// Move to Folder's items (a menu or a right-click): the folders, New Folder…, Top Level, and
+/// ScoreSort's Choice. `choose` gets the folder — "" for the top level, nil to go back to
+/// ScoreSort's guess. Used by the Score Order Sorter and Split's Step 3.
+struct PartFolderMenuItems: View {
+    let choices: [String]
+    /// Some of the files were put in a folder by hand, so ScoreSort's Choice can undo it.
+    let canRestore: Bool
+    let choose: (String?) -> Void
+
+    var body: some View {
+        ForEach(choices, id: \.self) { folder in
+            Button(folder) { choose(folder) }
+        }
+        Divider()
+        Button("New Folder\u{2026}") {
+            if let folder = askForPartFolderName() { choose(folder) }
+        }
+        Button("Top Level (No Folder)") { choose("") }
+        Divider()
+        Button("ScoreSort\u{2019}s Choice") { choose(nil) }
+            .disabled(!canRestore)
+    }
+}
+
+/// What a part being dragged to another folder looks like: its name, or "N parts".
+func partFolderDragPreview(name: String, count: Int) -> some View {
+    Label(count > 1 ? "\(count) parts" : name, systemImage: count > 1 ? "doc.on.doc" : "doc")
+        .lineLimit(1)
+        .padding(6)
+        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 6))
+}
+
+/// Makes a row draggable to another folder, and a place to drop parts into its folder —
+/// only while sorting into folders (`payload` nil otherwise).
+struct PartFolderDragDrop<Preview: View>: ViewModifier {
+    let payload: String?
+    let preview: () -> Preview
+    let onDrop: ([String]) -> Bool
+    let onTargeted: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        if let payload {
+            content
+                .draggable(payload) { preview() }
+                .dropDestination(for: String.self) { items, _ in onDrop(items) } isTargeted: { onTargeted($0) }
+        } else {
+            content
+        }
+    }
+}

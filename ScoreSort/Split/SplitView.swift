@@ -219,6 +219,9 @@ struct SplitView: View {
                     stepLabel: "Step 3",
                     initialItems: prefixItems,
                     ensembleType: $prefixEnsembleType,
+                    folderSorting: PrefixFolderSorting(mode: $partFolderMode) { id, mode, ensemble in
+                        defaultPartFolder(forFile: id, mode: mode, ensemble: ensemble)
+                    },
                     onBack: { splitStage = .naming },
                     onApply: { orderedItems in
                         applyPrefixAndSaveSplit(orderedItems: orderedItems)
@@ -1370,16 +1373,20 @@ struct SplitView: View {
         // what was just moved down one slot.
     }
 
-    /// Each file's folder under "Sort into folders" (none when it's off), from its Step 2 part
-    /// name — or, for a single file kept under its own name, the whole name.
+    /// The folder "Sort into folders" puts file `i` in (none when it's off), from its Step 2
+    /// part name — or, for a single file kept under its own name, the whole name.
+    private func defaultPartFolder(forFile i: Int, mode: PartFolderMode, ensemble: EnsembleType) -> String? {
+        let suffix = customFileNames[i] ?? ""
+        let fileName = splitOutputFileName(base: baseFileName, separator: filenameSeparator, suffix: suffix,
+                                           fileIndex: i, onlyFile: activeFileCount == 1)
+        return partFolderName(partName: suffix, fileName: fileName, mode: mode, ensemble: ensemble)
+    }
+
+    /// Each file's folder when saving straight from Step 2 (no prefix step).
     private func splitPartFolders() -> [Int: String] {
         var folders: [Int: String] = [:]
         for i in 0..<fileSizes.count {
-            let suffix = customFileNames[i] ?? ""
-            let fileName = splitOutputFileName(base: baseFileName, separator: filenameSeparator, suffix: suffix,
-                                               fileIndex: i, onlyFile: activeFileCount == 1)
-            folders[i] = partFolderName(partName: suffix, fileName: fileName,
-                                        mode: partFolderMode, ensemble: prefixEnsembleType)
+            folders[i] = defaultPartFolder(forFile: i, mode: partFolderMode, ensemble: prefixEnsembleType)
         }
         return folders
     }
@@ -1394,7 +1401,9 @@ struct SplitView: View {
         var finalCustomNames: [Int: String] = [:]
         var finalNamesForSummary: [String] = []
         var omittedPages = skippedPages   // Step-1 skips, plus any Step-3 skips below
-        let folders = splitPartFolders()
+        // The folders as Step 3 showed them, including any the user chose there.
+        var folders: [Int: String] = [:]
+        for item in orderedItems { folders[item.id] = item.folder }
 
         for item in orderedItems {
             guard let fullName = fullNames[item.id] else {

@@ -109,6 +109,13 @@ private struct PrefixOrderRow: View {
     }
 }
 
+/// "Sort into folders" in the prefix step: the remembered menu setting, and the folder
+/// ScoreSort picks for a file (by item id) in a mode and ensemble.
+struct PrefixFolderSorting {
+    let mode: Binding<PartFolderMode>
+    let defaultFolder: (_ id: Int, _ mode: PartFolderMode, _ ensemble: EnsembleType) -> String?
+}
+
 /// Full-screen step that lets the user set and reorder prefix numbering.
 /// Used as Step 3 (Splitter) or Step 2 (Bulk Rename).
 struct PrefixOrderStepView: View {
@@ -118,9 +125,16 @@ struct PrefixOrderStepView: View {
     let initialItems: [PrefixItem]
     @Binding var ensembleType: EnsembleType
     let onBack: () -> Void
-    let onApply: ([PrefixItem]) -> Void  // reordered list; caller handles save
+    let onApply: ([PrefixItem]) -> Void  // reordered list (each with its folder); caller handles save
+    /// "Sort into folders", where the tool offers it (Split): the menu shown here, and the
+    /// folder ScoreSort picks for a file. Nil hides folders altogether (Bulk Rename).
+    let folderSorting: PrefixFolderSorting?
 
     @State private var items: [PrefixItem]
+    /// Folders chosen by hand (drag, or Move to Folder), item id → folder ("" = top level).
+    @State private var folderOverrides: [Int: String] = [:]
+    /// The folder parts are being dragged over ("" = top level), for its highlight.
+    @State private var folderDropTarget: String? = nil
     /// IDs of items whose proposed name couldn't be matched to the current instrument order.
     @State private var unmatchedIds: Set<Int>
     /// The item whose prefix badge was double-clicked (drives the edit popover).
@@ -133,12 +147,14 @@ struct PrefixOrderStepView: View {
          stepLabel: String,
          initialItems: [PrefixItem],
          ensembleType: Binding<EnsembleType>,
+         folderSorting: PrefixFolderSorting? = nil,
          onBack: @escaping () -> Void,
          onApply: @escaping ([PrefixItem]) -> Void) {
         self.toolTitle = toolTitle
         self.stepLabel = stepLabel
         self.initialItems = initialItems
         self._ensembleType = ensembleType
+        self.folderSorting = folderSorting
         self.onBack = onBack
         self.onApply = onApply
         let order = InstrumentOrders.getOrder(for: ensembleType.wrappedValue)
@@ -188,6 +204,128 @@ struct PrefixOrderStepView: View {
             let moved = items.remove(at: from)
             let insertAt = (items.lastIndex { !unmatchedIds.contains($0.id) }).map { $0 + 1 } ?? 0
             items.insert(moved, at: insertAt)
+        }
+    }
+
+    // MARK: Sort into folders
+
+    private var isSortingIntoFolders: Bool { (folderSorting?.mode.wrappedValue ?? .off) != .off }
+
+    /// The folder `item` is saved into: one chosen by hand, else ScoreSort's guess; nil when
+    /// not sorting into folders, or for the top level.
+    private func folder(for item: PrefixItem) -> String? {
+        guard let sorting = folderSorting, sorting.mode.wrappedValue != .off else { return nil }
+        if let chosen = folderOverrides[item.id] { return chosen.isEmpty ? nil : chosen }
+        return sorting.defaultFolder(item.id, sorting.mode.wrappedValue, ensembleType)
+    }
+
+    /// The name as saved, with its folder: "Brass/05 - Trumpet 1.pdf".
+    private func finalPath(for item: PrefixItem) -> String {
+        partFolderPath(prefixedName(for: item), folder: folder(for: item))
+    }
+
+    /// The items with the folder each is saved into, for `onApply`.
+    private var itemsWithFolders: [PrefixItem] {
+        items.map { item in
+            var item = item
+            item.folder = folder(for: item)
+            return item
+        }
+    }
+
+    /// The recognised files grouped by folder ("" = top level), groups in the order their
+    /// first file comes (score order); one group when not sorting into folders.
+    private func folderGroups(_ matched: [PrefixItem]) -> [(folder: String, items: [PrefixItem])] {
+        guard isSortingIntoFolders else { return [("", matched)] }
+        var order: [String] = []
+        var groups: [String: [PrefixItem]] = [:]
+        for item in matched {
+            let folder = folder(for: item) ?? ""
+            if groups[folder] == nil { order.append(folder) }
+            groups[folder, default: []].append(item)
+        }
+        return order.map { ($0, groups[$0]!) }
+    }
+
+    private func setFolder(_ folder: String?, for id: Int) {
+        withAnimation { folderOverrides[id] = folder }
+    }
+
+    /// The folders Move to Folder offers.
+    private var folderChoices: [String] {
+        partFolderChoices(mode: folderSorting?.mode.wrappedValue ?? .off, ensemble: ensembleType,
+                          inUse: items.compactMap { folder(for: $0) } + folderOverrides.values.sorted())
+    }
+
+    /// Marks a drag as a Step 3 part (so text dragged in from elsewhere is ignored).
+    private static let folderDragPrefix = "scoresort-prefix-part:"
+
+    /// Moves dragged parts into `folder` ("" = top level).
+    private func handleFolderDrop(_ payloads: [String], into folder: String) -> Bool {
+        folderDropTarget = nil
+        let ids = payloads.filter { $0.hasPrefix(Self.folderDragPrefix) }
+            .compactMap { Int($0.dropFirst(Self.folderDragPrefix.count)) }
+            .filter { id in items.contains { $0.id == id } }
+        let moving = ids.filter { id in (items.first { $0.id == id }.flatMap { self.folder(for: $0) } ?? "") != folder }
+        guard !moving.isEmpty else { return false }
+        withAnimation { for id in moving { folderOverrides[id] = folder } }
+        return true
+    }
+
+    private func setFolderDropTarget(_ folder: String, _ targeted: Bool) {
+        if targeted { folderDropTarget = folder } else if folderDropTarget == folder { folderDropTarget = nil }
+    }
+
+    /// Swaps `item` with its neighbour in `peers` (the rows shown with it), `offset` -1 or +1.
+    private func moveAction(_ item: PrefixItem, in peers: [PrefixItem], by offset: Int) -> (() -> Void)? {
+        guard let index = peers.firstIndex(where: { $0.id == item.id }),
+              peers.indices.contains(index + offset) else { return nil }
+        let other = peers[index + offset].id
+        return {
+            guard let a = items.firstIndex(where: { $0.id == item.id }),
+                  let b = items.firstIndex(where: { $0.id == other }) else { return }
+            items.swapAt(a, b)
+        }
+    }
+
+    private func startPrefixEdit(_ item: PrefixItem) {
+        prefixEditTarget = item
+        prefixEditDraft = item.manualNumber.map(String.init) ?? "\(numbers[item.id] ?? 1)"
+    }
+
+    /// One recognised file's row, with its folder's spine, drag and right-click menu while
+    /// sorting into folders.
+    @ViewBuilder private func matchedRow(_ item: PrefixItem, peers: [PrefixItem], folder: String) -> some View {
+        PrefixOrderRow(
+            item: item,
+            prefixText: prefixText(for: item),
+            finalName: finalPath(for: item),
+            isManual: item.manualNumber != nil,
+            onMoveUp: moveAction(item, in: peers, by: -1),
+            onMoveDown: moveAction(item, in: peers, by: 1),
+            onToggleSkip: { toggleSkip(item) },
+            onEditPrefix: { startPrefixEdit(item) }
+        )
+        .overlay(alignment: .leading) {
+            if isSortingIntoFolders && !folder.isEmpty {
+                Rectangle().fill(Color.partFolder.opacity(0.55)).frame(width: 3)
+            }
+        }
+        .overlay {
+            if isSortingIntoFolders && folderDropTarget == folder {
+                Rectangle().fill(Color.accentColor.opacity(0.15)).allowsHitTesting(false)
+            }
+        }
+        .modifier(PartFolderDragDrop(
+            payload: isSortingIntoFolders ? Self.folderDragPrefix + String(item.id) : nil,
+            preview: { partFolderDragPreview(name: prefixedName(for: item), count: 1) },
+            onDrop: { handleFolderDrop($0, into: folder) },
+            onTargeted: { setFolderDropTarget(folder, $0) }))
+        .contextMenu {
+            if isSortingIntoFolders {
+                PartFolderMenuItems(choices: folderChoices, canRestore: folderOverrides[item.id] != nil,
+                                    choose: { setFolder($0, for: item.id) })
+            }
         }
     }
 
@@ -252,20 +390,22 @@ struct PrefixOrderStepView: View {
                     let unmatchedItems = items.filter {  unmatchedIds.contains($0.id) }
 
                     // ── Matched section (score + auto-detected instruments) ──
-                    ForEach(matchedItems, id: \.id) { item in
-                        let position   = items.firstIndex(where: { $0.id == item.id })!
-                        let sectionIdx = matchedItems.firstIndex(where: { $0.id == item.id })!
-                        PrefixOrderRow(
-                            item: item,
-                            prefixText: prefixText(for: item),
-                            finalName: prefixedName(for: item),
-                            isManual: item.manualNumber != nil,
-                            onMoveUp:   sectionIdx > 0                      ? { items.swapAt(position, position - 1) } : nil,
-                            onMoveDown: sectionIdx < matchedItems.count - 1 ? { items.swapAt(position, position + 1) } : nil,
-                            onToggleSkip: { toggleSkip(item) },
-                            onEditPrefix: { prefixEditTarget = item; prefixEditDraft = item.manualNumber.map(String.init) ?? "\(numbers[item.id] ?? 1)" }
-                        )
-                        if item.id != matchedItems.last?.id { Divider() }
+                    // While sorting into folders, each folder's files sit under its header;
+                    // the arrows move a file within its folder.
+                    let groups = folderGroups(matchedItems)
+                    ForEach(groups, id: \.folder) { group in
+                        if isSortingIntoFolders {
+                            PartFolderGroupHeader(folder: group.folder, fileCount: group.items.count,
+                                                  isChosenByHand: group.items.contains { folderOverrides[$0.id] != nil },
+                                                  isDropTarget: folderDropTarget == group.folder)
+                                .dropDestination(for: String.self) { payloads, _ in
+                                    handleFolderDrop(payloads, into: group.folder)
+                                } isTargeted: { setFolderDropTarget(group.folder, $0) }
+                        }
+                        ForEach(group.items, id: \.id) { item in
+                            matchedRow(item, peers: group.items, folder: group.folder)
+                            if item.id != group.items.last?.id { Divider() }
+                        }
                     }
 
                     // ── Unmatched section (instrument not recognised) ──────
@@ -290,14 +430,14 @@ struct PrefixOrderStepView: View {
                             PrefixOrderRow(
                                 item: item,
                                 prefixText: prefixText(for: item),
-                                finalName: prefixedName(for: item),
+                                finalName: finalPath(for: item),
                                 isManual: item.manualNumber != nil,
                                 // Top unmatched row's up-arrow promotes it into the matched section.
                                 onMoveUp:   sectionIdx > 0                        ? { items.swapAt(position, position - 1) } : { promoteToMatched(item) },
                                 onMoveDown: sectionIdx < unmatchedItems.count - 1 ? { items.swapAt(position, position + 1) } : nil,
                                 isUnmatched: true,
                                 onToggleSkip: { toggleSkip(item) },
-                                onEditPrefix: { prefixEditTarget = item; prefixEditDraft = item.manualNumber.map(String.init) ?? "\(numbers[item.id] ?? 1)" }
+                                onEditPrefix: { startPrefixEdit(item) }
                             )
                             if item.id != unmatchedItems.last?.id { Divider() }
                         }
@@ -317,7 +457,12 @@ struct PrefixOrderStepView: View {
 
                 Spacer()
 
-                Button { onApply(items) } label: {
+                if let sorting = folderSorting {
+                    PartFolderPicker(mode: sorting.mode)
+                        .padding(.trailing, 8)
+                }
+
+                Button { onApply(itemsWithFolders) } label: {
                     Label("Apply & Save", systemImage: "checkmark.circle.fill")
                 }
                 .buttonStyle(.borderedProminent)

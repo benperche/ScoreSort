@@ -452,8 +452,11 @@ struct SplitNamingStageView: View {
 
                     Spacer()
 
-                    PartFolderPicker(mode: $partFolderMode)
-                        .padding(.trailing, 8)
+                    // With the prefix step, the folders are chosen (and shown) there.
+                    if !prefixEnabled {
+                        PartFolderPicker(mode: $partFolderMode)
+                            .padding(.trailing, 8)
+                    }
 
                     Button(action: onSave) {
                         Label(prefixEnabled ? "Next: Prefix Order" : "Save Split Files",
