@@ -2290,34 +2290,28 @@ class EnsemblePresetStore: ObservableObject {
         presets.first { $0.id == selectedPresetId }
     }
 
-    private var storeURL: URL? {
-        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        else { return nil }
-        let folder = dir.appendingPathComponent("ScoreSort", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appendingPathComponent("ensemble-presets.json")
-    }
+    /// Anything the user should be told about the presets file — it couldn't be read and was
+    /// set aside, or a save failed. Shown by `SavedFileNoticeBanner`; never an alert from here.
+    @Published var notices: [SavedFileNotice] = []
 
-    init() {
-        load()
-        if selectedPresetId == nil { selectedPresetId = presets.first?.id }
+    /// `ensemble-presets.json` in the app's Application Support folder.
+    static var defaultFileURL: URL? { scoreSortSupportFile("ensemble-presets.json") }
+
+    /// Loading and saving go through `SavedListFile` (Logic/SavedListFile.swift), which sets
+    /// an unreadable file aside before anything can save over it.
+    private var file: SavedListFile<EnsemblePreset>
+
+    /// `fileURL` is injectable so tests use a temporary folder; `nil` keeps presets in memory only.
+    init(fileURL: URL? = EnsemblePresetStore.defaultFileURL) {
+        file = SavedListFile(url: fileURL, kind: .presets)
+        let loaded = file.load()
+        presets = loaded.entries
+        notices = loaded.notices
+        selectedPresetId = presets.first?.id
     }
 
     func save() {
-        guard let url = storeURL else { return }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .prettyPrinted
-        guard let data = try? encoder.encode(presets) else { return }
-        try? data.write(to: url, options: .atomic)
-    }
-
-    private func load() {
-        guard let url = storeURL,
-              let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode([EnsemblePreset].self, from: data)
-        else { return }
-        presets = decoded
-        selectedPresetId = presets.first?.id
+        if let failure = file.save(presets) { notices.append(failure) }
     }
 
     func addPreset(name: String, parts: [PresetPart]) {

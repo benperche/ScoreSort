@@ -494,9 +494,9 @@ extension ScoreSortCLI {
     /// The stamp designs saved in the app (stamps.json) — not the placeholder the app shows
     /// when there are none.
     static func savedStamps() -> [Stamp] {
-        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
-              let data = try? Data(contentsOf: dir.appendingPathComponent("ScoreSort/stamps.json")),
-              let stamps = try? JSONDecoder().decode([Stamp].self, from: data) else { return [] }
+        // Read-only, and entry by entry: one stamp this version can't decode doesn't hide the rest.
+        guard let url = StampStore.defaultFileURL,
+              case .loaded(let stamps, _) = readSavedList(Stamp.self, at: url) else { return [] }
         return stamps
     }
 }

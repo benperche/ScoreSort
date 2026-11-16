@@ -133,9 +133,9 @@ extension ScoreSortCLI {
     }
 
     static func savedPresets() -> [EnsemblePreset] {
-        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first,
-              let data = try? Data(contentsOf: dir.appendingPathComponent("ScoreSort/ensemble-presets.json")),
-              let presets = try? JSONDecoder().decode([EnsemblePreset].self, from: data) else { return [] }
+        // Read-only, and entry by entry: one preset this version can't decode doesn't hide the rest.
+        guard let url = EnsemblePresetStore.defaultFileURL,
+              case .loaded(let presets, _) = readSavedList(EnsemblePreset.self, at: url) else { return [] }
         return presets
     }
 

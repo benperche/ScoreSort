@@ -418,30 +418,64 @@ struct InstrumentOrders {
     // MARK: - Setup (call once at launch from AppDelegate)
     static func setup() {
         guard let url = fileURL else { return }
+        if let notice = prepareFile(at: url) {
+            launchNotice = notice
+            NotificationCenter.default.post(name: launchNoticeChanged, object: nil)
+        }
+        load(from: url)
+    }
 
+    /// Set by `setup()` when the file on disk couldn't be read and was set aside. Shown once by
+    /// `SavedFileNoticeBar`, which clears it when dismissed.
+    static var launchNotice: SavedFileNotice?
+    static let launchNoticeChanged = Notification.Name("InstrumentOrdersLaunchNoticeChanged")
+
+    /// Makes sure a current instrument-orders file is at `url`, without touching the loaded
+    /// orders (so tests can call it on a temporary file).
+    ///
+    /// - Missing: the defaults are written.
+    /// - Readable but written by an older version (or with no `_version`): **regenerated on
+    ///   purpose**, so new built-in orders reach existing users.
+    /// - There but unreadable, typically a hand edit that broke the JSON: moved aside under
+    ///   a dated name *before* the defaults are written, so the user's edits survive. This case
+    ///   used to be overwritten silently. Returns a notice saying where the file went.
+    static func prepareFile(at url: URL, today: Date = Date()) -> SavedFileNotice? {
         // Create the Application Support directory if needed
         let dir = url.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
 
-        // Rewrite defaults if the file is missing OR was built with an older version.
-        // _version is stored as ["2"] so the file stays as [String: [String]].
-        let needsRewrite: Bool
-        if FileManager.default.fileExists(atPath: url.path),
-           let data = try? Data(contentsOf: url),
-           let dict = try? JSONDecoder().decode([String: [String]].self, from: data),
-           let versionStr = dict["_version"]?.first,
-           let version = Int(versionStr),
-           version >= defaultsVersion {
-            needsRewrite = false
-        } else {
-            needsRewrite = true
-        }
-
-        if needsRewrite {
+        guard FileManager.default.fileExists(atPath: url.path) else {
             writeDefaults(to: url)
+            return nil
         }
 
-        load(from: url)
+        // _version is stored as ["2"] so the file stays as [String: [String]].
+        if let data = try? Data(contentsOf: url),
+           let dict = try? JSONDecoder().decode([String: [String]].self, from: data) {
+            if let versionStr = dict["_version"]?.first,
+               let version = Int(versionStr),
+               version >= defaultsVersion {
+                return nil
+            }
+            writeDefaults(to: url)
+            return nil
+        }
+
+        let title = "Your instrument order file couldn't be read"
+        switch setFileAside(url, today: today) {
+        case .success(let copy):
+            writeDefaults(to: url)
+            return SavedFileNotice(
+                title: title,
+                message: "ScoreSort has gone back to its built-in instrument order. Nothing was deleted: your file is kept as “\(copy.lastPathComponent)”, so any changes you made to it can be copied across.",
+                fileURL: copy)
+        case .failure(let error):
+            // Leave it exactly as it is rather than write over it; the built-in order is used.
+            return SavedFileNotice(
+                title: title,
+                message: "ScoreSort is using its built-in instrument order for now. It couldn't move “\(url.lastPathComponent)” out of the way (\(error.reason)), so it has left the file as it is. Fix or remove it and the app will use it the next time it opens.",
+                fileURL: url)
+        }
     }
 
     // MARK: - Private helpers

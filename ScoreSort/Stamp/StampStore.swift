@@ -4,7 +4,8 @@
 //
 //  Persistence for saved stamp designs — `stamps.json` in Application Support, the third
 //  independent store alongside `ensemble-presets.json` (Combine presets) and
-//  `instrument-orders.json` (Renamer order). Same shape as `EnsemblePresetStore`.
+//  `instrument-orders.json` (Renamer order). Same shape as `EnsemblePresetStore`; both read
+//  and write through `SavedListFile` (Logic/SavedListFile.swift).
 //
 
 import Foundation
@@ -19,21 +20,28 @@ final class StampStore: ObservableObject {
         stamps.first { $0.id == selectedStampId } ?? stamps.first
     }
 
-    private var storeURL: URL? {
-        guard let dir = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first
-        else { return nil }
-        let folder = dir.appendingPathComponent("ScoreSort", isDirectory: true)
-        try? FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        return folder.appendingPathComponent("stamps.json")
-    }
+    /// Anything the user should be told about the stamps file — it couldn't be read and was
+    /// set aside, or a save failed. Shown by `SavedFileNoticeBanner`; never an alert from here.
+    @Published var notices: [SavedFileNotice] = []
 
-    init() {
-        load()
+    /// `stamps.json` in the app's Application Support folder.
+    static var defaultFileURL: URL? { scoreSortSupportFile("stamps.json") }
+
+    /// Loading and saving go through `SavedListFile` (Logic/SavedListFile.swift), which sets
+    /// an unreadable file aside before anything can save over it.
+    private var file: SavedListFile<Stamp>
+
+    /// `fileURL` is injectable so tests use a temporary folder; `nil` keeps stamps in memory only.
+    init(fileURL: URL? = StampStore.defaultFileURL) {
+        file = SavedListFile(url: fileURL, kind: .stamps)
+        let loaded = file.load()
+        stamps = loaded.entries
+        notices = loaded.notices
         // Seed a starter design so the picker and preview are never empty on first use.
         if stamps.isEmpty {
             stamps = [Stamp(name: "Ensemble Name", text: "Example School Band")]
         }
-        if selectedStampId == nil { selectedStampId = stamps.first?.id }
+        selectedStampId = stamps.first?.id
     }
 
     // MARK: - Persistence
@@ -68,20 +76,7 @@ final class StampStore: ObservableObject {
     }
 
     private func writeToDisk() {
-        guard let url = storeURL else { return }
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = .prettyPrinted
-        guard let data = try? encoder.encode(stamps) else { return }
-        try? data.write(to: url, options: .atomic)
-    }
-
-    private func load() {
-        guard let url = storeURL,
-              let data = try? Data(contentsOf: url),
-              let decoded = try? JSONDecoder().decode([Stamp].self, from: data)
-        else { return }
-        stamps = decoded
-        selectedStampId = stamps.first?.id
+        if let failure = file.save(stamps) { notices.append(failure) }
     }
 
     // MARK: - Editing

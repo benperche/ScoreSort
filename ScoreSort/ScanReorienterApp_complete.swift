@@ -440,6 +440,8 @@ struct ContentView: View {
                     }
                 }
             }
+            // A saved file that couldn't be read, or a save that failed (SavedFileNoticeBanner.swift).
+            .savedFileNotices()
 
             // Welcome tour overlay — shown on first launch and from Help menu
             if appState.showingWelcomeTour {
