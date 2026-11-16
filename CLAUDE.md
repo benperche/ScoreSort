@@ -43,6 +43,9 @@ Day-to-day, the app is normally built and run from Xcode with ⌘R.
 - Uses the **Swift Testing** framework (`@Suite` / `@Test` / `#expect`), not XCTest.
 - Tests target the **pure functions and view-model logic** (split-size math, instrument detection, roman-numeral normalisation, booklet deimposition permutations, A3 detection/splitting, combine page-count output). UI/integration is not tested.
 - `writePDF(pages:to:)` is the shared helper that produces real PDFs via PDFKit for tests.
+- **CI runs the whole suite on every push to `main` and every pull request** (`.github/workflows/tests.yml`: GitHub's `xcode-27` runner, Xcode 27.2, through the shared `ScoreSort` scheme). After pushing, check it: `gh run list --workflow tests.yml --limit 1`. Pushes that only touch `docs/` or `.md` files don't run it.
+- **Tests never use the real saved files.** Build `EnsemblePresetStore` / `StampStore` with a temporary `fileURL` (or `nil` for in-memory), never the default; both read and write through `Logic/SavedListFile.swift`, which sets an unreadable file aside rather than saving over it.
+- **`CodeRef/` is the code reference being split out of `ScoreSort_CodeRef.md`** (issue #13, in progress): `shared.md`, `combine.md` and `rename.md` are done and verified; for every other area the old file is still the reference.
 
 ## Architecture notes that span files/concepts
 

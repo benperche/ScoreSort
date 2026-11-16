@@ -129,7 +129,8 @@ extension ScoreSortCLI {
             Saves an image of each page so you can see what's on it — ScoreSort doesn't
             read text, so this is how to find out which part each page belongs to.
 
-              --out      Folder for the images (created if needed).
+              --out      Folder for the images (created if needed). Images already there
+                         are not replaced: add --overwrite, or use another folder.
               --pages    Which pages, e.g. 1-3,7 or 5- (default: all).
               --top      Only the top third of each page — where the instrument name
                          and title are. Much smaller, and usually all you need.
@@ -159,7 +160,8 @@ extension ScoreSortCLI {
                                       topOnly: args.has("top"),
                                       sheet: args.has("sheet"),
                                       width: args.int("width") ?? (args.has("sheet") ? (args.has("top") ? 600 : 400) : 900),
-                                      png: format == "png")
+                                      png: format == "png",
+                                      overwrite: args.has("overwrite"))
             })
     }
 
@@ -167,11 +169,34 @@ extension ScoreSortCLI {
     static let topFraction: CGFloat = 1.0 / 3.0
 
     static func runPreview(file: URL, folder: URL, pages pageList: String?, topOnly: Bool,
-                           sheet: Bool = false, width: Int, png: Bool) throws -> CommandResult {
+                           sheet: Bool = false, width: Int, png: Bool,
+                           overwrite: Bool = false) throws -> CommandResult {
         guard (100...4000).contains(width) else { throw CommandError("--width must be between 100 and 4000.") }
         let doc = try openPDFDocument(file)
         let pages = try parsePageList(pageList ?? "all", pageCount: doc.pageCount)
         guard !pages.isEmpty else { throw CommandError("No pages to preview.") }
+
+        let base = file.deletingPathExtension().lastPathComponent
+        let ext = png ? "png" : "jpg"
+        // A handful of rows per sheet keeps each image readable at a glance.
+        let perSheet = topOnly ? 24 : 12
+        func pageImageName(_ pageIndex: Int) -> String {
+            String(format: "%@-p%03d%@.%@", base, pageIndex + 1, topOnly ? "-top" : "", ext)
+        }
+        func sheetImageName(_ n: Int) -> String { "\(base)-sheet\(n + 1).\(ext)" }
+
+        // Nothing is replaced without --overwrite. Checked for every image before any is
+        // rendered, so a refusal leaves the folder exactly as it was.
+        if !overwrite {
+            let names = sheet
+                ? (0..<((pages.count + perSheet - 1) / perSheet)).map(sheetImageName)
+                : pages.map(pageImageName)
+            let existing = names.filter { FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path) }
+            if let first = existing.first {
+                let what = existing.count == 1 ? "\(first) is" : "\(existing.count) preview images (\(first), …) are"
+                throw CommandError("\(what) already in \(folder.path). Add --overwrite to replace \(existing.count == 1 ? "it" : "them"), or give another --out folder.")
+            }
+        }
 
         // Render off the main actor, in parallel; a page PDFKit built in memory (no
         // Core Graphics page) falls back to a PDFKit thumbnail.
@@ -179,8 +204,6 @@ extension ScoreSortCLI {
         let rendered = renderScans(sources.compactMap { $0 }, width: { _ in width })
         var renderedIterator = rendered.makeIterator()
 
-        let base = file.deletingPathExtension().lastPathComponent
-        let ext = png ? "png" : "jpg"
         var written: [URL] = []
         var entries: [[String: Any]] = []
         var problems: [String] = []
@@ -206,8 +229,7 @@ extension ScoreSortCLI {
                 tiles.append((pageIndex, final))
                 continue
             }
-            let name = String(format: "%@-p%03d%@.%@", base, pageIndex + 1, topOnly ? "-top" : "", ext)
-            let url = folder.appendingPathComponent(name)
+            let url = folder.appendingPathComponent(pageImageName(pageIndex))
             do {
                 try writeImage(final, to: url, png: png)
                 written.append(url)
@@ -218,14 +240,12 @@ extension ScoreSortCLI {
         }
 
         if sheet {
-            // A handful of rows per sheet keeps each image readable at a glance.
-            let perSheet = topOnly ? 24 : 12
             let chunks = stride(from: 0, to: tiles.count, by: perSheet).map { Array(tiles[$0..<min($0 + perSheet, tiles.count)]) }
             for (n, chunk) in chunks.enumerated() {
                 guard let image = contactSheet(chunk, columns: topOnly ? 3 : 4) else {
                     problems.append("Sheet \(n + 1) couldn't be drawn."); continue
                 }
-                let url = folder.appendingPathComponent("\(base)-sheet\(n + 1).\(ext)")
+                let url = folder.appendingPathComponent(sheetImageName(n))
                 do {
                     try writeImage(image, to: url, png: png)
                     written.append(url)

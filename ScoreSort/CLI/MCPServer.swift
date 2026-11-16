@@ -87,8 +87,8 @@ enum ScoreSortMCPServer {
             Tool(name: "scoresort_info", command: "info", title: "Describe a PDF", effect: .readsOnly,
                  description: "Describe a PDF: page count, page sizes, bookmarks (with the part names ScoreSort would suggest), and whether it's a scan of double pages that needs scoresort_split_scans first.",
                  params: [Param(key: "file", option: nil, kind: .string, description: "Absolute path to the PDF.", required: true)]),
-            // Not read-only: it saves images, and into a folder the caller names it replaces
-            // earlier previews of the same PDF.
+            // Not read-only: it saves images, and with overwrite it replaces earlier previews
+            // of the same PDF in a folder the caller names.
             Tool(name: "scoresort_preview", command: "preview", title: "Look at a PDF's pages", effect: .changesFiles,
                  description: "Look at a PDF's pages, returned as images. ScoreSort can't read text, so this is how to find which part each page belongs to: the top of each page (default) shows the instrument name and title. By default pages come back side by side in labelled contact sheets (p1, p2, …), so a whole PDF is one or two images.",
                  params: [Param(key: "file", option: nil, kind: .string, description: "Absolute path to the PDF.", required: true),
@@ -96,7 +96,8 @@ enum ScoreSortMCPServer {
                           Param(key: "top", option: "top", kind: .boolean, description: "Only the top third of each page (default true). Set false to see whole pages.", defaultValue: true),
                           Param(key: "sheet", option: "sheet", kind: .boolean, description: "Contact sheets (default true). False returns one image per page — use with a few pages only.", defaultValue: true),
                           Param(key: "width", option: "width", kind: .number, description: "Pixel width of each page image (default 450 in sheets, 900 otherwise)."),
-                          Param(key: "out", option: "out", kind: .string, description: "Folder to also keep the images in (default: a temporary folder).")],
+                          Param(key: "out", option: "out", kind: .string, description: "Folder to also keep the images in (default: a new temporary folder). Earlier preview images there are not replaced unless overwrite is true."),
+                          Param(key: "overwrite", option: "overwrite", kind: .boolean, description: "Replace preview images already in out.")],
                  fillDefaults: { args in
                      if args["out"] == nil {
                          args["out"] = FileManager.default.temporaryDirectory

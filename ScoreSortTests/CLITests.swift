@@ -148,6 +148,41 @@ struct CLIInspectTests {
         #expect(rep.pixelsWide == 300)
         #expect(abs(rep.pixelsHigh - Int(300 * 842 / 595 / 3)) <= 1)
     }
+
+    @Test("preview replaces nothing without --overwrite, and a refusal writes nothing")
+    func previewKeepsExistingImages() throws {
+        let folder = temporaryFolder()
+        let url = folder.appendingPathComponent("Part.pdf")
+        writeDrawnPDF(pages: 3, to: url)
+        let out = folder.appendingPathComponent("previews")
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+
+        // Page 2's image is already there (standing in for an earlier preview).
+        let existing = out.appendingPathComponent("Part-p002.png")
+        let original = Data("an earlier preview".utf8)
+        try original.write(to: existing)
+
+        #expect(throws: CommandError.self) {
+            try ScoreSortCLI.runPreview(file: url, folder: out, pages: "1-3", topOnly: false, width: 300, png: true)
+        }
+        #expect(try Data(contentsOf: existing) == original)
+        // All or nothing: pages 1 and 3 weren't written either.
+        #expect(try FileManager.default.contentsOfDirectory(atPath: out.path) == ["Part-p002.png"])
+
+        // Different images of the same PDF don't clash: tops and sheets have their own names.
+        let tops = try ScoreSortCLI.runPreview(file: url, folder: out, pages: "1-3", topOnly: true, width: 300, png: true)
+        #expect(tops.images.count == 3)
+        let sheet = try ScoreSortCLI.runPreview(file: url, folder: out, pages: "1-3", topOnly: true, sheet: true, width: 300, png: true)
+        #expect(sheet.images.map(\.lastPathComponent) == ["Part-sheet1.png"])
+        #expect(throws: CommandError.self) {
+            try ScoreSortCLI.runPreview(file: url, folder: out, pages: "1-3", topOnly: false, sheet: true, width: 300, png: true)
+        }
+
+        // With --overwrite the image is replaced.
+        let replaced = try ScoreSortCLI.runPreview(file: url, folder: out, pages: "2", topOnly: false, width: 300, png: true, overwrite: true)
+        #expect(replaced.exitCode == 0)
+        #expect(try Data(contentsOf: existing) != original)
+    }
 }
 
 @Suite("Split writing (shared by the Split tab and the command line)")
