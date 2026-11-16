@@ -1,0 +1,116 @@
+# Runs the whole test suite on every push to main and on every pull request.
+#
+# This workflow only builds and tests. It must never publish anything: the appcast and
+# GitHub Pages are a separate workflow's job.
+
+name: Tests
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '**/*.md'
+
+permissions:
+  contents: read
+
+# A newer push to the same branch or pull request makes the older run pointless.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The project needs Xcode 26 or later (SWIFT_DEFAULT_ACTOR_ISOLATION and
+  # SWIFT_APPROACHABLE_CONCURRENCY); it is developed with this version on macOS 27, and some
+  # tests pin down macOS 27's PDFKit. Keep this and `runs-on` matching what
+  # https://github.com/actions/runner-images/blob/main/images/macos/xcode-27-arm64-Readme.md
+  # lists as installed: images drop old Xcode versions over time.
+  XCODE_VERSION: '27.2'
+  # Everything xcodebuild writes goes under build/, outside the folders the project compiles.
+  DERIVED_DATA: build/DerivedData
+  SOURCE_PACKAGES: build/SourcePackages
+  RESULTS: build/results
+  NSUnbufferedIO: 'YES'
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: xcode-27   # macOS 27 on Apple silicon
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out
+        uses: actions/checkout@v7
+
+      - name: Select Xcode ${{ env.XCODE_VERSION }}
+        run: |
+          xcode="/Applications/Xcode_${XCODE_VERSION}.app"
+          if [ ! -d "$xcode" ]; then
+            echo "::error::Xcode ${XCODE_VERSION} is not on this runner image. Installed:"
+            ls -d /Applications/Xcode*.app
+            exit 1
+          fi
+          sudo xcode-select --switch "$xcode/Contents/Developer"
+          sw_vers
+          xcodebuild -version
+
+      - name: Cache Swift packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.SOURCE_PACKAGES }}
+          key: swift-packages-xcode-${{ env.XCODE_VERSION }}-${{ hashFiles('ScoreSort.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
+
+      # -onlyUsePackageVersionsFromResolvedFile: build exactly the versions committed in
+      # Package.resolved, and fail rather than quietly resolving to something newer.
+      - name: Resolve packages
+        timeout-minutes: 10
+        run: |
+          xcodebuild -resolvePackageDependencies \
+            -project ScoreSort.xcodeproj \
+            -scheme ScoreSort \
+            -derivedDataPath "$DERIVED_DATA" \
+            -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
+            -onlyUsePackageVersionsFromResolvedFile
+
+      - name: Build
+        timeout-minutes: 20
+        run: |
+          xcodebuild build-for-testing \
+            -project ScoreSort.xcodeproj \
+            -scheme ScoreSort \
+            -destination platform=macOS \
+            -derivedDataPath "$DERIVED_DATA" \
+            -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -resultBundlePath "$RESULTS/Build.xcresult" \
+            CODE_SIGNING_ALLOWED=NO
+
+      # Its own, shorter limit: a test that hangs then fails this step (so the results below
+      # are still uploaded) instead of running into the job's limit, which cancels everything.
+      - name: Test
+        timeout-minutes: 15
+        run: |
+          xcodebuild test-without-building \
+            -project ScoreSort.xcodeproj \
+            -scheme ScoreSort \
+            -destination platform=macOS \
+            -derivedDataPath "$DERIVED_DATA" \
+            -clonedSourcePackagesDirPath "$SOURCE_PACKAGES" \
+            -onlyUsePackageVersionsFromResolvedFile \
+            -resultBundlePath "$RESULTS/Test.xcresult" \
+            CODE_SIGNING_ALLOWED=NO
+
+      # Open the downloaded .xcresult in Xcode for the full log of what failed.
+      - name: Upload result bundles
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: xcresult-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.RESULTS }}
+          if-no-files-found: ignore
+          retention-days: 14

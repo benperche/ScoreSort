@@ -1,5 +1,7 @@
 # ScoreSort
 
+[![Tests](https://github.com/benperche/ScoreSort/actions/workflows/tests.yml/badge.svg?branch=main)](https://github.com/benperche/ScoreSort/actions/workflows/tests.yml)
+
 A powerful macOS application for managing music PDFs with five tools for musicians and music librarians: PDF combining with smart copy management, automatic file renaming and bulk part renaming, PDF splitting with smart instrument naming, page rotation, and stamping parts with your ensemble's mark.
 
 ## Features
