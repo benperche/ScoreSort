@@ -1,0 +1,53 @@
+# Publishes docs/ — the Sparkle appcast — to GitHub Pages.
+#
+# The appcast at https://benperche.github.io/ScoreSort/appcast.xml is what offers updates to
+# every installed copy of ScoreSort, so it deploys only when docs/ changes. (Pages used to
+# rebuild on every push to main; bursts of pushes wedged a build and blocked later deploys.)
+#
+# Needs Settings ▸ Pages ▸ Source = "GitHub Actions". Until that is set, the deploy step fails
+# and the old branch build keeps serving docs/.
+name: Deploy appcast
+
+on:
+  push:
+    branches: [main]
+    paths: ['docs/**']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deploy at a time, and never cancel one that has started.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/configure-pages@v6
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: docs
+      - id: deployment
+        uses: actions/deploy-pages@v5
+      - name: Check the live appcast matches the repository
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if curl -fsSL "https://benperche.github.io/ScoreSort/appcast.xml?$(date +%s)" -o live.xml \
+               && cmp -s live.xml docs/appcast.xml; then
+              echo "Live appcast matches docs/appcast.xml."
+              exit 0
+            fi
+            sleep 20
+          done
+          echo "::error::The live appcast doesn't match docs/appcast.xml after deploying."
+          exit 1
