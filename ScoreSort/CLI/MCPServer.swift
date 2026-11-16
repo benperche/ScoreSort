@@ -48,9 +48,23 @@ enum ScoreSortMCPServer {
         var defaultValue: Any? = nil
     }
 
+    /// What a tool can do to the person's files. MCP's hints are fixed per tool, not per
+    /// call, so this is the worst case over every argument the tool accepts: one that
+    /// replaces files only when `overwrite` is true, or renames only when `apply` is true,
+    /// still changes files. `MCPServerTests` holds each tool to its command's real options.
+    enum Effect {
+        /// Looks only: writes, moves and replaces nothing.
+        case readsOnly
+        /// Writes files, and can replace, move or rename ones that already exist.
+        case changesFiles
+    }
+
     struct Tool {
         let name: String
         let command: String
+        /// The name a person sees in the client's list of tools.
+        let title: String
+        let effect: Effect
         let description: String
         let params: [Param]
         /// Arguments to add when absent (e.g. a temporary folder for previews).
@@ -61,19 +75,21 @@ enum ScoreSortMCPServer {
 
     static var tools: [Tool] {
         [
-            Tool(name: "scoresort_guide", command: "help",
+            Tool(name: "scoresort_guide", command: "help", title: "Read the ScoreSort guide", effect: .readsOnly,
                  description: "How to use ScoreSort's tools for common jobs (split and name parts, scans of double pages, score-order renaming, combining with presets). Read this first.",
                  params: []),
-            Tool(name: "scoresort_find", command: "find",
+            Tool(name: "scoresort_find", command: "find", title: "Find files and folders", effect: .readsOnly,
                  description: "Find the files the person means by name — PDFs, images or folders, newest first — to get the paths the other tools need. Searches only the folders the person has shared with AI assistants in ScoreSort's settings (or a folder they've given you by path). Use it whenever you're given a name rather than a full path (\"the Holst scan\", \"my Junior Band parts folder\"). If it finds nothing or there are no shared folders, ask the person to select the file in Finder, press Option-Command-C (Copy as Pathname) and paste the path — dragging a file into the chat sends you a copy, which ScoreSort can't use.",
                  params: [Param(key: "words", option: nil, kind: .strings, description: "Words from the name, e.g. [\"holst\", \"scan\"]. All must appear, in any order."),
                           Param(key: "kind", option: "kind", kind: .string, description: "pdf (default), image (photos or scans saved as pictures), folder, or any.", choices: ["pdf", "image", "folder", "any"]),
                           Param(key: "folders", option: "in", kind: .strings, description: "Absolute paths of folders to look in instead of the shared ones — only folders the person has given you."),
                           Param(key: "limit", option: "limit", kind: .number, description: "How many results (default 20).")]),
-            Tool(name: "scoresort_info", command: "info",
+            Tool(name: "scoresort_info", command: "info", title: "Describe a PDF", effect: .readsOnly,
                  description: "Describe a PDF: page count, page sizes, bookmarks (with the part names ScoreSort would suggest), and whether it's a scan of double pages that needs scoresort_split_scans first.",
                  params: [Param(key: "file", option: nil, kind: .string, description: "Absolute path to the PDF.", required: true)]),
-            Tool(name: "scoresort_preview", command: "preview",
+            // Not read-only: it saves images, and into a folder the caller names it replaces
+            // earlier previews of the same PDF.
+            Tool(name: "scoresort_preview", command: "preview", title: "Look at a PDF's pages", effect: .changesFiles,
                  description: "Look at a PDF's pages, returned as images. ScoreSort can't read text, so this is how to find which part each page belongs to: the top of each page (default) shows the instrument name and title. By default pages come back side by side in labelled contact sheets (p1, p2, …), so a whole PDF is one or two images.",
                  params: [Param(key: "file", option: nil, kind: .string, description: "Absolute path to the PDF.", required: true),
                           Param(key: "pages", option: "pages", kind: .string, description: "Pages to show, 1-based, e.g. \"1-3,7\" or \"5-\". Default: all."),
@@ -88,7 +104,7 @@ enum ScoreSortMCPServer {
                      }
                      if args["width"] == nil, (args["sheet"] as? Bool ?? true) { args["width"] = 450 }
                  }),
-            Tool(name: "scoresort_split_scans", command: "split-scans",
+            Tool(name: "scoresort_split_scans", command: "split-scans", title: "Split double-page scans", effect: .changesFiles,
                  description: "Cut scans of double pages (A3 sheets, or a book scanner's two-page spreads) into single pages, saved as a new PDF. Each scan is cut at the gap between its pages (or where black scanner background starts); identical sheets are all cut down the middle. Reports which new pages are black or empty (suggestedSkip, for scoresort_split's skip) and lists every scan's pages.",
                  params: [Param(key: "file", option: nil, kind: .string, description: "Absolute path to the scanned PDF.", required: true),
                           Param(key: "out", option: "out", kind: .string, description: "Absolute path for the new PDF.", required: true),
@@ -99,7 +115,7 @@ enum ScoreSortMCPServer {
                           Param(key: "dropBlanks", option: "drop-blanks", kind: .boolean, description: "Leave out black or empty pieces instead of reporting them."),
                           Param(key: "dryRun", option: "dry-run", kind: .boolean, description: "Report only; write nothing."),
                           Param(key: "overwrite", option: "overwrite", kind: .boolean, description: "Replace out if it exists.")]),
-            Tool(name: "scoresort_split", command: "split",
+            Tool(name: "scoresort_split", command: "split", title: "Split a PDF into parts", effect: .changesFiles,
                  description: "Split a PDF into one file per part, named \"<base><separator><part name>.pdf\", optionally numbered in score order (00 - Score, 01 - Flute …) and stamped — the Split tab's Steps 1–3. Give the parts (pages + name) after looking at them with scoresort_preview, or use the PDF's bookmarks. " + outputHint,
                  params: [Param(key: "file", option: nil, kind: .string, description: "Absolute path to the PDF.", required: true),
                           Param(key: "out", option: "out", kind: .string, description: "Absolute path of the folder for the part files (created if needed).", required: true),
@@ -116,7 +132,7 @@ enum ScoreSortMCPServer {
                           Param(key: "ensemble", option: "ensemble", kind: .string, description: "The ensemble the folders' sections follow (default: scoreOrder's, else band).", choices: ["band", "jazz", "orchestra"]),
                           Param(key: "dryRun", option: "dry-run", kind: .boolean, description: "Show the files that would be written; write nothing."),
                           Param(key: "overwrite", option: "overwrite", kind: .boolean, description: "Replace files that already exist.")]),
-            Tool(name: "scoresort_rename", command: "rename",
+            Tool(name: "scoresort_rename", command: "rename", title: "Number parts in score order", effect: .changesFiles,
                  description: "Number a folder of part files in score order (\"00 - Score.pdf\", \"01 - Flute 1.pdf\" …) by the instrument in each name — the Rename tab. Plans only unless apply is true: check the plan, then call again with apply.",
                  params: [Param(key: "paths", option: nil, kind: .strings, description: "Absolute path of the folder (or several files).", required: true),
                           Param(key: "ensemble", option: "ensemble", kind: .string, description: "Whose instrument order to use.", required: true, choices: ["band", "jazz", "orchestra"]),
@@ -129,7 +145,7 @@ enum ScoreSortMCPServer {
                           Param(key: "folderChoices", option: "folder", kind: .pairs(key: "file", value: "folder", valueIsNumber: false),
                                 description: "With folders: put a file in another folder where the plan's guess is wrong (folder \"\" = top level)."),
                           Param(key: "apply", option: "apply", kind: .boolean, description: "Rename the files (otherwise only plan).")]),
-            Tool(name: "scoresort_allocate", command: "allocate",
+            Tool(name: "scoresort_allocate", command: "allocate", title: "Plan who plays what", effect: .readsOnly,
                  description: "Plan who plays what before combining: an ensemble preset's players (scoresort_presets) matched to a folder of parts. Shows each player group and the file(s) they'd get, groups with no part, groups shared across numbered parts, and files no one plays. Writes nothing. Settle the gaps with allocations (e.g. the Bass Guitar players get the Tuba part), check again, then pass the same allocations to scoresort_combine.",
                  params: [Param(key: "paths", option: nil, kind: .strings, description: "Absolute path of the folder of parts (or the files).", required: true),
                           Param(key: "preset", option: "preset", kind: .string, description: "The ensemble preset's name.", required: true),
@@ -137,7 +153,7 @@ enum ScoreSortMCPServer {
                                 description: "Decisions: [{\"part\": \"Bass Guitar\", \"file\": \"Tuba\"}, {\"part\": \"Clarinet\", \"file\": \"Clarinet 1\", \"copies\": 11}, {\"part\": \"Clarinet\", \"file\": \"Clarinet 2\"}]. Replaces that group's automatic choice; entries without copies share the group's remaining players evenly."),
                           Param(key: "copies", option: "copies", kind: .pairs(key: "file", value: "copies", valueIsNumber: true),
                                 description: "A file's total copies, applied last; 0 leaves it out.")]),
-            Tool(name: "scoresort_combine", command: "combine",
+            Tool(name: "scoresort_combine", command: "combine", title: "Combine parts to print", effect: .changesFiles,
                  description: "Combine parts into one PDF to print, each part repeated for its number of players, with a bookmark per copy — the Combine tab. Copies come from a saved ensemble preset (scoresort_presets) and/or per file. Optional booklets and stamp. " + outputHint,
                  params: [Param(key: "paths", option: nil, kind: .strings, description: "Absolute paths of the part files, in order, or one folder (combined in name order).", required: true),
                           Param(key: "out", option: "out", kind: .string, description: "Absolute path of the PDF to write.", required: true),
@@ -153,13 +169,13 @@ enum ScoreSortMCPServer {
                           Param(key: "stampScope", option: "stamp-scope", kind: .string, description: "first (default) or every page.", choices: ["first", "every"]),
                           Param(key: "dryRun", option: "dry-run", kind: .boolean, description: "Show parts, copies and page total; write nothing."),
                           Param(key: "overwrite", option: "overwrite", kind: .boolean, description: "Replace out if it exists.")]),
-            Tool(name: "scoresort_presets", command: "presets",
+            Tool(name: "scoresort_presets", command: "presets", title: "List ensemble presets", effect: .readsOnly,
                  description: "List the ensemble presets saved in ScoreSort: each ensemble's parts and copies per part.",
                  params: []),
-            Tool(name: "scoresort_stamps", command: "stamps",
+            Tool(name: "scoresort_stamps", command: "stamps", title: "List stamp designs", effect: .readsOnly,
                  description: "List the stamp designs saved in ScoreSort (school or ensemble names and the like).",
                  params: []),
-            Tool(name: "scoresort_stamp", command: "stamp",
+            Tool(name: "scoresort_stamp", command: "stamp", title: "Stamp PDFs and images", effect: .changesFiles,
                  description: "Stamp a saved design onto PDFs or images, saving stamped copies in another folder (originals are never changed). " + outputHint,
                  params: [Param(key: "files", option: nil, kind: .strings, description: "Absolute paths of the files.", required: true),
                           Param(key: "stamp", option: "stamp", kind: .string, description: "The saved stamp's name.", required: true),
@@ -198,6 +214,34 @@ enum ScoreSortMCPServer {
         }
         return ["type": "object", "properties": properties,
                 "required": tool.params.filter(\.required).map(\.key)]
+    }
+
+    /// A tool's annotations — `ToolAnnotations` in the MCP schema — which a client uses to
+    /// decide what needs the person's confirmation. Every hint is written out, because the
+    /// protocol's defaults assume the worst (not read-only, destructive, open world).
+    ///
+    /// - `readOnlyHint`: the tool changes nothing.
+    /// - `destructiveHint`: it can do more than add — replace a file (`overwrite`) or move
+    ///   and rename files (`apply`).
+    /// - `idempotentHint`: calling again with the same arguments changes nothing further.
+    ///   Claimed only for the read-only tools; a client may retry an idempotent call unasked.
+    /// - `openWorldHint`: false throughout — ScoreSort works on this Mac's files and
+    ///   contacts nothing else.
+    static func annotations(for tool: Tool) -> [String: Any] {
+        let readOnly = tool.effect == .readsOnly
+        return ["title": tool.title,
+                "readOnlyHint": readOnly,
+                "destructiveHint": !readOnly,
+                "idempotentHint": readOnly,
+                "openWorldHint": false]
+    }
+
+    /// A tool as `tools/list` describes it. The title is given twice: top-level `title` is
+    /// where protocol revisions from 2025-06-18 look first, `annotations.title` is the only
+    /// place 2025-03-26 has.
+    static func listing(for tool: Tool) -> [String: Any] {
+        ["name": tool.name, "title": tool.title, "description": tool.description,
+         "inputSchema": schema(for: tool), "annotations": annotations(for: tool)]
     }
 
     /// The command line a tool call stands for.
@@ -262,6 +306,9 @@ enum ScoreSortMCPServer {
 
     // MARK: - Protocol
 
+    /// Newest first; a client asking for anything else is answered with the first. Tool
+    /// annotations arrived in 2025-03-26 and a tool's top-level `title` in 2025-06-18;
+    /// `tools/list` sends both whatever was negotiated (to 2024-11-05 they are extra fields).
     static let supportedVersions = ["2025-06-18", "2025-03-26", "2024-11-05"]
 
     static var instructions: String {
@@ -302,7 +349,7 @@ enum ScoreSortMCPServer {
         case "ping":
             return reply([:])
         case "tools/list":
-            return reply(["tools": tools.map { ["name": $0.name, "description": $0.description, "inputSchema": schema(for: $0)] }])
+            return reply(["tools": tools.map { listing(for: $0) }])
         case "tools/call":
             let params = message["params"] as? [String: Any] ?? [:]
             guard let name = params["name"] as? String, let tool = tools.first(where: { $0.name == name }) else {
