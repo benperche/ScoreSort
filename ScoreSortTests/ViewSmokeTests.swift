@@ -27,8 +27,8 @@ struct ViewSmokeTests {
             rootView: view
                 .environmentObject(AppState())
                 .environmentObject(RenamerManager())
-                .environmentObject(EnsemblePresetStore())
-                .environmentObject(StampStore())
+                .environmentObject(EnsemblePresetStore(fileURL: nil))
+                .environmentObject(StampStore(fileURL: nil))
         )
         host.frame = NSRect(x: 0, y: 0, width: 1000, height: 800)
         host.layoutSubtreeIfNeeded()
@@ -113,7 +113,7 @@ struct StampSwitchSmokeTests {
     /// updates" warning, which only appears in a running app.
     @Test("switching stamps re-renders without crashing")
     func switchingStamps() {
-        let store = StampStore()
+        let store = StampStore(fileURL: nil)
         store.stamps = [Stamp(name: "One", text: "First stamp"),
                         Stamp(name: "Two", text: "Second stamp")]
         store.selectedStampId = store.stamps[0].id
@@ -122,7 +122,7 @@ struct StampSwitchSmokeTests {
             rootView: StampView()
                 .environmentObject(AppState())
                 .environmentObject(RenamerManager())
-                .environmentObject(EnsemblePresetStore())
+                .environmentObject(EnsemblePresetStore(fileURL: nil))
                 .environmentObject(store)
         )
         host.frame = NSRect(x: 0, y: 0, width: 1100, height: 800)
