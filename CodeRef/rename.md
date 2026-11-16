@@ -92,7 +92,7 @@ Static accessors `band`, `jazz`, `orchestra`; `getOrder(for:)`. Lowercase name s
 
 - **Toolbar** (with files loaded): a "Renumber prefixed files" tick, Move to Folder (folders on), Don't Rename, Preferences (opens Settings on the Renamer tab), and Clear Files — labelled **Cancel Batch** mid-batch.
 - **List:** unrecognised files, then the matched files, then excluded files. Rows are `ScoreOrderFileRow`; double-click opens `ManualAssignmentView`. Click, ⇧-click and ⌘-click select (`selectedIDs`, `lastClickedID`; ranges follow `allDisplayedOps`). ⌫ excludes the selection through an `NSEvent` monitor.
-- **Bottom:** status text, the `PartFolderPicker`, and **Rename Files** (disabled when `renameCount == 0`; **Rename & Next** mid-batch).
+- **Bottom:** the ensemble picker (Wind Band / Jazz Band / Orchestra), the `PartFolderPicker`, status text, and **Rename Files** (disabled when `renameCount == 0`; **Rename & Next** mid-batch).
 - **Done screen:** `ScoreOrderRenameSummaryView` (Start Over, Show in Finder, Rescan Folder). Dropping files or folders on it starts again.
 
 ### Batch folders
