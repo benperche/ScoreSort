@@ -7,9 +7,9 @@
         <language>en</language>
 
         <item>
-            <title>Version 1.10.1</title>
-            <sparkle:version>15</sparkle:version>
-            <sparkle:shortVersionString>1.10.1</sparkle:shortVersionString>
+            <title>Version 1.11.0</title>
+            <sparkle:version>16</sparkle:version>
+            <sparkle:shortVersionString>1.11.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <!-- 1.5 and 1.5.1 (builds 7 and 8) were sandboxed and can't launch Sparkle's installer.
                  Below build 9 this item is informational: they're offered a link to the download
@@ -18,6 +18,57 @@
             <sparkle:informationalUpdate>
                 <sparkle:belowVersion>9</sparkle:belowVersion>
             </sparkle:informationalUpdate>
+            <pubDate>Mon, 16 Nov 2026 11:05:20 +1100</pubDate>
+            <description><![CDATA[
+                <h2>ScoreSort 1.11.0</h2>
+                <p>This update lets an AI assistant such as Claude use ScoreSort for you (in beta), adds sorting parts into section folders, and makes scans of double pages much easier to split.</p>
+                <p><b>✨ General Improvements</b></p>
+                <ul>
+                    <li><b>(Beta) Ask an AI assistant to do the job, and it can use ScoreSort.</b> Tell an AI like Claude "split this scan into parts, name them and number them in score order" and it can now work ScoreSort for you. It looks at the pages to read the part names, then uses ScoreSort's own splitting, double-page scan cutting, score-order renaming, combining with your presets, stamping, and sorting parts into section folders, so the files come out exactly as they would from the app. It works as a command-line tool for AI tools with a terminal, and as an "MCP server" for chat apps such as the Claude desktop app. It can also combine a folder of parts for one of your ensemble presets and sort out who plays what — spotting players with no part (say, two bass guitars) and giving them the closest one (the tuba part), spreading percussion across the percussion parts, and asking you before it hands anyone a part in the wrong key. Share the folders you keep parts and scans in, and you can just say "the Holst scan" — your assistant sees nothing else on your Mac; for anything else, paste a file's path (⌥⌘C in Finder). It never replaces a file unless told to, and it can show what it's about to do first. To set it up, open <b>Settings ▸ AI Assistants</b> and click <b>Connect to Claude</b> (or <b>Install Command</b> for AI tools that work in a terminal).</li>
+                    <li><b>Page previews in the Split and Rotate tabs are quicker to render.</b></li>
+                </ul>
+                <p><b>🏷️ Rename Files</b></p>
+                <ul>
+                    <li><b>Sort parts into section subfolders.</b> There is a new <b>Sort into folders</b> menu — beside the Rename button in the Renamer, and on the score-order step when splitting or bulk renaming. This lets ScoreSort put each part in a folder for its section — Woodwind, Brass, Percussion and Strings for a concert band (piano and string bass go with the brass), or Saxophones, Trumpets, Trombones and Rhythm for a jazz band — or for its instrument (Flute, Clarinet, Alto Saxophone…). The score and any part ScoreSort doesn't recognise stays at the top. Split several pieces into the same folder and their parts collect in the same section folders. In the Renamer, parts that are already numbered are simply moved into their folders. If ScoreSort puts a part in the wrong folder (say, a Bass part you'd rather keep with the strings), drag it onto another folder or right-click it; you can also make a new folder or keep a part at the top.</li>
+                    <li><b>"Renumber prefixed files" stays as you set it.</b> Ticked once, it stays ticked for every folder you drop — including each folder in a batch — until you quit ScoreSort, instead of unticking itself for each new folder.</li>
+                </ul>
+                <p><b>🔗 Combine PDFs</b></p>
+                <ul>
+                    <li><b>Moving files after adding them no longer breaks Combine.</b> ScoreSort now keeps track of each file you add, so if you move or rename it in Finder before making the PDF, it still finds it — and the list and table of contents pick up the new name. (A file you've moved to the Trash counts as gone.)</li>
+                </ul>
+                <p><b>✂️ Split PDF</b></p>
+                <ul>
+                    <li><b>Scans of double pages are much easier to split.</b> The A3 splitter has grown into <b>Split Double Pages</b>, built for overhead and book scanners. Every scan is shown in one window: two-page scans are cut at the gap between the pages — wherever it actually is, not just down the middle — single pages are left whole, and black scanner background or empty facing pages are set aside to skip. Drag a cut line to move it, switch any scan between one page and two, or click a page to skip or keep it. Skipped pages stay in Step 1, greyed out, so nothing is lost. It's offered when you open such a scan, or from <b>Fix Scan ▸ Split Double Pages…</b>. For scans of identical sheets, like A3 from a flatbed scanner, every page gets the <b>same cut</b> — down the middle, or wherever you drag any one of them — so you can just press Return and go.</li>
+                    <li><b>ScoreSort now asks what to do with a PDF's bookmarks — and can name the files from them.</b> When you open a PDF that already has bookmarks, a sheet shows the names its bookmarks would give the files. Choose <b>Split &amp; Name Files</b> to split at the bookmarks and use their titles as the file names (either "Piece - Flute 1" or just the bookmark title on its own), <b>Split Only</b> to keep the split points and name the files yourself, or <b>Ignore Bookmarks</b> to start from scratch. Before, the splits appeared without warning and the titles were only used for PDFs made by ScoreSort's own Combine tab.</li>
+                </ul>
+                <p><b>🔖 Stamp</b></p>
+                <ul>
+                    <li><b>Moving files after adding them no longer breaks stamping.</b> If you move or rename a queued file in Finder, the Stamp tab still finds it — “Replace original files” stamps it where it is now, and a new name carries through to “Save as new files” unless you’ve typed your own. If a file can’t be stamped, ScoreSort now says why.</li>
+                </ul>
+                <p><b>🐞 Fixed</b></p>
+                <ul>
+                    <li><b>Typing a number for a file in the Renamer works.</b> When you double-click a file to give it a number, the number you type is now used.</li>
+                    <li><b>No more two files with the same number.</b> Dropping in a folder where some parts are already numbered and some aren't used to number the new ones from 01 again, clashing with the old ones. The Renamer now renumbers the whole folder in that case (ticking "Renumber prefixed files" for you and saying so); untick it if you really want only the new files numbered.</li>
+                    <li><b>"Renumber prefixed files" puts parts of the same instrument in order.</b> A folder numbered with Trombone 3 before Trombone 2 used to keep that order ("already correct"); renumbering now fixes it, and "Trumpet 2" comes after "Trumpet 1".</li>
+                    <li><b>A single part can go through the splitter once its pages have been cut or reordered.</b> If you split a part scanned as A3 sheets into A4 pages (or fixed its booklet order, or swapped pages) and it's still one file, you can now carry on through naming and saving — before, both steps insisted on at least two files or a skipped page, even though the result was a new PDF.</li>
+                    <li><b>The little page map beside each page preview when naming parts (Split and Bulk Rename) now marks exactly what you can see.</b> Its rectangle used to be about three times taller than the area actually shown, and you couldn't pan all the way to the bottom of a page.</li>
+                    <li><b>After splitting a scan, Delete skips one page again</b>, not the whole file, as intended — so removing a stray blank page doesn't take the rest of the part with it.</li>
+                    <li><b>Combine says what went wrong instead of “Failed to create PDF”.</b> If a file in the list has been deleted or can’t be read since you added it, ScoreSort now names it and says why, rather than giving a one-line error — or, if only some files were affected, quietly leaving those parts out of the PDF. Problems saving to a folder (such as a read-only shared drive) are explained too.</li>
+                    <li><b>Combined PDFs keep their table of contents on macOS 27.</b> Booklets, and any combined PDF with a stamp on it, were being saved without their bookmarks, so there was no list of parts in Preview's sidebar and the Split tab couldn't find the part boundaries by itself. The bookmarks are saved again, for Create PDF and Open in Preview.</li>
+                </ul>
+            ]]></description>
+            <enclosure
+                url="https://github.com/benperche/ScoreSort/releases/download/v1.11.0/ScoreSort.dmg"
+                sparkle:edSignature="ZxJxtzOErVyKe8pUCiGLdKJKuJL/hczqcxltjERC0dskcp5QZ9v3HfCqmVuqQyPWJF0gabH8yDkrSP9KviHMDA=="
+                length="9182903"
+                type="application/octet-stream"/>
+        </item>
+
+        <item>
+            <title>Version 1.10.1</title>
+            <sparkle:version>15</sparkle:version>
+            <sparkle:shortVersionString>1.10.1</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
             <pubDate>Tue, 08 Sep 2026 11:07:31 +1000</pubDate>
             <description><![CDATA[
                 <h2>ScoreSort 1.10.1</h2>
