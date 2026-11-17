@@ -86,7 +86,7 @@ Three layers, for drag performance:
 | Tool | Insertion point | "Each part" means |
 |------|-----------------|-------------------|
 | Combine | `CombineManager.buildDocument(options:stampJob:rotateBackFaces:)`, before imposition and the outline — shared by Create PDF, Open in Preview and Print | each source file per copy (the `bookmarks` page indices) |
-| Split | `writeSplitFiles` (`Logic/SplitLogic.swift`), reached through `PDFManager.saveSplitPDF(… stampJob:)` from both save routes, and by the CLI's `split --stamp` | page 0 of each output file |
+| Split | `writeSplitFiles` (`Logic/SplitLogic.swift`), reached from both save routes through `SplitSaveProgress.run(… stampJob:)` (in the background, so the stamp chain is `nonisolated`), and by the CLI's `split --stamp` | page 0 of each output file |
 | Stamp tab | `StampView.write(_:job:)` | page 0 of each file |
 | CLI `stamp` | `CombineCommands` → `applyingStamp` | page 0 of each file |
 

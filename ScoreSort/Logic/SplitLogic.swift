@@ -341,7 +341,7 @@ func splitOutputIsWorthSaving(activeFiles: Int, skippedPages: Int, pagesRebuilt:
 
 /// One file a split will write: its name (with `.pdf`) and the pages (0-based, in order)
 /// that go into it.
-struct SplitFilePlan: Equatable {
+nonisolated struct SplitFilePlan: Equatable, Sendable {
     let name: String
     let pages: [Int]
 }
@@ -359,18 +359,35 @@ func splitFilePlans(pageToFile: [Int: Int], pageCount: Int, skippedPages: Set<In
 }
 
 /// What writing a split did: the files written, and the ones that failed with the reason.
-struct SplitWriteReport {
+nonisolated struct SplitWriteReport {
     var written: [String] = []
     var failures: [(name: String, reason: String)] = []
+    /// Files not attempted because the save was cancelled.
+    var notWritten: [String] = []
+    var wasCancelled: Bool { !notWritten.isEmpty }
 }
 
 /// Writes each planned file into `folder` (making any subfolder its name includes), stamping each one's first page (or every page)
 /// as `stampJob` says — each output file is one part. Existing files are replaced.
 /// Shared by the Split tab and the command line, so both produce the same files.
-func writeSplitFiles(_ plans: [SplitFilePlan], from document: PDFDocument, to folder: URL,
-                     stampJob: StampJob?) -> SplitWriteReport {
+///
+/// Touches no main-actor state, so the Split tab runs it in the background on **its own copy**
+/// of the document (PDFKit mustn't be used from two threads at once, and the tab is still
+/// showing the original). `progress` is called before each file with how many are done, the
+/// total and the file about to be written, and once more at the end with `nil`. `isCancelled`
+/// is checked between files: once it says yes, the rest are listed in `notWritten`. Each file
+/// is written whole or not at all (`savePDFDocument` writes atomically).
+nonisolated func writeSplitFiles(_ plans: [SplitFilePlan], from document: PDFDocument, to folder: URL,
+                                 stampJob: StampJob?,
+                                 progress: ((_ done: Int, _ total: Int, _ next: String?) -> Void)? = nil,
+                                 isCancelled: (() -> Bool)? = nil) -> SplitWriteReport {
     var report = SplitWriteReport()
-    for plan in plans {
+    for (index, plan) in plans.enumerated() {
+        if isCancelled?() == true {
+            report.notWritten = plans[index...].map(\.name)
+            break
+        }
+        progress?(index, plans.count, plan.name)
         let assembled = PDFDocument()
         for pageIndex in plan.pages {
             // A copy, so the source document is left as it was.
@@ -397,6 +414,7 @@ func writeSplitFiles(_ plans: [SplitFilePlan], from document: PDFDocument, to fo
             report.written.append(plan.name)
         }
     }
+    if !report.wasCancelled { progress?(plans.count, plans.count, nil) }
     return report
 }
 

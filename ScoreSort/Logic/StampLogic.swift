@@ -21,7 +21,7 @@ import CoreText
 /// The nine quick positions offered as buttons. These are *presets* that set a stamp's
 /// free `positionX`/`positionY` — the stamp itself stores the fractions, so it can also be
 /// dragged anywhere in between on the preview.
-enum StampAnchor: String, Codable, CaseIterable, Identifiable {
+nonisolated enum StampAnchor: String, Codable, CaseIterable, Identifiable {
     case topLeft, topCentre, topRight
     case middleLeft, centre, middleRight
     case bottomLeft, bottomCentre, bottomRight
@@ -70,7 +70,7 @@ enum StampAnchor: String, Codable, CaseIterable, Identifiable {
 /// How `{date}` is written out. Day-first is the default and deliberately not taken from the
 /// system locale: this is an Australian app, and a US-formatted date on a copyright line is
 /// worse than wrong — 03/04 is a different day depending on who reads it.
-enum StampDateFormat: String, Codable, CaseIterable, Identifiable {
+nonisolated enum StampDateFormat: String, Codable, CaseIterable, Identifiable {
     case dayFirst      // 14/03/2026
     case longForm      // 14 March 2026
     case iso           // 2026-03-14
@@ -115,7 +115,7 @@ enum StampDateFormat: String, Codable, CaseIterable, Identifiable {
 
 /// Placeholders a stamp's text can contain, filled in when the stamp is drawn or written.
 /// Deliberately few and lower-case; a stamp is a line or two of text, not a template language.
-enum StampToken: String, CaseIterable {
+nonisolated enum StampToken: String, CaseIterable {
     case date = "{date}"
     case year = "{year}"
 
@@ -140,7 +140,7 @@ enum StampToken: String, CaseIterable {
 }
 
 /// True when the text uses any placeholder — drives whether the date-format control is shown.
-func stampUsesTokens(_ text: String) -> Bool {
+nonisolated func stampUsesTokens(_ text: String) -> Bool {
     StampToken.allCases.contains { text.localizedCaseInsensitiveContains($0.rawValue) }
 }
 
@@ -148,7 +148,7 @@ func stampUsesTokens(_ text: String) -> Bool {
 /// — a bold `{date}` produces a bold date.
 ///
 /// Replacements run back to front so the ranges found earlier stay valid.
-func resolvingStampTokens(_ attributed: NSAttributedString,
+nonisolated func resolvingStampTokens(_ attributed: NSAttributedString,
                           date: Date = Date(),
                           format: StampDateFormat = .preferred) -> NSAttributedString {
     let result = NSMutableAttributedString(attributedString: attributed)
@@ -177,7 +177,7 @@ func resolvingStampTokens(_ attributed: NSAttributedString,
 /// How the stamp's lines line up with each other inside its box. Only visible on a
 /// multi-line stamp, and deliberately a stored choice rather than something derived from the
 /// stamp's position — dragging a stamp around shouldn't re-flow its text.
-enum StampTextAlignment: String, Codable, CaseIterable, Identifiable {
+nonisolated enum StampTextAlignment: String, Codable, CaseIterable, Identifiable {
     case left, centre, right
 
     var id: String { rawValue }
@@ -218,7 +218,7 @@ enum StampTextAlignment: String, Codable, CaseIterable, Identifiable {
 /// Which pages of a document get stamped. Chosen **per job**, not saved on the stamp — the
 /// same design is often wanted on every page of one document and only the first page of
 /// the next.
-enum StampScope: String, Codable, CaseIterable, Identifiable {
+nonisolated enum StampScope: String, Codable, CaseIterable, Identifiable {
     /// Every page of the output.
     case everyPage
     /// Only the first page of each sub-document — each source file in a combined PDF,
@@ -237,7 +237,7 @@ enum StampScope: String, Codable, CaseIterable, Identifiable {
 
 /// A saved stamp design. Extra appearance options (opacity, rotation) can be added
 /// later as new defaulted fields without breaking existing `stamps.json` files.
-struct Stamp: Identifiable, Codable, Equatable {
+nonisolated struct Stamp: Identifiable, Codable, Equatable {
     var id = UUID()
     /// Preset name shown in the picker (not drawn on the page).
     var name: String
@@ -358,7 +358,7 @@ struct Stamp: Identifiable, Codable, Equatable {
 
 /// One stamping request: a design plus the pages it should land on. Bundling the two keeps
 /// the export APIs to a single optional parameter — nil means "don't stamp".
-struct StampJob {
+nonisolated struct StampJob {
     let stamp: Stamp
     let scope: StampScope
 
@@ -378,13 +378,13 @@ struct StampJob {
 }
 
 /// Inset between the text and the border box, when a border is drawn.
-let stampPaddingH: CGFloat = 7
-let stampPaddingV: CGFloat = 4
+nonisolated let stampPaddingH: CGFloat = 7
+nonisolated let stampPaddingV: CGFloat = 4
 
 // MARK: - Colour helpers
 
 /// Parses "#RRGGBB" (or "RRGGBB"). Falls back to black on anything unparseable.
-func nsColor(fromHex hex: String) -> NSColor {
+nonisolated func nsColor(fromHex hex: String) -> NSColor {
     var s = hex.trimmingCharacters(in: .whitespaces)
     if s.hasPrefix("#") { s.removeFirst() }
     guard s.count == 6, let value = UInt32(s, radix: 16) else { return .black }
@@ -395,7 +395,7 @@ func nsColor(fromHex hex: String) -> NSColor {
 }
 
 /// Serialises a colour as "#RRGGBB" for storage in `stamps.json`.
-func hexString(from color: NSColor) -> String {
+nonisolated func hexString(from color: NSColor) -> String {
     let rgb = color.usingColorSpace(.sRGB) ?? .black
     let r = Int((rgb.redComponent   * 255).rounded())
     let g = Int((rgb.greenComponent * 255).rounded())
@@ -407,7 +407,7 @@ func hexString(from color: NSColor) -> String {
 
 /// Resolves the stamp's font family + traits, falling back to the system font when the
 /// family isn't available (e.g. a stamp designed on another Mac).
-func stampFont(_ stamp: Stamp) -> NSFont {
+nonisolated func stampFont(_ stamp: Stamp) -> NSFont {
     let size = CGFloat(stamp.fontSize)
     var traits: NSFontTraitMask = []
     if stamp.isBold { traits.insert(.boldFontMask) }
@@ -424,12 +424,12 @@ func stampFont(_ stamp: Stamp) -> NSFont {
 
 /// The attributes newly typed (or unformatted) stamp text takes: the stamp's base font,
 /// traits and colour.
-func stampBaseAttributes(_ stamp: Stamp) -> [NSAttributedString.Key: Any] {
+nonisolated func stampBaseAttributes(_ stamp: Stamp) -> [NSAttributedString.Key: Any] {
     [.font: stampFont(stamp), .foregroundColor: nsColor(fromHex: stamp.colourHex)]
 }
 
 /// Decodes the stamp's rich text, or nil when it has none yet.
-func stampRichText(_ stamp: Stamp) -> NSAttributedString? {
+nonisolated func stampRichText(_ stamp: Stamp) -> NSAttributedString? {
     guard let data = stamp.richTextData,
           let rich = NSAttributedString(rtf: data, documentAttributes: nil),
           rich.length > 0 else { return nil }
@@ -442,7 +442,7 @@ func stampRichText(_ stamp: Stamp) -> NSAttributedString? {
 /// The stamp's alignment is applied over the whole range here — *without* touching the
 /// per-run font and colour attributes — rather than being carried in the RTF, so the control
 /// stays authoritative whatever the editor happens to have stored.
-func stampAttributedString(_ stamp: Stamp,
+nonisolated func stampAttributedString(_ stamp: Stamp,
                            date: Date = Date(),
                            dateFormat: StampDateFormat = .preferred) -> NSAttributedString {
     let raw = stampRichText(stamp)
@@ -462,13 +462,13 @@ func stampAttributedString(_ stamp: Stamp,
 }
 
 /// Serialises an edited attributed string for storage in `stamps.json`.
-func stampRTFData(from attributed: NSAttributedString) -> Data? {
+nonisolated func stampRTFData(from attributed: NSAttributedString) -> Data? {
     attributed.rtf(from: NSRange(location: 0, length: attributed.length),
                    documentAttributes: [.documentType: NSAttributedString.DocumentType.rtf])
 }
 
 /// The laid-out size of the stamp's text, wrapped to fit inside the page's margins.
-func stampTextSize(_ stamp: Stamp, in pageBox: CGRect) -> CGSize {
+nonisolated func stampTextSize(_ stamp: Stamp, in pageBox: CGRect) -> CGSize {
     let attr = stampAttributedString(stamp)
     guard attr.length > 0 else { return .zero }
     let padH = stamp.hasBorder ? stampPaddingH : 0
@@ -483,7 +483,7 @@ func stampTextSize(_ stamp: Stamp, in pageBox: CGRect) -> CGSize {
 // MARK: - Placement
 
 /// The size of the full stamp box: the laid-out text plus border padding.
-func stampBoxSize(for stamp: Stamp, textSize: CGSize) -> CGSize {
+nonisolated func stampBoxSize(for stamp: Stamp, textSize: CGSize) -> CGSize {
     let padH = stamp.hasBorder ? stampPaddingH : 0
     let padV = stamp.hasBorder ? stampPaddingV : 0
     return CGSize(width: textSize.width + padH * 2, height: textSize.height + padV * 2)
@@ -492,7 +492,7 @@ func stampBoxSize(for stamp: Stamp, textSize: CGSize) -> CGSize {
 /// The travel available to the stamp box inside `pageBox` once the margins and the box's
 /// own size are taken out. Zero on an axis means the box fills that axis — it then simply
 /// sits at the margin. Also the denominator when converting a drag into a position.
-func stampTravel(for stamp: Stamp, boxSize: CGSize, in pageBox: CGRect) -> CGSize {
+nonisolated func stampTravel(for stamp: Stamp, boxSize: CGSize, in pageBox: CGRect) -> CGSize {
     let margin = CGFloat(stamp.margin)
     return CGSize(width:  max(0, pageBox.width  - margin * 2 - boxSize.width),
                   height: max(0, pageBox.height - margin * 2 - boxSize.height))
@@ -500,7 +500,7 @@ func stampTravel(for stamp: Stamp, boxSize: CGSize, in pageBox: CGRect) -> CGSiz
 
 /// The stamp box placed inside `pageBox` at the stamp's fractional position. `pageBox` is
 /// in PDF user space — y increases upwards, so `positionY == 1` is the top of the page.
-func stampRect(for stamp: Stamp, textSize: CGSize, in pageBox: CGRect) -> CGRect {
+nonisolated func stampRect(for stamp: Stamp, textSize: CGSize, in pageBox: CGRect) -> CGRect {
     let size = stampBoxSize(for: stamp, textSize: textSize)
     let travel = stampTravel(for: stamp, boxSize: size, in: pageBox)
     let margin = CGFloat(stamp.margin)
@@ -515,7 +515,7 @@ func stampRect(for stamp: Stamp, textSize: CGSize, in pageBox: CGRect) -> CGRect
 
 /// Draws the stamp into `ctx`, positioned within `pageBox` (PDF user space, y up).
 /// Shared by the PDF flattener and the designer's live preview.
-func drawStamp(_ stamp: Stamp, in ctx: CGContext, pageBox: CGRect) {
+nonisolated func drawStamp(_ stamp: Stamp, in ctx: CGContext, pageBox: CGRect) {
     guard stamp.isDrawable else { return }
     let attr = stampAttributedString(stamp)
     let textSize = stampTextSize(stamp, in: pageBox)
@@ -551,7 +551,7 @@ func drawStamp(_ stamp: Stamp, in ctx: CGContext, pageBox: CGRect) {
 /// The *crop* box (not the media box) is deliberate — `splitA3Pages` sets both boxes to
 /// one half of an A3 sheet, and using the media box alone would resurrect the half the
 /// user discarded.
-func visualPageBox(_ page: CGPDFPage) -> CGRect {
+nonisolated func visualPageBox(_ page: CGPDFPage) -> CGRect {
     var box = page.getBoxRect(.cropBox)
     if box.isEmpty { box = page.getBoxRect(.mediaBox) }
     var w = box.width, h = box.height
@@ -568,7 +568,7 @@ func visualPageBox(_ page: CGPDFPage) -> CGRect {
 ///   • outlines/bookmarks do not survive — callers that want them must build the
 ///     `PDFOutline` on `outlineReadyDocument(from:)` of the *returned* document, or it
 ///     won't be saved (page indices are unchanged).
-func stampedDocument(_ doc: PDFDocument, stamp: Stamp, pageIndices: Set<Int>) -> PDFDocument? {
+nonisolated func stampedDocument(_ doc: PDFDocument, stamp: Stamp, pageIndices: Set<Int>) -> PDFDocument? {
     guard doc.pageCount > 0, stamp.isDrawable else { return nil }
     guard let data = doc.dataRepresentation(),
           let provider = CGDataProvider(data: data as CFData),
@@ -607,7 +607,7 @@ func stampedDocument(_ doc: PDFDocument, stamp: Stamp, pageIndices: Set<Int>) ->
 
 /// Applies `job` to `doc`, or returns `doc` unchanged when there's nothing to stamp or the
 /// flatten fails — so callers can use it inline without losing the document.
-func applyingStamp(_ job: StampJob?, to doc: PDFDocument, partFirstPages: [Int]) -> PDFDocument {
+nonisolated func applyingStamp(_ job: StampJob?, to doc: PDFDocument, partFirstPages: [Int]) -> PDFDocument {
     guard let job, job.isDrawable else { return doc }
     let indices = job.pageIndices(pageCount: doc.pageCount, partFirstPages: partFirstPages)
     return stampedDocument(doc, stamp: job.stamp, pageIndices: indices) ?? doc
@@ -617,7 +617,7 @@ func applyingStamp(_ job: StampJob?, to doc: PDFDocument, partFirstPages: [Int])
 
 /// The page box the preview (and the drag maths on top of it) works in: the crop box
 /// normalised to the origin and swapped for 90°/270° rotation, or A4 when there's no page.
-func visualPageBox(for page: PDFPage?) -> CGRect {
+nonisolated func visualPageBox(for page: PDFPage?) -> CGRect {
     guard let page else { return CGRect(x: 0, y: 0, width: 595, height: 842) }   // A4
     var box = page.bounds(for: .cropBox)
     if box.isEmpty { box = page.bounds(for: .mediaBox) }

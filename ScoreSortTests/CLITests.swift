@@ -929,7 +929,7 @@ struct SingleFileSplitTests {
         manager.loadPDF(from: source)
         let out = dir.appendingPathComponent("out")
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
-        manager.saveSplitPDF(to: out, splitMarkers: [], baseFileName: "02 Ebony Alto 1", customFileNames: [:],
+        manager.saveSplitPDF(to: out, baseFileName: "02 Ebony Alto 1", customFileNames: [:],
                              pageToFileMapping: [0: 0, 1: 0, 2: 0, 3: 0], separator: " - ") { _, _, _ in }
         #expect(try FileManager.default.contentsOfDirectory(atPath: out.path) == ["02 Ebony Alto 1.pdf"])
     }

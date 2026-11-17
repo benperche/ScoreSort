@@ -1828,32 +1828,44 @@ class PDFManager: ObservableObject {
         }
     }
     
-    func saveSplitPDF(to folderURL: URL, splitMarkers: Set<Int>, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], skippedPages: Set<Int> = [], separator: String = "_", stampJob: StampJob? = nil, partFolders: [Int: String] = [:], completion: PDFAlertHandler) {
-        guard let document = pdfDocument else { return }
-
-        // The writing itself is shared with the command line (`writeSplitFiles`,
-        // Logic/SplitLogic.swift), so both produce identical files.
+    /// The files a split will write, named as Steps 2 and 3 show them. Shared by the Split tab's
+    /// background save and `saveSplitPDF`; the writing is `writeSplitFiles` (Logic/SplitLogic.swift),
+    /// shared with the command line, so all of them produce identical files.
+    func splitPlans(baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int],
+                    skippedPages: Set<Int> = [], separator: String = "_", partFolders: [Int: String] = [:]) -> [SplitFilePlan] {
+        guard let document = pdfDocument else { return [] }
         let onlyFile = splitActiveFileCount(pageToFile: pageToFileMapping, skippedPages: skippedPages) == 1
-        let plans = splitFilePlans(pageToFile: pageToFileMapping, pageCount: document.pageCount,
-                                   skippedPages: skippedPages) { fileIndex in
+        return splitFilePlans(pageToFile: pageToFileMapping, pageCount: document.pageCount,
+                              skippedPages: skippedPages) { fileIndex in
             // "Sort into folders": a file's section/instrument folder, by file index.
             partFolderPath(splitOutputFileName(base: baseFileName, separator: separator,
                                                suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex,
                                                onlyFile: onlyFile),
                            folder: partFolders[fileIndex])
         }
-        let report = writeSplitFiles(plans, from: document, to: folderURL, stampJob: stampJob)
+    }
 
+    /// What to tell the user about a finished split save (not a cancelled one).
+    static func splitSaveMessage(_ report: SplitWriteReport, folder: URL) -> (title: String, message: String, isError: Bool) {
         if report.failures.isEmpty {
-            completion("PDF Split Successfully",
-                       "Created \(report.written.count) file(s) in:\n\(folderURL.path)",
-                       false)
-        } else {
-            let reasons = report.failures.map { "\($0.name): \($0.reason)" }.joined(separator: "\n")
-            completion(report.written.isEmpty ? "Save Failed" : "Partial Success",
-                       "Created \(report.written.count) file(s), but \(report.failures.count) failed:\n\(reasons)",
-                       true)
+            return ("PDF Split Successfully", "Created \(report.written.count) file(s) in:\n\(folder.path)", false)
         }
+        let reasons = report.failures.map { "\($0.name): \($0.reason)" }.joined(separator: "\n")
+        return (report.written.isEmpty ? "Save Failed" : "Partial Success",
+                "Created \(report.written.count) file(s), but \(report.failures.count) failed:\n\(reasons)",
+                true)
+    }
+
+    /// Writes the split on the calling thread. The Split tab saves in the background instead
+    /// (`SplitView.writeInBackground`); this stays for callers that want the result at once.
+    func saveSplitPDF(to folderURL: URL, baseFileName: String, customFileNames: [Int: String], pageToFileMapping: [Int: Int], skippedPages: Set<Int> = [], separator: String = "_", stampJob: StampJob? = nil, partFolders: [Int: String] = [:], completion: PDFAlertHandler) {
+        guard let document = pdfDocument else { return }
+        let plans = splitPlans(baseFileName: baseFileName, customFileNames: customFileNames,
+                               pageToFileMapping: pageToFileMapping, skippedPages: skippedPages,
+                               separator: separator, partFolders: partFolders)
+        let report = writeSplitFiles(plans, from: document, to: folderURL, stampJob: stampJob)
+        let outcome = Self.splitSaveMessage(report, folder: folderURL)
+        completion(outcome.title, outcome.message, outcome.isError)
     }
 }
 

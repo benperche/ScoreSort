@@ -50,6 +50,14 @@ struct ViewSmokeTests {
         render(SplitView())
     }
 
+    @Test("Split save progress sheet renders, starting, part-way and cancelling")
+    func splitSaveProgress() {
+        let progress = SplitSaveProgress(total: 12)
+        render(SplitSaveProgressView(progress: progress))
+        progress.cancel()
+        render(SplitSaveProgressView(progress: progress))
+    }
+
     @Test("Split Step 3 renders, sorting into folders and not")
     func prefixStepWithFolders() {
         let items = ["Score.pdf", "Flute 1.pdf", "Trumpet 1.pdf", "Snare Drum.pdf", "Notes.pdf"].enumerated()

@@ -12,6 +12,8 @@ _Draft for the next release after 1.11.0. Keep adding to this as more changes la
 
 ## ✂️ Split PDF
 
+- **Saving a split no longer freezes ScoreSort on big scans.** A progress bar shows each part as it's saved, and you can cancel part-way: the parts already saved are kept, and you're told which weren't.
+
 ## 🔖 Stamp
 
 ## 🐞 Fixed

@@ -12,7 +12,7 @@
 import PDFKit
 
 /// Writes `doc` to `url`. Returns `nil` on success, or a message saying what went wrong.
-func savePDFDocument(_ doc: PDFDocument, to url: URL) -> String? {
+nonisolated func savePDFDocument(_ doc: PDFDocument, to url: URL) -> String? {
     // An empty document can't be written at all, and would otherwise fail with no explanation.
     guard doc.pageCount > 0 else { return "There were no pages to save." }
     guard let data = doc.dataRepresentation() else {
@@ -30,7 +30,7 @@ func savePDFDocument(_ doc: PDFDocument, to url: URL) -> String? {
 }
 
 /// A message for a destination that wouldn't accept the file.
-func saveFailureMessage(for error: Error, at url: URL) -> String {
+nonisolated func saveFailureMessage(for error: Error, at url: URL) -> String {
     let folder = url.deletingLastPathComponent().lastPathComponent
     if isFilePermissionError(error) {
         return """

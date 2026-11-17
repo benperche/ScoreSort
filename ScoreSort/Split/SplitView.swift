@@ -106,6 +106,8 @@ struct SplitView: View {
     @State private var skipMode: SkipMode = .file
     /// Non-nil when the "Fix Booklet Order" sheet should be presented.
     @State private var bookletFixRequest: BookletFixRequest? = nil
+    /// A save in progress (the files are written in the background behind its sheet).
+    @State private var saveProgress: SplitSaveProgress? = nil
     /// The most recently applied booklet order, stored so the user can repeat it.
     /// Tuple carries the file's page count (for eligibility check) and the order array.
     @State private var lastBookletOrder: (n: Int, order: [Int])? = nil
@@ -337,6 +339,9 @@ struct SplitView: View {
         .onChange(of: fileSizes)                { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: skippedPages)             { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: pdfManager.pdfDocument)   { DispatchQueue.main.async { syncTabCommands() } }
+        .sheet(item: $saveProgress) { progress in
+            SplitSaveProgressView(progress: progress)
+        }
         .sheet(item: $scanSplitRequest) { request in
             ScanSplitSheet(
                 request: request,
@@ -1054,7 +1059,7 @@ struct SplitView: View {
 
     func saveSplitPDF() {
         guard let document = pdfManager.pdfDocument,
-              canContinueToNaming else { return }
+              canContinueToNaming, saveProgress == nil else { return }
 
         if prefixEnabled {
             // Go straight to Step 3 — folder picker comes after the user confirms order.
@@ -1098,19 +1103,13 @@ struct SplitView: View {
                                                                     onlyFile: activeFileCount == 1),
                                                 folder: folders[i]))
                 }
-                saveSplitFiles(names: names, into: folderURL, save: { folder, completion in
-                    pdfManager.saveSplitPDF(
-                        to: folder,
-                        splitMarkers: splitMarkers,
-                        baseFileName: baseFileName,
-                        customFileNames: customFileNames,
-                        pageToFileMapping: pageToFileMapping,
-                        skippedPages: skippedPages,
-                        separator: filenameSeparator,
-                        stampJob: activeStampJob,
-                        partFolders: folders,
-                        completion: completion)
-                }, finish: { trashed in
+                let plans = pdfManager.splitPlans(baseFileName: baseFileName,
+                                                  customFileNames: customFileNames,
+                                                  pageToFileMapping: pageToFileMapping,
+                                                  skippedPages: skippedPages,
+                                                  separator: filenameSeparator,
+                                                  partFolders: folders)
+                saveSplitFiles(names: names, plans: plans, into: folderURL, finish: { trashed in
                     sourceWasTrashed = trashed
                     pendingFolderURL = folderURL
                     summaryNames = names
@@ -1123,6 +1122,7 @@ struct SplitView: View {
     /// Called by PrefixOrderStepView when the user confirms the prefix ordering.
     /// Shows the folder picker, then writes all split files in one pass.
     private func applyPrefixAndSaveSplit(orderedItems: [PrefixItem]) {
+        guard saveProgress == nil else { return }
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -1417,19 +1417,13 @@ struct SplitView: View {
             finalNamesForSummary.append(partFolderPath(fullName, folder: folders[item.id]))
         }
 
-        saveSplitFiles(names: finalNamesForSummary, into: folderURL, save: { folder, completion in
-            pdfManager.saveSplitPDF(
-                to: folder,
-                splitMarkers: splitMarkers,
-                baseFileName: "",
-                customFileNames: finalCustomNames,
-                pageToFileMapping: pageToFileMapping,
-                skippedPages: omittedPages,
-                separator: "",
-                stampJob: activeStampJob,
-                partFolders: folders,
-                completion: completion)
-        }, finish: { trashed in
+        let plans = pdfManager.splitPlans(baseFileName: "",
+                                          customFileNames: finalCustomNames,
+                                          pageToFileMapping: pageToFileMapping,
+                                          skippedPages: omittedPages,
+                                          separator: "",
+                                          partFolders: folders)
+        saveSplitFiles(names: finalNamesForSummary, plans: plans, into: folderURL, finish: { trashed in
             sourceWasTrashed = trashed
             pendingFolderURL = folderURL   // stored here so summary can offer "Show in Finder"
             summaryNames = finalNamesForSummary
@@ -1437,23 +1431,34 @@ struct SplitView: View {
         })
     }
 
-    /// Saves the split files (`save` writes them into the folder it's given) and then moves
-    /// the original to the Trash if asked. When one of `names` lands exactly on the original —
-    /// same folder, same name, as when a single part's pages were only cut from A3 — the files
-    /// are written to a temporary folder first, so the original has been read in full before
-    /// anything touches it. Then the original goes to the Trash (“Move original to Trash”) or,
-    /// after asking, is replaced, and the new files move into place. `finish` gets whether the
-    /// original went to the Trash.
-    private func saveSplitFiles(names: [String], into folder: URL,
-                                save: (URL, PDFAlertHandler) -> Void,
-                                finish: (Bool) -> Void) {
+    /// Saves the split files (`plans`, named `names`) and then moves the original to the Trash
+    /// if asked. The writing happens in the background behind a progress sheet
+    /// (`writeInBackground`), so a large scan no longer freezes the app.
+    ///
+    /// When one of `names` lands exactly on the original — same folder, same name, as when a
+    /// single part's pages were only cut from A3 — the files are written to a temporary folder
+    /// first, so the original has been read in full before anything touches it. Then the
+    /// original goes to the Trash (“Move original to Trash”) or, after asking, is replaced, and
+    /// the new files move into place. Cancelling there saves nothing and leaves the original
+    /// alone. `finish` gets whether the original went to the Trash.
+    private func saveSplitFiles(names: [String], plans: [SplitFilePlan], into folder: URL,
+                                finish: @escaping (Bool) -> Void) {
+        guard saveProgress == nil else { return }
         guard let source = pdfManager.sourceURL,
               splitOutputReplacesSource(names: names, folder: folder, source: source) else {
-            var failed = false
-            save(folder) { title, message, isError in
-                if isError { failed = true; showNSAlert(title: title, message: message, isError: true) }
+            Task {
+                guard let report = await writeInBackground(plans, to: folder) else { return }
+                if report.wasCancelled {
+                    showNSAlert(title: "Saving Stopped", message: stoppedMessage(report, folder: folder), isError: false)
+                    return
+                }
+                let outcome = PDFManager.splitSaveMessage(report, folder: folder)
+                if outcome.isError {
+                    showNSAlert(title: outcome.title, message: outcome.message, isError: true)
+                    return
+                }
+                finish(trashSourceFileIfRequested())
             }
-            if !failed { finish(trashSourceFileIfRequested()) }
             return
         }
 
@@ -1470,41 +1475,84 @@ struct SplitView: View {
             showNSAlert(title: "Couldn't Save", message: "ScoreSort couldn't make a temporary folder to save into beside \(folder.path).", isError: true)
             return
         }
-        defer { try? fm.removeItem(at: temp) }
 
-        var failure: (title: String, message: String)? = nil
-        save(temp) { title, message, isError in
-            if isError { failure = (title, message) }
-        }
-        if let failure {
-            showNSAlert(title: failure.title, message: failure.message, isError: true)
-            return
-        }
-
-        var trashed = false
-        do {
-            if deleteSourceAfterSplit {
-                try fm.trashItem(at: source, resultingItemURL: nil)
-                trashed = true
+        Task {
+            defer { try? fm.removeItem(at: temp) }
+            guard let report = await writeInBackground(plans, to: temp) else { return }
+            if report.wasCancelled {
+                showNSAlert(title: "Saving Stopped",
+                            message: "Nothing was saved, and “\(source.lastPathComponent)” is as it was.",
+                            isError: false)
+                return
             }
-            for name in names {
-                let from = temp.appendingPathComponent(name)
-                guard fm.fileExists(atPath: from.path) else { continue }
-                let to = folder.appendingPathComponent(name)
-                try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
-                if fm.fileExists(atPath: to.path) {
-                    _ = try fm.replaceItemAt(to, withItemAt: from)
-                } else {
-                    try fm.moveItem(at: from, to: to)
+            let outcome = PDFManager.splitSaveMessage(report, folder: folder)
+            if outcome.isError {
+                showNSAlert(title: outcome.title, message: outcome.message, isError: true)
+                return
+            }
+
+            var trashed = false
+            do {
+                if deleteSourceAfterSplit {
+                    try fm.trashItem(at: source, resultingItemURL: nil)
+                    trashed = true
                 }
+                for name in names {
+                    let from = temp.appendingPathComponent(name)
+                    guard fm.fileExists(atPath: from.path) else { continue }
+                    let to = folder.appendingPathComponent(name)
+                    try fm.createDirectory(at: to.deletingLastPathComponent(), withIntermediateDirectories: true)
+                    if fm.fileExists(atPath: to.path) {
+                        _ = try fm.replaceItemAt(to, withItemAt: from)
+                    } else {
+                        try fm.moveItem(at: from, to: to)
+                    }
+                }
+            } catch {
+                showNSAlert(title: "Couldn't Finish Saving",
+                            message: "The split files were made, but couldn't be put in \(folder.path): \(error.localizedDescription)" + (trashed ? "\n\nThe original is in the Trash." : ""),
+                            isError: true)
+                return
             }
-        } catch {
-            showNSAlert(title: "Couldn't Finish Saving",
-                        message: "The split files were made, but couldn't be put in \(folder.path): \(error.localizedDescription)" + (trashed ? "\n\nThe original is in the Trash." : ""),
-                        isError: true)
-            return
+            finish(trashed)
         }
-        finish(trashed)
+    }
+
+    /// Writes `plans` into `folder` on a background thread, behind the progress sheet, from a
+    /// copy of the document (`SplitSaveSource`). Nil if the save couldn't start (the user has
+    /// been told why).
+    private func writeInBackground(_ plans: [SplitFilePlan], to folder: URL) async -> SplitWriteReport? {
+        guard let document = pdfManager.pdfDocument else { return nil }
+        let progress = SplitSaveProgress(total: plans.count)
+        saveProgress = progress
+        // Let the sheet appear before the one step that has to run here: a snapshot of a
+        // document rebuilt in memory (an untouched one is reopened from its file instead).
+        try? await Task.sleep(for: .milliseconds(80))
+        guard let source = SplitSaveSource.of(document, loadedFrom: pdfManager.sourceURL) else {
+            saveProgress = nil
+            showNSAlert(title: "Couldn't Save",
+                        message: "ScoreSort couldn't put the pages together to save them. Try opening the PDF again.",
+                        isError: true)
+            return nil
+        }
+        let report = await progress.run(plans, from: source, expectingPageCount: document.pageCount,
+                                        to: folder, stampJob: activeStampJob)
+        saveProgress = nil
+        return report
+    }
+
+    /// What a cancelled save did: how many files were written, where, and which weren't.
+    private func stoppedMessage(_ report: SplitWriteReport, folder: URL) -> String {
+        let total = report.written.count + report.failures.count + report.notWritten.count
+        var message = "Saved \(report.written.count) of \(total) files in \(folder.path)."
+        let shown = report.notWritten.prefix(8)
+        message += "\n\nNot saved:\n" + shown.joined(separator: "\n")
+        if report.notWritten.count > shown.count { message += "\n…and \(report.notWritten.count - shown.count) more" }
+        if !report.failures.isEmpty {
+            message += "\n\nFailed:\n" + report.failures.map { "\($0.name): \($0.reason)" }.joined(separator: "\n")
+        }
+        message += "\n\nSave again to finish: files already saved are replaced."
+        return message
     }
 }
 

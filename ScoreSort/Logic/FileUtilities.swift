@@ -75,7 +75,7 @@ func nonWritableParentDirectories(of urls: [URL]) -> [URL] {
 /// Detects whether a thrown file-system error is a permission / read-only-location problem
 /// (as opposed to, say, a name collision). Used to decide when to show the friendly
 /// "this location is read-only" guidance instead of a raw system error string.
-func isFilePermissionError(_ error: Error) -> Bool {
+nonisolated func isFilePermissionError(_ error: Error) -> Bool {
     let ns = error as NSError
     func isReadOnlyPOSIX(_ code: Int) -> Bool {
         return code == Int(EACCES) || code == Int(EPERM) || code == Int(EROFS)
