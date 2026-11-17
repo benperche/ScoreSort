@@ -123,6 +123,8 @@ Helpers: `draggedSet(for:)` (the whole selection if the dragged row is selected,
 
 **`EnsemblePresetStore`** (app-level `@EnvironmentObject`): `@Published presets` and `selectedPresetId`; `selectedPreset`. Persisted as JSON at `~/Library/Application Support/ScoreSort/ensemble-presets.json`, loaded on init and saved by every mutating method: `addPreset(name:parts:)`, `updatePreset(_:)`, `deletePreset(_:)`, `movePresets(from:to:)`, `duplicatePreset(_:)` ("Copy of …"), `exportCSV()` / `importCSV(_:)` (`Preset Name,Part Name,Copies`).
 
+- **Reading and writing go through `SavedListFile<EnsemblePreset>`** (`Logic/SavedListFile.swift`, shared with `StampStore`): an unreadable file is set aside under a dated name before anything can save over it, entries decode one by one, and a failed save is reported. Problems are published as `notices` and shown by `SavedFileNoticeBanner` above the tabs, never as an alert. `init(fileURL:)` is injectable (`defaultFileURL`; `nil` = memory only) — **tests never use the default**. The CLI reads the file itself (`savedPresets()`, `readSavedList`). See [gotchas.md § Saved files](gotchas.md#saved-files).
+
 - **No auto-seed.** The store starts empty; both editors show an empty-state prompt.
 - **Templates** are static arrays, not stored presets: `windBandTemplate`, `jazzTemplate`, `orchestraTemplate`. The wind band template ships "Euphonium BC" (not bare "Euphonium") so the common Australian-band case is clef-correct out of the box.
 - **Independent of the Renamer's instrument orders** (`instrument-orders.json`). The two systems don't interact.
