@@ -1,0 +1,56 @@
+# Tests
+
+Target `ScoreSortTests`, hosted by the app, `@testable import ScoreSort`, **Swift Testing** (`@Suite` / `@Test` / `#expect`), not XCTest. About 600 `@Test`s in 19 files under `ScoreSortTests/`. They test pure functions, view-model logic and real file output; the only UI tests are smoke tests that construct each view.
+
+```bash
+xcodebuild -project ScoreSort.xcodeproj -scheme ScoreSort test
+xcodebuild -project ScoreSort.xcodeproj -scheme ScoreSort test -only-testing:ScoreSortTests/CombineManagerTests
+```
+
+Ben normally runs them in Xcode himself.
+
+## CI
+
+`.github/workflows/tests.yml` runs on every push to `main` and every pull request, except when only `docs/**` or `*.md` changed (concurrent runs on one ref cancel the older). It runs on GitHub's `xcode-27` runner (macOS 27, Apple silicon) with Xcode 27.2 (fails clearly if the image lacks it), caches Swift packages keyed on `Package.resolved`, resolves with `-onlyUsePackageVersionsFromResolvedFile`, then `build-for-testing` and `test-without-building` (15-minute limit, so a hang fails the step and the `.xcresult` bundles are still uploaded on failure) through the **shared scheme** `ScoreSort.xcodeproj/xcshareddata/xcschemes/ScoreSort.xcscheme`, with `CODE_SIGNING_ALLOWED=NO`. After pushing: `gh run list --workflow tests.yml --limit 1`.
+
+## Rules for tests
+
+- **Never touch the user's real saved files.** Build `EnsemblePresetStore` / `StampStore` with a temporary `fileURL`, or `nil` for memory only — never the default. `InstrumentOrders.prepareFile(at:)` is tested on a temporary file. See [gotchas.md § Saved files](gotchas.md#saved-files).
+- **Never set `RenamerManager.prefixSeparator`**: it writes the user's real defaults.
+- **Tests that build a `RenamerManager()` set `partFolderMode = .off`**: it starts from the user's real "Sort into folders" setting. Under the test runner `RenamerManager` doesn't write that setting back, and `PartFolderMode.numbersSections` is always false (both check `XCTestConfigurationFilePath`).
+- The entry point never takes the command-line path under tests (`XCTestConfigurationFilePath`); `MCPServerTests` spawns the real executable without the test environment when it needs it.
+- **Test outlines by writing the file and reopening it, with Core Graphics–drawn fixtures** (`CombineBookmarkSavingTests`): `PDFPage()`-built documents don't show the macOS 27 outline drop ([gotcha](gotchas.md#pdfkit-and-pdf-geometry)).
+- Moved-file tests use a stand-in `.Trash` folder, never the real Trash. Read-only tests `chmod 0555` a temporary folder.
+- Never drive a real print dialog from a test; see [gotchas.md § Printing and booklets](gotchas.md#printing-and-booklets).
+
+Shared helpers: `writePDF(pages:to:)` (`Music_PDF_ManagerTests.swift`; PDFKit pages), `temporaryFolder(_:)` and `writeDrawnPDF(pages:size:to:)` (`CLITests.swift`; Core Graphics pages). Several files have private fixture builders (drawn greyscale scans, grey pages, bookmarked documents).
+
+## Files and suites
+
+| File | Suites → what they cover |
+|------|--------------------------|
+| `Music_PDF_ManagerTests.swift` (legacy name; the original file) | `FilenameValidationTests` (`pdfFilenameError`) · `InstrumentDetectionTests` (leftmost match, longest first, order index) · `ManualOverrideTests` (assign, replace, conflict and chain shifts) · `ScanFolderTests` (the Score Order Sorter's plan: score 00, sequence, undetected, overrides, already prefixed) · `ToggleSplitTests`, `SplitSizesTests` · `CombineManagerTests` (totals, add/remove/clear/copies, move blocks, `createCombinedPDF` page counts, blanks, copies) · `PDFManagerTests` (`saveRotatedPDF` values, source not mutated, odd/even; `saveSplitPDF` counts and names) · `RomanNumeralTests`, `NumberedBaseTests`, `PresetPartMatchesTests` (aliases, qualifier guard, clef), `RenumberAfterDeletionTests` · `ExtractSplitNamesTests`, `SplitSizesFromBookmarksTests` · `CombineManagerBookmarkTests` (one bookmark per copy, blank pages) · `CoverFirstFrontBackOrderTests`, `InnerFirstFrontBackOrderTests`, `BookletCandidatesTests` (deimposition) · `A3LandscapeDetectionTests`, `A3PageSplittingTests` · `ReadOnlyLocationTests` · `SplitEnsembleInferenceTests`, `SplitNumberedSuggestionTests` (per-ensemble part counts, crossing to the next instrument), `JazzSuggestionSequenceTests`, `PreferredInstrumentNameTests`, `NextSuggestionIndexTests` · `OutputDirectoryTests`, `RenamableFileTests`, `QualifiedFolderNameTests`, `JobFolderExpansionTests`, `ScoreOrderNumberingTests` |
+| `BookletLogicTests.swift` | `BookletImpositionOrderTests` (exact inverse of cover-first for N=4…20, known orders, `[]` cases) · `BookletPaddedCountTests` · `BookletSpreadsTests` (folded/flat spreads, padding trimmed) · `BookletSingleSidedTests` (blank backs left out only when safe) · `BookletSegmentsTests` · `BookletSheetCountTests` · `ImposedBookletDocumentTests` (faces, padding, `sheetStarts`, both sheet sizes, size following the source page) · `CombineBookletOutputTests` (end to end through `CombineManager`: TOC on the right sheets, a booklet per copy, single pages unchanged) · `BookletPlacementTests` — **content placement**: solid-grey pages imposed and every half-sheet sampled, so a transposed pair or mirrored sheet fails even when counts are right; padding blank; scaling down leaves even margins (scales about the half's centre); scaling up is clipped at the fold. Matched against *measured* greys, since rendering shifts gamma. |
+| `BookletCalibrationTests.swift` | `BookletCalibrationSheetTests` (four pages → one real imposed sheet, rotated backs) · `BookletDuplexDefaultsTests` (per-printer memory; `.serialized`) |
+| `PrintLogicTests.swift` | `PrintSettingsTests` — `printSettings(for:basedOn:wantsTwoSided:)`: landscape sheets turn the paper (both sizes), portrait left alone, centred with zero margins, duplex hint no-tumble / none |
+| `CombineManagerReorderTests.swift` | `CombineManagerReorderTests` — drag reorder, block moves, collate groups (create, dissolve, add to, dissolved when one member is left), copies clamp, totals with groups |
+| `CombineFollowsMovedFilesTests.swift`, `StampFollowsMovedFilesTests.swift` | Bookmarks find a file moved, renamed or re-exported after being added; names and TOC labels follow a rename; a Stamp item's edited output name stands; a file in a `.Trash` folder counts as gone |
+| `CombineSaveErrorTests.swift` | Failures say why: deleted or damaged inputs named with their reason and nothing saved; all unreadable listed; copies listed once; read-only destination and empty document explained; Open in Preview the same |
+| `CombineBookmarkSavingTests.swift` | The TOC survives **saving** for single pages, stamped, booklet and stamped booklet output (`/Outlines` in the bytes, right labels and pages on reopening); a stamped combined PDF splits back into its parts |
+| `PresetCopySplitTests.swift` | `PresetCopySplitTests` (`splitPresetCopies`, one entry over several files) · `PresetAliasTests` |
+| `SplitBookmarkNamingTests.swift` | `BookmarkSectionsTests` · `BookmarkSplitNamesTests` (both styles, dropped numbers, no false piece name, file-name-safe, agreement with `extractSplitNames`) · `SplitFileNameTests` (`splitOutputFileName`, `remapFileNames`) |
+| `ScanSplitLogicTests.swift` | `ScanSplitDetectionTests` (gutter centred and off-centre, dust, music into the fold, bed either side, dark edges and artwork not bed, empty page, music never blank) · `ScanSplitLayoutTests` (`ScanSplitModel`: skips → output pages, moving a cut keeps chosen skips, One/Two Pages, same-cut mode) · `ScanSplittingTests` (`splitPage` at 0/90/180/270°, mixed documents) · `ScanSplitRenderingTests` (`renderScan` upright, rotated, crop box; `looksLikeDoublePageScan`; `isUniformSheetScan`) |
+| `StampLogicTests.swift` | `StampPlacementTests`, `StampFreePositionTests` (drag maths) · `StampCodingTests` (round trip, legacy `anchor`, defaults) · `StampScopeTests`, `ApplyingStampTests` · `StampFlatteningTests` (page count, partial, write/reload, rotated page, A3 crop box) · `StampColourTests` · `ExpandToFilesTests` · `StampRichTextTests`, `StampAlignmentTests` · `ShortenedStampNameTests` · `StampFormatterStateTests` · `ImageWithStampTests` · `ImagePagesTests` · `PresetStampLinkTests` · `StampDateTokenTests` |
+| `PartFolderTests.swift` | `PartFolderNameTests` (which folder, per ensemble) · `PartFolderWritingTests` (Split and Rename writing into folders) · `SortedPieceTests` (a sorted piece renamed again or gathered back; empty folders removed) · `StickyRenumberTests` |
+| `RenamerEnsembleTests.swift` | `RenamerEnsembleTests` (ensemble switching vs a customised order; `.serialized`) · `RenumberAroundManualTests` · `MixedNumberingTests` (automatic renumbering) |
+| `SavedListFileTests.swift` | `SavedListReadingTests` · `PresetStoreFileTests`, `StampStoreFileTests` (damaged file set aside and never overwritten; one bad entry; failed saves reported once; refusing to save when the file can't be moved) · `InstrumentOrdersFileTests` · `SavedFileNoticeBarTests` |
+| `CLITests.swift` | `CLIArgumentTests` (strict parsing, page lists, the verb switch, help) · `CLIInspectTests` (`info`, `preview` incl. `--top` size and no overwrite) · `SplitWritingTests` (`splitFilePlans`, `writeSplitFiles`, `scoreOrderFileNames`) · `CLISplitTests` · `CLISplitScansTests` · `CLIRenameTests` (plans like the Rename tab, `--apply`, `--number`, `--rescan`) · `PresetMatchingTests` · `CLICombineTests` (copies, dry run, `stamp` never over an original) · `InstrumentPreviewAreaTests`, `FirstKeptPageTests` (Step 2 preview) · `AllocationTests` · `CLIFindTests` (word matching, shared folders only, future dates) · `AIConnectionTests` (settings file add/remove, refusing non-objects, wrapper script) · `SplitWorthSavingTests`, `SingleFileSplitTests` |
+| `MCPServerTests.swift` | `initialize` version negotiation, notifications, unknown methods; every tool option exists on its command and schemas are valid; titles and annotations in the schema's shape; **the read-only tools' commands have no `--out`, `--apply` or `--overwrite`**; `rename` isn't read-only; arguments → argv; a real call and an error result; preview images; **the real executable writes only protocol to stdout** |
+| `ViewSmokeTests.swift` | `ViewSmokeTests` (each tab, Split Step 3 with and without folders, the bookmark and double-page sheets, AI Assistants settings, the whole `ContentView`, all with in-memory stores) · `StampSwitchSmokeTests`. These catch a view that fails to construct — run them after moving code between files. |
+
+## Not covered
+
+- **Split's view state**: `SplitView`'s in-place rebuilds (`swapCurrentPageWithNext`, `applyBookletOrder`), undo/redo, the document `onChange` reset, and `saveSplitFiles`' replace-the-original path. Their pure pieces (`toggleSplit`, `remapFileNames`, `splitOutputReplacesSource`, `splitOutputIsWorthSaving`) are tested.
+- **Anything modal or system-level**: `printPDFDocument` (the dialog can't be driven headlessly), open/save panels, Quick Look, drag and drop, keyboard handlers and `NSEvent` monitors, menus.
+- **AI Assistants' Connect and Install** (quitting and reopening Claude, the administrator prompt); `AIConnection`'s pure logic is tested.
+- **Sparkle** and the release pipeline.
