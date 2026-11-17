@@ -129,7 +129,7 @@ ScoreSort updates itself after that. Keep it in Applications — that's also whe
 git clone https://github.com/benperche/ScoreSort.git
 ```
 
-2. Open `ScoreSort.xcodeproj` in Xcode 16 or later
+2. Open `ScoreSort.xcodeproj` in Xcode 26 or later
 
 3. Press ⌘R to build and run
 
@@ -425,7 +425,7 @@ Every command takes `--json`. Nothing is overwritten without `--overwrite`, and 
 1. Sorts instruments by length (longest first) to match specific names before generic ones
    - Example: "bass clarinet" matches before "clarinet"
 2. Performs case-insensitive substring matching
-3. Returns the first match found, preserving original position in instrument order
+3. Returns the match that starts furthest left in the file name — "Baritone BC Bassoon" is a baritone part — and numbers it by that instrument's place in the order
 
 ### Default Instrument Orders
 
