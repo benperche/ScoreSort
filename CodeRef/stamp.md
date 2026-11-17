@@ -1,0 +1,95 @@
+# Stamp (tab 4, ⌘5) and where stamping applies
+
+A reusable **text stamp** ("Example School Band", "Property of XYZ", "© {year}") burned into output pages. The Stamp tab designs stamps and applies them to PDFs that already exist; **Combine and Split reuse the same saved stamps** through the `StampMenuButton` in their toolbars.
+
+Files: `ScoreSort/Logic/StampLogic.swift` (model, placement, drawing, flattening, preview helpers), `Stamp/StampStore.swift`, `Stamp/StampTab.swift` (`StampView`, `StampFileItem`, `StampMenuButton`, `PresetStampPicker`, private `StampStyleButtons`, `FontFamilyPicker`, `StampPreviewCanvas`), `Stamp/StampTextEditor.swift` (`StampTextEditor`, `StampTextFormatter`), `Logic/SavedListFile.swift` (the store's file), `Logic/ImagePages.swift` (images as pages).
+
+The CLI's `stamp` and `stamps`: [cli-mcp.md](cli-mcp.md). Format menu and menu slice: [shared.md](shared.md#menu-bar).
+
+Gotchas that concern this area: [gotchas.md § PDFKit and PDF geometry](gotchas.md#pdfkit-and-pdf-geometry) (flattening drops outlines; crop box), [§ Saved files](gotchas.md#saved-files), [§ SwiftUI and AppKit](gotchas.md#swiftui-and-appkit) (nested `ObservableObject`, publishing during updates), [§ Performance](gotchas.md#performance).
+
+## Model and logic — `Logic/StampLogic.swift`
+
+| Symbol | Purpose |
+|--------|---------|
+| `Stamp` | `Codable` design: `name`, `text` (plain mirror, used for labels and `isDrawable`), **`richTextData`** (RTF — the source of truth when present, so bold/italic/font/size/colour vary run by run), `positionX`/`positionY`, `margin` (24), base attributes `fontFamily` ("Helvetica") / `isBold` (true) / `isItalic` / `fontSize` (11) / `colourHex` (used when there's no rich text, and inherited by newly typed text), `hasBorder` (true), `alignment`. `isDrawable` is false for all-whitespace text. **Scope is deliberately not here** (see `StampJob`). `init(from:)` is hand-written: every key is `decodeIfPresent` with a default, so fields can be added without invalidating `stamps.json`; a pre-drag `anchor` string migrates to the equivalent position, and a missing `alignment` is derived from the position. |
+| `StampJob` | `stamp` + `scope`: one stamping request, so every export API takes a single optional parameter (`nil` = don't stamp). `pageIndices(pageCount:partFirstPages:)` resolves the scope. |
+| `StampScope` | `.everyPage` / `.firstPageOfEachPart` — a **per-job** choice, stored per tool in `@AppStorage` (`combineStampScope`, `splitStampScope`, `stampTabScope`), never on the design: the same design is often wanted on every page of one document and only the first of the next. |
+| `StampAnchor` | The nine **presets** only, not stored. `position` gives the fractions, `grid` the row-major picker layout; `Stamp.move(to:)` / `matches(_:)` apply and detect one (so the grid shows nothing selected after a free drag). |
+| `StampTextAlignment` | Left / centre / right for multi-line stamps. **Stored, not derived**: it used to be inferred from `positionX`, so dragging a stamp re-flowed its text. `derived(fromPositionX:)` survives only for migration. |
+| `StampToken`, `resolvingStampTokens(_:date:format:)`, `stampUsesTokens(_:)` | `{date}` and `{year}` (case-insensitive). Filled in inside `stampAttributedString`, so the preview and the written PDF agree and the border box is sized to the resolved text. Replacements run **back to front** (earlier ranges stay valid) via `replaceCharacters`, which keeps the replaced run's attributes — a bold `{date}` gives a bold date. `stampUsesTokens` decides whether the date-format control shows. |
+| `StampDateFormat` | `dayFirst` (14/03/2026, **the default**), `longForm`, `iso`, `monthFirst`. A fixed `en_AU` locale, not the system's — a US-ordered date on a copyright line misleads. App-wide in `UserDefaults` `stampDateFormat` (`.preferred` reads it). |
+| `stampFont`, `stampBaseAttributes`, `stampRichText`, `stampRTFData(from:)` | Base font (falls back to the system font when the family isn't installed), base attributes, and RTF decode/encode. Empty rich text counts as none, so a cleared editor falls back rather than drawing nothing. |
+| `stampAttributedString(_:date:dateFormat:)` | **What actually gets drawn**: the rich text, else the plain text in base attributes; tokens resolved; `alignment` applied over the whole range as a paragraph style **without** touching per-run fonts and colours — deliberately not carried in the RTF, so the control stays authoritative. |
+| `stampTextSize`, `stampBoxSize(for:textSize:)`, `stampTravel(for:boxSize:in:)` | Text size (wrapped inside the margins), box size (plus `stampPaddingH`/`V` when bordered), and the room left to move. `stampTravel` is also **the denominator when converting a drag into a position**; a zero axis means the box fills it and sits at the margin. |
+| `stampRect(for:textSize:in:)` | Places the box at `positionX`/`positionY` — fractions of the **travel** inside the margins, so 1 is flush with the margin, not off the page. **PDF user space is y-up**: `positionY == 1` is the top. Clamped to 0…1. |
+| `drawStamp(_:in:pageBox:)` | The single drawing routine: CoreText frame plus optional rounded border. Used by **both** the flattener and the live preview, so they can't diverge. |
+| `stampedDocument(_:stamp:pageIndices:)` | The flattener (below). nil for an empty document or a blank stamp. |
+| `applyingStamp(_:to:partFirstPages:)` | What every export calls: applies a `StampJob?` inline and returns the document **unchanged** when there's nothing to stamp *or the flatten fails*. |
+| `visualPageBox(_: CGPDFPage)` / `visualPageBox(for: PDFPage?)` | The crop box, origin-normalised, w/h swapped for 90°/270° (A4 when there's no page). The flattener, the preview and the drag maths all use it, so they agree. |
+| `stampPagePreviewImage(page:maxDimension:)` | Page 1 (or a blank A4 sheet) as a bitmap **without** a stamp — the preview's cached background. |
+| `imageWithStamp(_:stamp:)` | Composites a stamp into an already-rendered page image for **static** previews (`PDFPageView`, so Split Step 1 can show its stamp). Compositing rather than overlaying a view means it lines up however the preview scales; a focused `NSImage` context is y-up, so no flip is needed. |
+| `nsColor(fromHex:)` / `hexString(from:)` | `#RRGGBB` round trip (sRGB; black on anything unparseable). |
+
+**How flattening works.** `doc.dataRepresentation()` → `CGPDFDocument` → every page redrawn into one multi-page `CGPDFContext`, stamping the listed pages. Going through CGPDF rather than `PDFPage.pageRef` is deliberate: Combine's image pages (`PDFPage(image:)`) and blank pages (`PDFPage()`) have no `pageRef`. Each output page uses `visualPageBox` — the **crop box**, so an A3-split half doesn't get its discarded half back — and `getDrawingTransform(.cropBox, …)`, which absorbs the page's `/Rotate`, so the stamp is placed where the reader sees it. Consequences: **source annotations and links are dropped**, and **outlines don't survive** — stamp first, then build the outline on `outlineReadyDocument(from:)` of the result ([gotcha](gotchas.md#pdfkit-and-pdf-geometry)). Page indices are unchanged.
+
+## Store — `Stamp/StampStore.swift`
+
+`StampStore: ObservableObject` (app-level `@EnvironmentObject`): `@Published stamps`, `selectedStampId`, `selectedStamp` (falls back to the first), and `notices`. Persisted as `stamps.json` in `~/Library/Application Support/ScoreSort/` — one of three independent saved files (with `ensemble-presets.json` and `instrument-orders.json`).
+
+- **Reading and writing go through `SavedListFile<Stamp>`** (`Logic/SavedListFile.swift`, shared with `EnsemblePresetStore`): an unreadable file is set aside under a dated name before anything can save over it, entries are decoded one by one, and a failed save says so. Problems are published as `notices` and shown by `SavedFileNoticeBanner` above the tabs, never as an alert from the store. Details: [gotchas.md § Saved files](gotchas.md#saved-files).
+- `init(fileURL:)` takes an injectable URL (`StampStore.defaultFileURL` by default; `nil` = memory only). **Tests always pass a temporary URL or nil.**
+- **Seeds one starter stamp** ("Ensemble Name" / "Example School Band") when the list is empty, so the picker and preview are never empty. That's why the CLI reads `stamps.json` directly (`savedStamps()`, via `readSavedList`) rather than building a `StampStore()`.
+- **Saving is debounced while typing.** `updateStamp` returns early when nothing changed and otherwise calls `scheduleSave()` (0.4 s): encoding and atomically writing the whole store on every keystroke was part of why the text fields felt laggy. `save()` (immediate) serves add, duplicate, delete and move; `flushPendingSave()` runs when leaving the tab.
+- Methods: `addStamp(name:text:)`, `updateStamp(_:)`, `deleteStamp(_:)`, `duplicateStamp(_:)` ("Copy of …", inserted after the original), `moveStamps(from:to:)`.
+
+## The Stamp tab — `StampView`
+
+Left: the **designer** column (360 pt) — stamp picker, name, the rich text editor with style buttons, alignment, font, size, colour, border, the nine position presets, margin, date format (when the text uses a token). Right: the draggable preview, its page navigation, and the files to stamp. `draft: Stamp?` is the working copy; `.onChange(of: draft)` pushes it to the store **on the next runloop turn** (`DispatchQueue.main.async`), because the editor writes back from AppKit callbacks that can fire mid-update; `updateStamp` finds its target by id, so a late write still lands on the right stamp.
+
+**Menu slice** (guarded on `selectedTab == 4`): Add Files… ⌘O, Stamp Files… ⌘S, Clear Files ⌘⌫; Actions: **New Stamp ⌘N**, **Duplicate Stamp ⌘D**, Delete Stamp (disabled for the last one), Previous/Next Page (no shortcuts — the keys are bare ← →), Show in Finder ⇧⌘F (the *previewed* file). ⌘N/⌘D are free because `FileCommands` replaces File ▸ New with Open… on ⌘O, and these rows exist only while Stamp is active.
+
+### Rich text — `Stamp/StampTextEditor.swift`
+
+- **`StampTextEditor`** — an `NSViewRepresentable` `NSTextView` in `isRichText` mode (SwiftUI's `TextEditor` can't carry attributes on macOS 14), written back to the stamp as RTF on every change. The coordinator reloads the text view **only when a different stamp is being edited** (`loadedStampId`) — rewriting it from the model on every update would fight the typing and drop the selection.
+- **`StampTextFormatter`** lives on `AppState` so the **Format menu (⌘B / ⌘I)** can reach it; `isAvailable` is false when no stamp editor exists, which makes the menu inert. It **applies** to the selection, or the whole text when nothing is selected (`effectiveRange`). Its **state** (`isBold`/`isItalic`) uses `hasTrait`: the whole selection when there is one (a mixed selection reads as off, so a click bolds all of it), otherwise the caret's `typingAttributes` — so the buttons follow the cursor. Toggling reads the same `hasTrait`, so the lit button predicts what a click will do. Don't use `effectiveRange` for state: widening an empty selection made the buttons describe the document instead of the cursor.
+- `refreshState()` guards every assignment (writing the same value to an `@Published` still fires `objectWillChange`); `makeNSView`/`updateNSView` must call **`refreshStateSoon()`** instead, because publishing from inside them gives "Publishing changes from within view updates".
+- **`StampStyleButtons`** is extracted purely so it can `@ObservedObject` the formatter: a nested `ObservableObject` doesn't notify views observing its owner, so reading `appState.stampFormatter.isBold` from the tab's body left the buttons stale. They use `.toggleStyle(.button)`. Font, size and colour controls update the base attributes *and* apply to the selection; the alignment control binds straight to `Stamp.alignment` (a property of the stamp, not the selection).
+- **`FontFamilyPicker`** holds about 300 rows, so it's `Equatable` on the family alone and used with `.equatable()`; the family list is enumerated once per launch. Otherwise every keystroke anywhere in the tab rebuilt all of them — the main source of typing lag.
+
+### Preview — `StampPreviewCanvas`
+
+Three layers, for drag performance:
+1. the page as a cached `NSImage` from `stampPagePreviewImage`, re-rendered only when the page changes;
+2. the stamp in a SwiftUI `Canvas` calling the shared `drawStamp` (after `translateBy(0, h)` + `scaleBy(1, -1)` to turn Canvas's y-down space into PDF's y-up, then page points → view points), so it is faithful and nearly free to redraw;
+3. a transparent drag handle over the stamp (dashed outline on hover). The drag converts view points → page points → a fraction of `stampTravel`, from the position captured at the start of the gesture, clamped to 0…1 (y negated).
+
+**The first version was unusably laggy**: it reloaded the PDF from disk *and* re-rendered the page every frame. `StampView` caches the page (`previewPage`, with the document retained in `previewDocument` — a `PDFPage` can't draw once its document is released). Don't reintroduce either per-frame cost.
+
+**Navigation** walks the **whole queue** (`fileIndex`, `pageIndex`): `previousPage`/`nextPage` cross files (back lands on the previous file's last page), `firstPage`/`lastPage` go to the ends of the queue, `previousFile`/`nextFile` jump files. Keys match Split and Rotate — **← → pages, ⌘← ⌘→ ends, ↑ ↓ files** — in an `.onKeyPress` gated on `selectedTab == 4`, a non-empty queue, and **the first responder not being an `NSTextView`**, so the arrows belong to the text editor while typing. `clampPreviewPosition()` keeps the position valid when the queue changes. In first-page scope the stamp is still drawn on later pages (so it can be positioned from any of them), and the navigation bar says in orange that the page won't be stamped.
+
+### Stamping files
+
+- **Input** — PDFs **and images** (`pageableFileExtensions`), opened with `pdfDocument(forFileAt:)`, so a JPEG/PNG/HEIC becomes an A4 page as in Combine. A drop **anywhere in the tab** is accepted (`.onDrop` on the outer container), through `collectDroppedFileURLs` and `expandToFiles(_:extensions:)`: folders expand recursively, name-sorted, as in Combine and the Renamer. Add Files… allows folders too. Duplicates are ignored.
+- **Output** — `StampOutputMode` (`@AppStorage("stampOutputMode")`): **`replaceOriginal` (the default)** writes over each file in place after one `confirmNSAlert` (names not editable); `saveAsNew` asks for a folder (opening at the first file's folder), uses the editable per-file `outputName`s, and asks once before replacing any that exist. `outputProblem` blocks stamping, with an explanation, while an image is queued in replace mode (output is always a PDF, so it can't take an image's place) or `nameProblem` finds an empty, invalid (`pdfFilenameError`) or duplicate name.
+- **`stampFiles()`** builds the `StampJob` and calls **`write(_:job:)`**, which stamps each file with `applyingStamp(…, partFirstPages: [0])` (a standalone file is one part, so first-page scope means page 1), saves through `savePDFDocument(_:to:)`, and reports once: "Files Stamped" (and empties the queue) or a list of "• name: reason" lines (`unreadableFileReason` for inputs).
+- **Queued files follow moves.** `StampFileItem` carries a bookmark and conforms to `FollowsMovedFile` (shared with `CombineFile`, `Logic/FileUtilities.swift`). `refreshLocation()` follows a move or rename and updates `outputName` too unless it was edited. `refreshItemLocations()` runs before stamping (so Replace mode stamps the file *where it is now*, and a bookmark that leads into the Trash counts as gone) and before Show in Finder. `loadPreviewDocument()` refreshes the current item but **writes back only when the URL changed**: it runs from `onChange(of: items)`, and writing a refreshed bookmark every time would re-trigger it.
+
+## `StampMenuButton` and `PresetStampPicker`
+
+**`StampMenuButton`** — the pull-down in Combine's and Split Step 1's toolbars, bound to the tool's own `stampEnabled` and `stampScope`. Contents: which stamp, with **"Don't stamp"** as the first row; which pages (disabled while off); and "Edit Stamps…" (switches to tab 4 — tabs stay mounted, so nothing is lost). On/off is folded into the stamp list rather than a separate `Toggle` because a toggle's checkmark and a picker row's checkmark look the same in a macOS menu, and the old layout showed three checkmarks meaning two things. Picking a stamp sets `StampStore.selectedStampId` and turns stamping on; picking "Don't stamp" turns it off and leaves the selection alone, since it is shared with the other tabs. The label is "Stamp" or "Stamp: ⟨name⟩" (trimmed by `shortenedStampName` to 18 characters; the full name is in the tooltip), the icon `seal`/`seal.fill`. It is `.focusable(false)`: as a pull-down it took the focus ring and the arrow keys from Split's page navigator.
+
+**`PresetStampPicker`** — sets `EnsemblePreset.stampId` in both preset editors (see [combine.md](combine.md#ensemble-presets)). It only records the link; applying the preset arms the stamp.
+
+## Where stamping applies
+
+| Tool | Insertion point | "Each part" means |
+|------|-----------------|-------------------|
+| Combine | `CombineManager.buildDocument(options:stampJob:rotateBackFaces:)`, before imposition and the outline — shared by Create PDF, Open in Preview and Print | each source file per copy (the `bookmarks` page indices) |
+| Split | `writeSplitFiles` (`Logic/SplitLogic.swift`), reached through `PDFManager.saveSplitPDF(… stampJob:)` from both save routes, and by the CLI's `split --stamp` | page 0 of each output file |
+| Stamp tab | `StampView.write(_:job:)` | page 0 of each file |
+| CLI `stamp` | `CombineCommands` → `applyingStamp` | page 0 of each file |
+
+**Split's preview** — `PDFPageView` takes an optional `stamp` and composites it into the image it already renders. `SplitView.previewStamp` supplies it only for pages that will really be stamped (every page, or page 0 and the pages at `splitMarkers`) and never for a skipped page. The stamp is static there, so there's no `Canvas` layer.
+
+**The Rotate tab is deliberately excluded**: it works in rotation metadata, which flattening would bake in.
