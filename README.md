@@ -445,7 +445,7 @@ All orders are fully customisable in Preferences → Renamer.
 
 ## Releasing Updates (maintainer)
 
-ScoreSort updates itself with [Sparkle](https://sparkle-project.org). The update feed (`docs/appcast.xml`) is served by GitHub Pages; the app downloads are GitHub Release assets. The EdDSA key that signs updates lives in the login Keychain (paired with `SUPublicEDKey` in `Info.plist`).
+ScoreSort updates itself with [Sparkle](https://sparkle-project.org). The update feed (`docs/appcast.xml`) is served by GitHub Pages, deployed by the **Deploy appcast** workflow (`.github/workflows/pages.yml`) whenever `docs/` changes on `main`; the app downloads are GitHub Release assets. The EdDSA key that signs updates lives in the login Keychain (paired with `SUPublicEDKey` in `Info.plist`).
 
 ### One-time setup (already done — for reference)
 
@@ -490,7 +490,7 @@ ScoreSort updates itself with [Sparkle](https://sparkle-project.org). The update
 
    **Check the AI connection with the released build** (it's the only build that runs exactly as users' will): install from the DMG, open ScoreSort, **Settings ▸ AI Assistants ▸ Connect to Claude**, share a folder that has a PDF in it, then ask Claude in a new chat to "find my most recent PDF with ScoreSort". If Claude lists it, the notarised app runs fine when Claude starts it.
 
-8. **Commit & push `docs/appcast.xml`** — GitHub Pages serves the new feed and existing users are offered the update in-app.
+8. **Commit & push `docs/appcast.xml`** — the **Deploy appcast** workflow publishes it and checks the live feed matches the file (`gh run list --workflow pages.yml --limit 1`); existing users are then offered the update in-app.
 
 9. **Reset `RELEASE_NOTES_NEXT.md`** back to an empty per-section draft so it's ready to accumulate notes for the next release.
 
