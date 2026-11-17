@@ -162,8 +162,11 @@ struct SplitView: View {
     }
 
     /// Returns all page indices for a given output file index (sorted).
+    /// The pages of output file `fileIndex`: a run of `fileSizes[fileIndex]` pages. Worked out
+    /// from `fileSizes` directly — building the whole page → file map for it, as this used to,
+    /// ran several times per file card on every redraw.
     func pagesForFile(_ fileIndex: Int) -> [Int] {
-        pageToFileMapping.filter { $0.value == fileIndex }.keys.sorted()
+        Array(splitFilePages(fileIndex, fileSizes: fileSizes))
     }
 
     /// True if every page in the output file is in skippedPages.
@@ -610,6 +613,8 @@ struct SplitView: View {
 
                             ScrollView {
                                 VStack(alignment: .leading, spacing: 4) {
+                                    // Built once per redraw, not once per card.
+                                    let mapping = pageToFileMapping
                                     ForEach(0..<numberOfFiles, id: \.self) { fileIndex in
                                         let filePageCount = fileIndex < fileSizes.count ? fileSizes[fileIndex] : 0
                                         let canFix  = filePageCount >= 4 && filePageCount % 4 == 0
@@ -630,7 +635,7 @@ struct SplitView: View {
                                         } : nil
                                         FilePreviewCard(
                                             fileIndex: fileIndex,
-                                            pageToFileMapping: pageToFileMapping,
+                                            pageToFileMapping: mapping,
                                             totalPages: totalPages,
                                             baseFileName: baseFileName,
                                             customFileNames: customFileNames,

@@ -182,3 +182,68 @@ struct SplitBackgroundSaveTests {
         #expect(progress.isCancelling)
     }
 }
+
+@Suite("Split Step 1: page previews and bookkeeping")
+struct SplitStepOnePerformanceTests {
+
+    @Test("a file's pages come straight from fileSizes, as the page map gave them")
+    func filePagesMatchMapping() {
+        let sizes = [3, 1, 4, 2]
+        var mapping: [Int: Int] = [:]
+        var pos = 0
+        for (file, size) in sizes.enumerated() { for p in pos..<(pos + size) { mapping[p] = file }; pos += size }
+        for file in sizes.indices {
+            let fromMap = mapping.filter { $0.value == file }.keys.sorted()
+            #expect(Array(splitFilePages(file, fileSizes: sizes)) == fromMap)
+        }
+        #expect(splitFilePages(4, fileSizes: sizes).isEmpty)
+        #expect(splitFilePages(-1, fileSizes: sizes).isEmpty)
+        #expect(splitFilePages(0, fileSizes: []).isEmpty)
+    }
+
+    @Test("the preview is twice the page's size, and an extra turn swaps its sides")
+    func previewSizeAndRotation() throws {
+        let folder = temporaryFolder("preview")
+        let url = folder.appendingPathComponent("Page.pdf")
+        writeDrawnPDF(pages: 1, to: url)
+        let source = try #require(PDFDocument(url: url)?.page(at: 0)?.scanRenderSource)
+
+        let upright = try #require(renderPagePreview(source, stamp: nil, extraRotation: 0))
+        #expect(upright.pointSize == CGSize(width: 595, height: 842))
+        #expect(upright.image.width == 1190)
+        #expect(abs(upright.image.height - 1684) <= 1)
+
+        let turned = try #require(renderPagePreview(source, stamp: nil, extraRotation: 90))
+        #expect(turned.pointSize == CGSize(width: 842, height: 595))
+        #expect(turned.image.width == upright.image.height)
+        #expect(turned.image.height == upright.image.width)
+    }
+
+    @Test("the preview shows the crop box, so an A3 half isn't shown whole")
+    func previewHonoursCropBox() throws {
+        let folder = temporaryFolder("preview")
+        let url = folder.appendingPathComponent("A3.pdf")
+        writeDrawnPDF(pages: 1, size: CGSize(width: 1191, height: 842), to: url)
+        let document = try #require(PDFDocument(url: url))
+        let page = try #require(document.page(at: 0))
+        page.setBounds(CGRect(x: 0, y: 0, width: 595.5, height: 842), for: .cropBox)
+        let source = try #require(page.scanRenderSource)
+        let preview = try #require(renderPagePreview(source, stamp: nil, extraRotation: 0))
+        #expect(preview.pointSize == CGSize(width: 595.5, height: 842))
+    }
+
+    @Test("a stamp is drawn into the preview")
+    func previewCarriesStamp() throws {
+        let folder = temporaryFolder("preview")
+        let url = folder.appendingPathComponent("Page.pdf")
+        writeDrawnPDF(pages: 1, to: url)
+        let source = try #require(PDFDocument(url: url)?.page(at: 0)?.scanRenderSource)
+        let plain = try #require(renderPagePreview(source, stamp: nil, extraRotation: 0))
+        let stamped = try #require(renderPagePreview(source, stamp: Stamp(name: "T", text: "Example School Band"),
+                                                     extraRotation: 0))
+        #expect(plain.pointSize == stamped.pointSize)
+        let a = try #require(plain.image.dataProvider?.data as Data?)
+        let b = try #require(stamped.image.dataProvider?.data as Data?)
+        #expect(a != b)
+    }
+}

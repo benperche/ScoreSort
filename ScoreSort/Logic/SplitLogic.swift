@@ -341,6 +341,14 @@ func splitOutputIsWorthSaving(activeFiles: Int, skippedPages: Int, pagesRebuilt:
 
 /// One file a split will write: its name (with `.pdf`) and the pages (0-based, in order)
 /// that go into it.
+/// The pages of output file `fileIndex` when the files are `fileSizes` pages long, in order:
+/// a contiguous run. Empty for an index out of range.
+func splitFilePages(_ fileIndex: Int, fileSizes: [Int]) -> Range<Int> {
+    guard fileSizes.indices.contains(fileIndex) else { return 0..<0 }
+    let start = fileSizes[..<fileIndex].reduce(0, +)
+    return start..<(start + fileSizes[fileIndex])
+}
+
 nonisolated struct SplitFilePlan: Equatable, Sendable {
     let name: String
     let pages: [Int]

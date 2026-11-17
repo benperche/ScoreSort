@@ -21,7 +21,7 @@ Clearing the document (nil) resets the whole flow back to `.split`.
 
 ### The model: `fileSizes: [Int]`
 
-The split is an **ordered array of page counts**, one per output file: `[2, 2, 1, 3]` is four files. Everything else is derived: `splitMarkers` (pages that start a file, page 0 excluded — for drawing only), `pageToFileMapping` (page → file), `pagesForFile`, `activeFileCount`, `skippedFileIndices`. Never store split points anywhere else ([gotcha](gotchas.md#split)).
+The split is an **ordered array of page counts**, one per output file: `[2, 2, 1, 3]` is four files. Everything else is derived: `splitMarkers` (pages that start a file, page 0 excluded — for drawing only), `pageToFileMapping` (page → file; build it once per redraw — the file-card list does — not once per card), `pagesForFile` (`splitFilePages`, a range straight from `fileSizes`), `activeFileCount`, `skippedFileIndices`. Never store split points anywhere else ([gotcha](gotchas.md#split)).
 
 Other state: `stride` (1–20), `currentPage`, `baseFileName`, `customFileNames: [Int: String]` (file index → suffix), `skippedPages: Set<Int>`, `selectedFileIndices`, `skipMode` (`.file`/`.page`), `documentBookmarks`, `bookmarkOffer`, `scanSplitRequest`, `pendingScanSplitSkips`, `bookletFixRequest`, `lastBookletOrder`, the two suppress flags, `documentRebuilt`, and banner flags (`a3HintVisible`, `a3SplitNoticeVisible`, `bookletRedoNoticeVisible`).
 

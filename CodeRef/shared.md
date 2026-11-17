@@ -98,7 +98,7 @@ No longer the menu bridge. It survives for Combine's in-view keyboard handling: 
 
 **`DropZoneView`** — the "Drop a PDF here / Choose PDF" empty state for Split and Rotate; takes the tab's `PDFManager` and an optional `subtitle`. Rejects non-PDF drops with an alert.
 
-**`PDFPageView`** — a page as a fitted image on white (Split Step 1, Rotate before/after, booklet thumbnails), with an optional extra clockwise `rotation` and an optional `stamp` drawn in. Re-renders only when its page, rotation or stamp changes (`.task(id:)`), keeping the previous image up meanwhile. Deliberately not a `PDFView`: see [gotchas.md § PDFKit](gotchas.md#pdfkit-and-pdf-geometry).
+**`PDFPageView`** — a page as a fitted image on white (Split Step 1, Rotate before/after, booklet thumbnails), with an optional extra clockwise `rotation` and an optional `stamp` drawn in. Re-renders only when its page, rotation or stamp changes (`.task(id:)`), keeping the previous image up meanwhile. **It draws off the main thread** (#34): `renderPagePreview` (Core Graphics via `renderScan`, so the crop box is shown; stamp via `drawStamp`; extra turn via `rotatedImage`) runs in a detached task, and a result that arrives after the page has changed again is dropped, so arrow-key paging through a big scan never waits on a page. A page built in memory (no `pageRef`) still draws through PDFKit's `thumbnail` on the main actor. Deliberately not a `PDFView`: see [gotchas.md § PDFKit](gotchas.md#pdfkit-and-pdf-geometry).
 
 **`Unchecked<T>`** — an `@unchecked Sendable` box for capturing PDFKit objects in `@Sendable` closures. Its explicit empty `deinit` works around a Release-mode compiler crash; leave it.
 

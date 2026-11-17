@@ -1719,7 +1719,20 @@ struct PDFPageView: View {
         // until the new one is ready, so stepping through pages doesn't flash blank.
         .task(id: Key(page: page.map(ObjectIdentifier.init), rotation: rotation, stamp: stamp)) {
             guard let page else { image = nil; return }
-            image = Self.render(page, rotation: rotation, stamp: stamp)
+            // Draw off the main thread through Core Graphics, so paging through a big scan
+            // with the arrow keys never waits on a page (#34). When the page changes again
+            // before this one is ready, the task is cancelled and its picture dropped.
+            if let source = page.scanRenderSource {
+                let stamp = stamp, rotation = rotation
+                let preview = await Task.detached(priority: .userInitiated) {
+                    renderPagePreview(source, stamp: stamp, extraRotation: rotation)
+                }.value
+                guard !Task.isCancelled, let preview else { return }
+                image = NSImage(cgImage: preview.image, size: preview.pointSize)
+            } else {
+                // A page built in memory has no Core Graphics page: PDFKit draws it, here.
+                image = Self.render(page, rotation: rotation, stamp: stamp)
+            }
         }
     }
 
@@ -1741,20 +1754,58 @@ struct PDFPageView: View {
     /// `image` turned clockwise by a multiple of 90°.
     private static func rotated(_ image: NSImage, clockwise degrees: Int) -> NSImage {
         let turns = ((degrees % 360) + 360) % 360 / 90
-        guard turns != 0, let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil) else { return image }
-        let w = cg.width, h = cg.height
-        let (outW, outH) = turns % 2 == 0 ? (w, h) : (h, w)
-        guard let ctx = CGContext(data: nil, width: outW, height: outH, bitsPerComponent: 8, bytesPerRow: 0,
-                                  space: CGColorSpaceCreateDeviceRGB(),
-                                  bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return image }
-        // Core Graphics is y-up, so a clockwise turn on screen is a negative angle here.
-        ctx.translateBy(x: CGFloat(outW) / 2, y: CGFloat(outH) / 2)
-        ctx.rotate(by: -CGFloat(turns) * .pi / 2)
-        ctx.draw(cg, in: CGRect(x: -CGFloat(w) / 2, y: -CGFloat(h) / 2, width: CGFloat(w), height: CGFloat(h)))
-        guard let out = ctx.makeImage() else { return image }
+        guard turns != 0, let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+              let out = rotatedImage(cg, clockwise: degrees) else { return image }
         let pointSize = turns % 2 == 0 ? image.size : NSSize(width: image.size.height, height: image.size.width)
         return NSImage(cgImage: out, size: pointSize)
     }
+}
+
+/// A rendered page preview: the bitmap, and the size in points it stands for (the page as it
+/// reads, so a stamp drawn on it lands where it does on the real page).
+nonisolated struct PagePreviewImage: @unchecked Sendable {
+    let image: CGImage
+    let pointSize: CGSize
+}
+
+/// `PDFPageView`'s picture of a page, drawn through Core Graphics so it can run off the main
+/// thread (`renderScan` touches no PDFKit). Twice the page's point size for a sharp preview,
+/// the stamp drawn in, then any extra clockwise rotation applied.
+nonisolated func renderPagePreview(_ source: ScanRenderSource, stamp: Stamp?, extraRotation: Int) -> PagePreviewImage? {
+    let points = source.visualSize
+    guard points.width > 0, points.height > 0,
+          var image = renderScan(source, width: Int((points.width * 2).rounded())) else { return nil }
+    if let stamp, stamp.isDrawable {
+        guard let ctx = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8,
+                                  bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(),
+                                  bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
+        ctx.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        ctx.scaleBy(x: CGFloat(image.width) / points.width, y: CGFloat(image.height) / points.height)
+        drawStamp(stamp, in: ctx, pageBox: CGRect(origin: .zero, size: points))
+        guard let stamped = ctx.makeImage() else { return nil }
+        image = stamped
+    }
+    let turns = ((extraRotation % 360) + 360) % 360 / 90
+    guard turns != 0 else { return PagePreviewImage(image: image, pointSize: points) }
+    guard let turned = rotatedImage(image, clockwise: extraRotation) else { return nil }
+    return PagePreviewImage(image: turned,
+                            pointSize: turns % 2 == 0 ? points : CGSize(width: points.height, height: points.width))
+}
+
+/// `image` turned clockwise by a multiple of 90°; the same image when there's no turn.
+nonisolated func rotatedImage(_ image: CGImage, clockwise degrees: Int) -> CGImage? {
+    let turns = ((degrees % 360) + 360) % 360 / 90
+    guard turns != 0 else { return image }
+    let w = image.width, h = image.height
+    let (outW, outH) = turns % 2 == 0 ? (w, h) : (h, w)
+    guard let ctx = CGContext(data: nil, width: outW, height: outH, bitsPerComponent: 8, bytesPerRow: 0,
+                              space: CGColorSpaceCreateDeviceRGB(),
+                              bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { return nil }
+    // Core Graphics is y-up, so a clockwise turn on screen is a negative angle here.
+    ctx.translateBy(x: CGFloat(outW) / 2, y: CGFloat(outH) / 2)
+    ctx.rotate(by: -CGFloat(turns) * .pi / 2)
+    ctx.draw(image, in: CGRect(x: -CGFloat(w) / 2, y: -CGFloat(h) / 2, width: CGFloat(w), height: CGFloat(h)))
+    return ctx.makeImage()
 }
 
 // MARK: - PDF Manager
