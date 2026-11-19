@@ -41,6 +41,15 @@ Held as `@StateObject` on `ScoreSortApp` and injected with `.environmentObject()
 
 `PDFManager` is *not* app-level: Split and Rotate each own a separate `@StateObject`. `CombineManager` belongs to `CombineView`.
 
+## Files opened from outside: Open With and the Dock icon (#21)
+
+`Info.plist` declares PDFs (`com.adobe.pdf`), images (`public.image`) and folders (`public.folder`) as documents, all **`LSHandlerRank` Alternate**, so ScoreSort is offered under Open With but never becomes anyone's default PDF app.
+
+- **Arrival.** `AppDelegate.application(_:open:)` puts the URLs in `ExternalOpenQueue.shared`, because the window may not exist yet: opening a file is often what launches the app. `ContentView` takes them in `.onReceive(ExternalOpenQueue.shared.$pending)` and calls `AppState.handleOpenedFiles`.
+- **One window.** `ContentView` has `.handlesExternalEvents(preferring: ["*"], allowing: ["*"])`, so SwiftUI hands the event to the existing window instead of opening a new one each time. **Don't use `.handlesExternalEvents(matching: [])` on the `WindowGroup`**: it stops the extra windows, but then a cold launch from a file opens *no* window. Tested in the built app: cold (with `-ApplePersistenceIgnoreState YES`, so window restoration can't hide the result) and warm, single files, several files and a folder, one window each time.
+- **Which tab: `routeOpenedFiles`** (`Logic/OpenRouting.swift`, pure; `OpenRoutingTests`). The tab on screen takes the files if it can without losing work: Combine and Stamp add to their lists; Split and Rotate only when empty; Rename only when idle (`currentTabHasContent` is `tabCommands.slice.clear != nil`, since the active tab's Clear is enabled exactly when it has something loaded). Otherwise several files or a folder go to Combine, and a single PDF or image gets an **Open in…** chooser (`OpenChoiceView`, `AppState.openChoice`). Anything else is left out; nothing usable gives an alert.
+- **Hand-over.** `AppState.deliver(_:to:)` switches tab and sets `pendingOpen`; each tab's `takePendingOpen()` (on appear, and on `pendingOpen` changing) takes the files once (`AppState.takePendingOpen(for:)`) and loads them through its own loader: Combine `addFiles`, Rename `startInput`, Split and Rotate `pdfManager.loadPDF`, Stamp `addInput`.
+
 ## Menu bar
 
 Standard **File / Edit / View** plus one adaptive **Actions** menu and a **Format** menu (redesigned in 1.8.0). There are no per-tab menus.

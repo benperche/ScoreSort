@@ -383,6 +383,7 @@ struct ScoreSortApp: App {
         // Default window size on first launch. Users can resize freely and the size is
         // then remembered. (Temporarily set to 1280×800 when taking screenshots.)
         .defaultSize(width: 940, height: 800)
+
         .commands {
             CommandGroup(replacing: .appInfo) {
                 Button("About ScoreSort") {
@@ -532,7 +533,11 @@ struct ContentView: View {
             }
             // A saved file that couldn't be read, or a save that failed (SavedFileNoticeBanner.swift).
             .savedFileNotices()
-            // Files opened from Finder or the Dock (#21): taken once the window is here.
+            // Files opened from Finder or the Dock (#21) arrive at AppDelegate.application(_:open:)
+            // and are taken here once the window is on screen. This window is preferred for
+            // them, so SwiftUI doesn't open another window each time; with nothing on screen
+            // (opening a file is what launched the app) it still makes this one.
+            .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
             .onReceive(ExternalOpenQueue.shared.$pending) { urls in
                 guard !urls.isEmpty else { return }
                 DispatchQueue.main.async { appState.handleOpenedFiles(ExternalOpenQueue.shared.take()) }
