@@ -1164,10 +1164,7 @@ struct CombineView: View {
     }
 
     // MARK: - Apply Preset
-    /// Applies copy counts from the given preset parts to the file list.
-    /// Parts are matched against file names via case-insensitive substring search,
-    /// longest part name first so "Bass Clarinet" wins over "Clarinet".
-    /// Files that don't match any part are highlighted orange.
+
     /// Arms the preset's stamp, if it has one. A preset belongs to a school or ensemble, so
     /// applying it should set up that organisation's mark — but only ever as a default: the
     /// Stamp button in the toolbar shows what's armed and switches it off in one click.
@@ -1178,18 +1175,16 @@ struct CombineView: View {
         stampEnabled = true
     }
 
+    /// Applies a preset's copy counts to the file list (`CombineManager.applyPreset`) and arms
+    /// its stamp. Files that match no part are highlighted orange; copies the app divided
+    /// between numbered parts are tinted blue.
     @discardableResult
     private func applyPreset(parts: [PresetPart], stampId: UUID? = nil) -> (matched: Int, unmatched: Int, unmatchedPartNames: Set<String>) {
         applyPresetStamp(stampId)
-        // The matching is shared with the command line (Logic/PresetMatching.swift).
-        let result = matchPreset(parts: parts, files: combineManager.files.map { ($0.id, $0.name) })
-        for (fileId, copies) in result.copies {
-            combineManager.updateCopies(for: fileId, copies: copies, undoManager: undoManager)
-        }
+        let result = combineManager.applyPreset(parts: parts, undoManager: undoManager)
         unmatchedFileIds = result.unmatchedFileIds
         splitCopyFileIds = result.splitFileIds
         return (matched: result.matchedCount, unmatched: result.unmatchedFileIds.count,
                 unmatchedPartNames: result.unmatchedPartNames)
     }
 }
-

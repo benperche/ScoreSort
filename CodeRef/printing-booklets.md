@@ -1,6 +1,6 @@
 # Booklets, two-sided setup and printing
 
-Combine's booklet output and everything about printing. Files: `ScoreSort/Logic/BookletLogic.swift` (imposition), `Logic/BookletCalibration.swift` (the generated test sheet, per-printer duplex memory), `Logic/PrintLogic.swift` (the system print dialog), `Combine/BookletLayoutSheet.swift` (page-turn review), and in `Combine/CombineTab.swift`: `CombineOutputOptions`, `buildDocument`, `printCombined`, `BookletIntroView`, `BookletDuplexSetupView`, `CombineOutputMenuButton`, `BookletScaleField`.
+Combine's booklet output and everything about printing. Files: `ScoreSort/Logic/BookletLogic.swift` (imposition), `Logic/BookletCalibration.swift` (the generated test sheet, per-printer duplex memory), `Logic/PrintLogic.swift` (the system print dialog), `Combine/BookletLayoutSheet.swift` (page-turn review), `Combine/CombineManager.swift` (`CombineOutputOptions`, `buildDocument`, `printCombined`) and `Combine/BookletSetupViews.swift` (`BookletIntroView`, `BookletDuplexSetupView`, `CombineOutputMenuButton`, `BookletScaleField`).
 
 The other direction — un-scrambling a *scanned* booklet into reading order — is Split's Fix Booklet Order: [split.md](split.md#fix-booklet-order-deimposition). The rest of Combine (the file list, presets, `buildDocument`'s order stamp → impose → outline): [combine.md](combine.md#output).
 

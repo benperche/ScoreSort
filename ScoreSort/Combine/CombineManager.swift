@@ -379,6 +379,19 @@ class CombineManager: ObservableObject {
     // ── Collate groups ────────────────────────────────────────────────────────
     /// Groups the given files into a collate set, pulling them together
     /// contiguously at the position of the first selected file.
+    /// Sets each file's copies from an ensemble preset's parts, matched on file names
+    /// (`matchPreset`, shared with the command line: longest part name first, so "Bass
+    /// Clarinet" beats "Clarinet"; one entry over several numbered parts is shared out).
+    /// Files that match nothing keep their copies. One undo step per file changed.
+    @discardableResult
+    func applyPreset(parts: [PresetPart], undoManager: UndoManager?) -> PresetMatchResult {
+        let result = matchPreset(parts: parts, files: files.map { ($0.id, $0.name) })
+        for (fileId, copies) in result.copies {
+            updateCopies(for: fileId, copies: copies, undoManager: undoManager)
+        }
+        return result
+    }
+
     func createCollateGroup(fileIds: Set<UUID>, undoManager: UndoManager?) {
         let bf = files; let bg = collateGroups
         let orderedIndices = files.indices.filter { fileIds.contains(files[$0].id) }
