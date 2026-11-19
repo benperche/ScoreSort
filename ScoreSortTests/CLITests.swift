@@ -517,6 +517,21 @@ struct CLICombineTests {
                 == ["00 - Score.pdf", "01 - Flute.pdf", "02 - Trumpet.pdf"])
     }
 
+    @Test("--blank-pages pads odd-length parts in single-page output and leaves booklets unchanged")
+    func blankPages() throws {
+        let dir = parts(["01 - Flute.pdf", "02 - Trumpet.pdf"], pages: 3)
+        let outDir = temporaryFolder("blank-pages-out")
+        func pageCount(_ name: String, _ extra: [String]) throws -> Int {
+            let out = outDir.appendingPathComponent(name)
+            #expect(ScoreSortCLI.main(["combine", dir.path, "--out", out.path] + extra) == 0)
+            return try #require(PDFDocument(url: out)).pageCount
+        }
+        #expect(try pageCount("plain.pdf", []) == 6)
+        #expect(try pageCount("padded.pdf", ["--blank-pages"]) == 8)
+        let booklet = try pageCount("booklet.pdf", ["--booklet"])
+        #expect(try pageCount("booklet-blank.pdf", ["--booklet", "--blank-pages"]) == booklet)
+    }
+
     @Test("A dry run writes nothing; an existing output needs --overwrite")
     func safety() throws {
         let dir = parts(["Flute.pdf"])

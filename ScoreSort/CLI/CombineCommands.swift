@@ -188,7 +188,10 @@ extension ScoreSortCLI {
               --booklet     Impose each part as a fold-and-staple booklet.
               --sheet       Booklet paper: double (two A4 pages on A3, default) or fit-a4
                             (an A5 booklet on A4).
-              --blank-pages Booklet: add blank pages so every part starts on a fresh sheet.
+              --blank-pages Single pages: add a blank page after each part with an odd number
+                            of pages, so every part starts on a fresh sheet when printed
+                            two-sided. Booklets always start each part on a fresh sheet,
+                            so this changes nothing with --booklet.
               --stamp       Stamp a saved design (see `stamps`); --stamp-scope first (default)
                             or every.
               --dry-run     Show each part and its copies, and the page total; write nothing.

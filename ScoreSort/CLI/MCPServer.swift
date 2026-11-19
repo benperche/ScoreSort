@@ -165,7 +165,7 @@ enum ScoreSortMCPServer {
                                 description: "A file's total copies, applied last: [{\"file\": \"Flute 1\", \"copies\": 3}] — file is the name or a unique part of it; 0 leaves it out."),
                           Param(key: "booklet", option: "booklet", kind: .boolean, description: "Impose each part as a fold-and-staple booklet."),
                           Param(key: "sheet", option: "sheet", kind: .string, description: "Booklet paper: double (A4 pages on A3) or fit-a4 (A5 booklet).", choices: ["double", "fit-a4"]),
-                          Param(key: "blankPages", option: "blank-pages", kind: .boolean, description: "Booklets: start every part on a fresh sheet."),
+                          Param(key: "blankPages", option: "blank-pages", kind: .boolean, description: "Single-page output only: add a blank page after each part with an odd number of pages, so every part starts on a fresh sheet when printed two-sided. Booklets always start each part on a fresh sheet; this has no effect with booklet."),
                           Param(key: "stamp", option: "stamp", kind: .string, description: "A saved stamp design."),
                           Param(key: "stampScope", option: "stamp-scope", kind: .string, description: "first (default) or every page.", choices: ["first", "every"]),
                           Param(key: "dryRun", option: "dry-run", kind: .boolean, description: "Show parts, copies and page total; write nothing."),
