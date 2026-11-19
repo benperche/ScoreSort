@@ -311,6 +311,9 @@ struct ScoreOrderSortView: View {
 
     var body: some View {
         content
+            // Files opened from Finder or the Dock (#21), handed over by AppState.
+            .onAppear { takePendingOpen() }
+            .onChange(of: appState.pendingOpen?.id) { takePendingOpen() }
             .onAppear { DispatchQueue.main.async { syncTabCommands() } }
             .onChange(of: appState.selectedTab)        { DispatchQueue.main.async { syncTabCommands() } }
             .onChange(of: renamerManager.hasContent)   { DispatchQueue.main.async { syncTabCommands() } }
@@ -328,6 +331,12 @@ struct ScoreOrderSortView: View {
     }
 
     /// Publishes the Score Order Sorter's actions to the menu bridge while Rename is active.
+    /// Loads files opened from Finder or the Dock when they're meant for this tab (#21).
+    private func takePendingOpen() {
+        guard let urls = appState.takePendingOpen(for: .rename) else { return }
+        startInput(urls)
+    }
+
     private func syncTabCommands() {
         guard appState.selectedTab == 1 else { return }
         let reviewing = renamerManager.hasContent && renameResult == nil

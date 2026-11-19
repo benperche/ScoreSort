@@ -4,6 +4,7 @@ _Draft for the next release after 1.11.0. Keep adding to this as more changes la
 
 ## ✨ General Improvements
 
+- **Open PDFs straight into ScoreSort from Finder.** Right-click a PDF, image or folder and choose **Open With ▸ ScoreSort**, or drop it on ScoreSort's Dock icon. Several files or a folder go to Combine (or to Stamp or Rename if that's the tab you're on); a single PDF goes to the tab you're on if it can take it, or ScoreSort asks whether to split, rotate, stamp or combine it. ScoreSort never becomes your default PDF app.
 - **AI assistants can tell which ScoreSort tools only look at your files and which can change them.** Each tool now says so, and has a plain name, so an assistant app can ask you before the ones that matter.
 
 - **ScoreSort is now free software**, under the GNU General Public License (version 3): anyone may use, share and improve it, as long as improved versions stay free too. About ScoreSort says so, and credits Sparkle, which keeps ScoreSort up to date.

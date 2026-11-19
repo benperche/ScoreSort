@@ -151,6 +151,9 @@ struct CombineView: View {
             handleDrop(providers: providers)
             return true
         }
+        // Files opened from Finder or the Dock (#21), handed over by AppState.
+        .onAppear { takePendingOpen() }
+        .onChange(of: appState.pendingOpen?.id) { takePendingOpen() }
         .onAppear {
             DispatchQueue.main.async { syncMenuClosures(); syncMenuFlags(); syncTabCommands() }
             installKeyMonitor()
@@ -1128,6 +1131,13 @@ struct CombineView: View {
 
     /// Publishes Combine's actions to the app-level menu bridge — but only while Combine
     /// is the active tab, so the File/View/Actions menus reflect whatever tab is on screen.
+    /// Loads files opened from Finder or the Dock when they're meant for this tab (#21).
+    private func takePendingOpen() {
+        guard let urls = appState.takePendingOpen(for: .combine) else { return }
+        let expanded = Self.expandToSupportedFiles(urls)
+        if !expanded.isEmpty { combineManager.addFiles(urls: expanded, undoManager: undoManager) }
+    }
+
     private func syncTabCommands() {
         guard appState.selectedTab == 0 else { return }
         let hasFiles = !combineManager.files.isEmpty

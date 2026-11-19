@@ -162,6 +162,9 @@ struct RotateView: View {
         }
         .focusable()
         .focused($isViewFocused)
+        // Files opened from Finder or the Dock (#21), handed over by AppState.
+        .onAppear { takePendingOpen() }
+        .onChange(of: appState.pendingOpen?.id) { takePendingOpen() }
         .onAppear { isViewFocused = true; DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: appState.selectedTab) { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: pdfManager.pdfDocument) { _, newValue in
@@ -220,6 +223,12 @@ struct RotateView: View {
     }
 
     /// Publishes Rotate's actions to the menu bridge while Rotate is the active tab.
+    /// Loads files opened from Finder or the Dock when they're meant for this tab (#21).
+    private func takePendingOpen() {
+        guard let urls = appState.takePendingOpen(for: .rotate) else { return }
+        if let url = urls.first { pdfManager.loadPDF(from: url) }
+    }
+
     private func syncTabCommands() {
         guard appState.selectedTab == 3 else { return }
         let loaded = pdfManager.pdfDocument != nil

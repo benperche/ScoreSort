@@ -341,6 +341,9 @@ struct SplitView: View {
                 bookmarkOffer = nil
             }
         }
+        // Files opened from Finder or the Dock (#21), handed over by AppState.
+        .onAppear { takePendingOpen() }
+        .onChange(of: appState.pendingOpen?.id) { takePendingOpen() }
         .onAppear { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: appState.selectedTab)     { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: splitStage)               { DispatchQueue.main.async { syncTabCommands() } }
@@ -839,6 +842,12 @@ struct SplitView: View {
 
     /// Publishes the Split tab's actions to the menu bridge while Split is active.
     /// The primary action + tab actions are contextual to the current step.
+    /// Loads files opened from Finder or the Dock when they're meant for this tab (#21).
+    private func takePendingOpen() {
+        guard let urls = appState.takePendingOpen(for: .split) else { return }
+        if let url = urls.first { pdfManager.loadPDF(from: url) }
+    }
+
     private func syncTabCommands() {
         guard appState.selectedTab == 2 else { return }
         let loaded = pdfManager.pdfDocument != nil

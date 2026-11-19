@@ -25,6 +25,75 @@ class AppState: ObservableObject {
     let stampFormatter = StampTextFormatter()
     /// Bridges the *active* tab's actions to the File/Edit/View/⟨tab⟩ menus.
     let tabCommands = TabCommands()
+
+    // MARK: Files opened from outside (Open With, the Dock icon) — #21
+
+    /// Files on their way to a tab: the tab named takes them (`takePendingOpen` in each tab)
+    /// and clears this.
+    @Published var pendingOpen: PendingOpen?
+    /// A single file that could go to several tabs, waiting for the user to pick one.
+    @Published var openChoice: OpenChoice?
+
+    /// Sends files opened from Finder or the Dock to the right tab (`routeOpenedFiles`), or
+    /// asks where a single file should go.
+    func handleOpenedFiles(_ urls: [URL]) {
+        guard !urls.isEmpty else { return }
+        NSApp.activate(ignoringOtherApps: true)
+        showingWelcomeTour = false
+        showingKeyboardHelp = false
+        let current = AppTab(rawValue: selectedTab) ?? .combine
+        switch routeOpenedFiles(urls, current: current, currentTabHasContent: tabCommands.slice.clear != nil) {
+        case .open(let tab, let items):
+            deliver(items, to: tab)
+        case .choose(let url, let tabs):
+            openChoice = OpenChoice(url: url, options: tabs)
+        case .unsupported:
+            showNSAlert(title: "Can\u{2019}t Open That Here",
+                        message: "ScoreSort opens PDFs, images (JPEG, PNG, TIFF, HEIC, BMP, GIF) and folders of them.",
+                        isError: true)
+        }
+    }
+
+    /// Switches to `tab` and hands it `urls`.
+    func deliver(_ urls: [URL], to tab: AppTab) {
+        selectedTab = tab.rawValue
+        pendingOpen = PendingOpen(tab: tab, urls: urls)
+    }
+
+    /// The files for `tab`, if any are waiting — taken, so they're loaded once.
+    func takePendingOpen(for tab: AppTab) -> [URL]? {
+        guard let open = pendingOpen, open.tab == tab else { return nil }
+        pendingOpen = nil
+        return open.urls
+    }
+}
+
+struct PendingOpen: Identifiable, Equatable {
+    let id = UUID()
+    let tab: AppTab
+    let urls: [URL]
+}
+
+struct OpenChoice: Identifiable {
+    let id = UUID()
+    let url: URL
+    let options: [AppTab]
+}
+
+/// Files the system asked ScoreSort to open (`AppDelegate.application(_:open:)`). They can
+/// arrive before the window exists — opening a file is often what launches the app — so
+/// they wait here until `ContentView` is on screen to take them.
+@MainActor
+final class ExternalOpenQueue: ObservableObject {
+    static let shared = ExternalOpenQueue()
+    @Published private(set) var pending: [URL] = []
+
+    func receive(_ urls: [URL]) { pending += urls }
+
+    func take() -> [URL] {
+        defer { pending = [] }
+        return pending
+    }
 }
 
 // MARK: - Tab Commands (menu bridge for the active tab)
@@ -397,6 +466,12 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
         return AppDelegate.mainWindowHasAppeared
     }
+
+    /// Finder's Open With, or files and folders dropped on the Dock icon (#21). Queued for
+    /// `ContentView`, which may not exist yet if this is what launched the app.
+    func application(_ application: NSApplication, open urls: [URL]) {
+        ExternalOpenQueue.shared.receive(urls)
+    }
 }
 
 // MARK: - Main Content View
@@ -457,6 +532,17 @@ struct ContentView: View {
             }
             // A saved file that couldn't be read, or a save that failed (SavedFileNoticeBanner.swift).
             .savedFileNotices()
+            // Files opened from Finder or the Dock (#21): taken once the window is here.
+            .onReceive(ExternalOpenQueue.shared.$pending) { urls in
+                guard !urls.isEmpty else { return }
+                DispatchQueue.main.async { appState.handleOpenedFiles(ExternalOpenQueue.shared.take()) }
+            }
+            .sheet(item: $appState.openChoice) { choice in
+                OpenChoiceView(choice: choice) { tab in
+                    appState.openChoice = nil
+                    if let tab { appState.deliver([choice.url], to: tab) }
+                }
+            }
 
             // Welcome tour overlay — shown on first launch and from Help menu
             if appState.showingWelcomeTour {
@@ -493,6 +579,40 @@ struct ContentView: View {
         }
         .animation(.easeInOut(duration: 0.15), value: appState.showingKeyboardHelp)
         .animation(.easeInOut(duration: 0.2), value: appState.showingWelcomeTour)
+    }
+}
+
+// MARK: - Open In… (a single file opened from outside, #21)
+
+/// Asks which tab a single opened file should go to.
+struct OpenChoiceView: View {
+    let choice: OpenChoice
+    /// The tab picked, or nil for Cancel.
+    let onPick: (AppTab?) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text("Open \u{201C}\(choice.url.lastPathComponent)\u{201D} in\u{2026}")
+                .font(.headline)
+                .lineLimit(2)
+                .truncationMode(.middle)
+            VStack(spacing: 8) {
+                ForEach(choice.options) { tab in
+                    Button { onPick(tab) } label: {
+                        Text(tab.openTitle).frame(maxWidth: .infinity)
+                    }
+                    .controlSize(.large)
+                    .keyboardShortcut(tab == choice.options.first ? .defaultAction : nil)
+                }
+            }
+            HStack {
+                Spacer()
+                Button("Cancel") { onPick(nil) }
+                    .keyboardShortcut(.cancelAction)
+            }
+        }
+        .padding(20)
+        .frame(width: 320)
     }
 }
 

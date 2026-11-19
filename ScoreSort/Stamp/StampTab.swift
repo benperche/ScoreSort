@@ -144,6 +144,9 @@ struct StampView: View {
                 return .ignored
             }
         }
+        // Files opened from Finder or the Dock (#21), handed over by AppState.
+        .onAppear { takePendingOpen() }
+        .onChange(of: appState.pendingOpen?.id) { takePendingOpen() }
         .onAppear {
             draft = stampStore.selectedStamp
             isViewFocused = true
@@ -784,6 +787,12 @@ struct StampView: View {
     }
 
     // MARK: - Menu bridge
+
+    /// Loads files opened from Finder or the Dock when they're meant for this tab (#21).
+    private func takePendingOpen() {
+        guard let urls = appState.takePendingOpen(for: .stamp) else { return }
+        addInput(urls)
+    }
 
     private func syncTabCommands() {
         guard appState.selectedTab == 4 else { return }

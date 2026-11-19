@@ -50,6 +50,12 @@ struct ViewSmokeTests {
         render(SplitView())
     }
 
+    @Test("Open In… chooser renders")
+    func openChoice() {
+        render(OpenChoiceView(choice: OpenChoice(url: URL(fileURLWithPath: "/tmp/Holst Score.pdf"),
+                                                 options: [.split, .rotate, .stamp, .combine])) { _ in })
+    }
+
     @Test("Split save progress sheet renders, starting, part-way and cancelling")
     func splitSaveProgress() {
         let progress = SplitSaveProgress(total: 12)
