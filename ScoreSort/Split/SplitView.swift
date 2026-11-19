@@ -265,6 +265,9 @@ struct SplitView: View {
                 // snapshots' page-based skip indices map onto the wrong pages.
                 if suppressDocumentReset {
                     suppressDocumentReset = false
+                    // In-place rebuilds never reach the double-page check, so this
+                    // single-use flag must not linger into the next real load.
+                    suppressNextA3Detection = false
                     undoStack = []
                     redoStack = []
                     return
@@ -313,6 +316,8 @@ struct SplitView: View {
             } else {
                 // PDF cleared — reset all split flow state so nothing bleeds
                 // into the next session regardless of which stage we were on.
+                suppressNextA3Detection = false
+                pendingScanSplitSkips = nil
                 fileSizes = []
                 currentPage = 0
                 customFileNames.removeAll()
@@ -1297,7 +1302,6 @@ struct SplitView: View {
         lastBookletOrder = (n: pages.count, order: order)
 
         // Replace the document while preserving all other split state.
-        suppressNextA3Detection = true
         documentRebuilt         = true
         suppressDocumentReset   = true
         pdfManager.pdfDocument  = newDoc
@@ -1348,7 +1352,6 @@ struct SplitView: View {
 
         skippedPages = newSkipped
         lastBookletOrder = (n: n, order: order)
-        suppressNextA3Detection = true
         documentRebuilt         = true
         suppressDocumentReset   = true
         pdfManager.pdfDocument  = newDoc
@@ -1371,7 +1374,6 @@ struct SplitView: View {
                 newDoc.insert(page, at: newDoc.pageCount)
             }
         }
-        suppressNextA3Detection = true
         documentRebuilt         = true
         suppressDocumentReset   = true
         pdfManager.pdfDocument  = newDoc

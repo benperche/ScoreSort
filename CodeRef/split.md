@@ -11,11 +11,11 @@ Gotchas that concern this tab: [gotchas.md § Split](gotchas.md#split), [§ PDFK
 `SplitView` switches on a private `SplitStage`: `.split` (Step 1, `splitStageBody`) → `.naming` (Step 2, `SplitNamingStageView`) → `.prefix` (Step 3, `PrefixOrderStepView`, only with "Prefix score order" on) → `.summary` (`RenameSummaryView`).
 
 **The document `onChange` sits on the `Group` around all four stages**, not inside Step 1, so a PDF arriving during any stage resets everything. (Inside Step 1 it was silent during later stages, and an earlier file's names bled through.) A new document resets page, names, pan, skips, selection, `skipMode`, `documentRebuilt` and the undo stacks, then:
-1. If `suppressDocumentReset` is set (an in-place rebuild), it clears the flag and the undo stacks and returns, keeping all split state.
+1. If `suppressDocumentReset` is set (an in-place rebuild), it clears that flag, `suppressNextA3Detection` and the undo stacks and returns, keeping all split state.
 2. If it looks like a double-page scan (`isA3Landscape || looksLikeDoublePageScan`) and `suppressNextA3Detection` isn't set, it runs `setupSplitState(offerBookmarks: false)` and opens Split Double Pages.
 3. Otherwise a near-miss (`looksLikeA3Landscape`) shows a hint banner, `setupSplitState()` runs, and a just-split scan's `pendingScanSplitSkips` are applied (see below).
 
-Clearing the document (nil) resets the whole flow back to `.split`.
+Clearing the document (nil) resets the whole flow back to `.split`, including both single-use load flags (`suppressNextA3Detection`, `pendingScanSplitSkips`).
 
 ## Step 1 — split points
 
@@ -74,7 +74,7 @@ A view-local `[SplitSnapshot]` `undoStack`/`redoStack` (capped at 50). `SplitSna
 
 ### In-place rebuilds
 
-`swapCurrentPageWithNext()`, `applyBookletOrder(pages:order:)` and `applyBookletOrderToAllMatchingFiles(order:n:)` build a new `PDFDocument` with pages moved, then set `suppressNextA3Detection`, `documentRebuilt` and `suppressDocumentReset` immediately before assigning `pdfManager.pdfDocument`, so split points, names and skips survive. The booklet functions also remap `skippedPages` through the permutation. "Apply to all" exists because one rebuild per file can't work: each `onChange` clears `suppressDocumentReset` before the next call could use it.
+`swapCurrentPageWithNext()`, `applyBookletOrder(pages:order:)` and `applyBookletOrderToAllMatchingFiles(order:n:)` build a new `PDFDocument` with pages moved, then set `documentRebuilt` and `suppressDocumentReset` immediately before assigning `pdfManager.pdfDocument`, so split points, names and skips survive. The booklet functions also remap `skippedPages` through the permutation. "Apply to all" exists because one rebuild per file can't work: each `onChange` clears `suppressDocumentReset` before the next call could use it.
 
 ## Bookmarks — `Split/SplitBookmarks.swift`
 
