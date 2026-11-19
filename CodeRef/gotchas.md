@@ -14,7 +14,7 @@ Things that look wrong, or look like they could be simpler, but are the way they
 - **Never call PDFKit drawing from `concurrentPerform`.** Scan analysis renders `CGPDFPage`s through Core Graphics (`renderScan`), applying PDFKit's crop box and rotation by hand; PDFKit's `draw` is about 3× slower on 600 dpi CCITT scans and not thread-safe. The analysis functions are `nonisolated` because the module defaults to `MainActor`.
 - **A `PDFPage` can't draw once its document is released.** Hold the document (Stamp's `previewDocument`).
 - **`PDFPageView` is an image, not a `PDFView`**: a `PDFView` showing an image-only page runs Live Text recognition, which spammed the console with TextRecognition "Unable to find a valid E5" warnings on every update. → [shared.md](shared.md#shared-infrastructure)
-- **`PDFDocument.write(to:)` returns only a Bool.** Save through `savePDFDocument(_:to:)` (`Logic/PDFSaving.swift`) so a failure says why. (Rotate's save still uses `write(to:)`.)
+- **`PDFDocument.write(to:)` returns only a Bool.** Save through `savePDFDocument(_:to:)` (`Logic/PDFSaving.swift`) so a failure says why. Rotate's save uses it too now (#31).
 
 ## Split
 

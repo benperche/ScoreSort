@@ -61,7 +61,7 @@ All three outputs — `createCombinedPDF(to:options:stampJob:completion:)`, `ope
 Each real file adds a `bookmarks` entry `(label, pageIndex)` — the filename without `.pdf`, or `"Filename N/Total"` for multiple copies — and a parallel `partLayouts` entry.
 
 **The order is stamp → impose → outline, and it matters:**
-1. `applyingStamp(...)` first, so stamps land on *reading* pages. Bookmark page indices double as "first page of each part".
+1. `applyingStamp(...)` first, so stamps land on *reading* pages. Bookmark page indices double as "first page of each part". If it throws, `stampProblem` is set and all three outputs stop with "Couldn’t Stamp the Parts" (after the `unreadable` check) rather than producing unstamped output.
 2. For `.booklet`, `bookletSegments(pageCount:partFirstPages:)` carves the document at the bookmark indices and `imposedBookletDocument(...)` rebuilds it as sheets. Because there is **one bookmark per part per copy**, seven copies of a part become seven separately foldable booklets. Each segment's layout, and each bookmark's new `pageIndex` (`imposed.sheetStarts`), is found by looking up which segment *contains* the reading page, not by position: `bookletSegments` can prepend a segment at page 0, and a file that fails to load contributes a label but no pages.
 3. `outlineReadyDocument(from:)` moves the pages into a fresh `PDFDocument()`, then the `PDFOutline` is built and assigned. Without that step macOS 27 saves stamped and booklet output with no table of contents. Each destination aims at the **top-left of the crop box** (`.zero` is the foot of the page in PDF coordinates, which lands a viewer on the next part).
 

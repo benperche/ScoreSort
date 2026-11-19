@@ -2012,10 +2012,11 @@ class PDFManager: ObservableObject {
             newDocument.insert(page, at: pageIndex)
         }
 
-        if newDocument.write(to: url) {
-            completion("PDF Saved Successfully", "Your rotated PDF has been saved to:\n\(url.path)", false)
+        // `write(to:)` only answers true or false; this keeps the reason.
+        if let problem = savePDFDocument(newDocument, to: url) {
+            completion("Couldn’t Save the PDF", problem, true)
         } else {
-            completion("Error", "Failed to save rotated PDF", true)
+            completion("PDF Saved Successfully", "Your rotated PDF has been saved to:\n\(url.path)", false)
         }
     }
     

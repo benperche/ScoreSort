@@ -720,6 +720,22 @@ struct PDFManagerTests {
         #expect(result.page(at: 3)?.rotation == 180)  // page 4 (even)
     }
 
+    @Test func rotateSaveToReadOnlyFolderSaysWhy() throws {
+        let manager = makeManager(pages: 2)
+        let locked = tempDir.appendingPathComponent("Locked")
+        try FileManager.default.createDirectory(at: locked, withIntermediateDirectories: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: locked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+
+        var result = (title: "", message: "", isError: false)
+        manager.saveRotatedPDF(to: locked.appendingPathComponent("rotated.pdf"), baseRotation: .rotate90,
+                               additionalRotationMode: .none, additionalRotationAngle: .none) { result = ($0, $1, $2) }
+        #expect(result.isError)
+        #expect(result.title == "Couldn’t Save the PDF")
+        #expect(result.message.contains("Locked"), "the message names the folder it couldn't save into")
+        #expect(result.message != "Failed to save rotated PDF")
+    }
+
     // MARK: - saveSplitPDF
 
     @Test func splitCreatesCorrectNumberOfFiles() throws {

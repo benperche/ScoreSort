@@ -450,7 +450,7 @@ class CombineManager: ObservableObject {
     private func buildDocument(options: CombineOutputOptions, stampJob: StampJob?,
                                rotateBackFaces: Bool = false)
         -> (doc: PDFDocument, pageCount: Int, bookmarks: [(label: String, pageIndex: Int)],
-            unreadable: [URL]) {
+            unreadable: [URL], stampProblem: String?) {
         var doc = PDFDocument()
         var idx = 0
         var bookmarks: [(label: String, pageIndex: Int)] = []
@@ -509,7 +509,13 @@ class CombineManager: ObservableObject {
         // Stamp *before* the outline is built — flattening rebuilds the pages and drops any
         // existing outline, but leaves page indices untouched, so the bookmark loop below
         // still lines up.
-        doc = applyingStamp(stampJob, to: doc, partFirstPages: bookmarks.map { $0.pageIndex })
+        // A stamp that couldn't be applied stops the output rather than producing it unstamped.
+        var stampProblem: String?
+        do {
+            doc = try applyingStamp(stampJob, to: doc, partFirstPages: bookmarks.map { $0.pageIndex })
+        } catch {
+            stampProblem = error.localizedDescription
+        }
 
         // Then impose, still before the outline: imposition rebuilds the pages too, and it
         // must run on reading pages so stamps land where the reader sees them. Each bookmark
@@ -568,7 +574,7 @@ class CombineManager: ObservableObject {
         }
         doc.outlineRoot = root
 
-        return (doc, pageCount, bookmarks, unreadable)
+        return (doc, pageCount, bookmarks, unreadable, stampProblem)
     }
 
     func createCombinedPDF(to url: URL, options: CombineOutputOptions,
@@ -577,6 +583,10 @@ class CombineManager: ObservableObject {
         let built = buildDocument(options: options, stampJob: stampJob)
         guard built.unreadable.isEmpty else {
             completion("Couldn’t Read Some Files", unreadableFilesMessage(built.unreadable), true)
+            return
+        }
+        if let problem = built.stampProblem {
+            completion("Couldn’t Stamp the Parts", problem, true)
             return
         }
         if let problem = savePDFDocument(built.doc, to: url) {
@@ -593,6 +603,10 @@ class CombineManager: ObservableObject {
         let built = buildDocument(options: options, stampJob: stampJob)
         guard built.unreadable.isEmpty else {
             onError("Couldn’t Read Some Files", unreadableFilesMessage(built.unreadable), true)
+            return
+        }
+        if let problem = built.stampProblem {
+            onError("Couldn’t Stamp the Parts", problem, true)
             return
         }
         let tempURL = FileManager.default.temporaryDirectory.appendingPathComponent("CombinedForPrint.pdf")
@@ -613,6 +627,10 @@ class CombineManager: ObservableObject {
                                   rotateBackFaces: shouldRotateBackFaces(options))
         guard built.unreadable.isEmpty else {
             onError("Couldn’t Read Some Files", unreadableFilesMessage(built.unreadable), true)
+            return
+        }
+        if let problem = built.stampProblem {
+            onError("Couldn’t Stamp the Parts", problem, true)
             return
         }
         printPDFDocument(built.doc,

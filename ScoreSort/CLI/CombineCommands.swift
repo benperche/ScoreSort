@@ -70,8 +70,10 @@ extension ScoreSortCLI {
             })
     }
 
+    /// `job` replaces looking `stamp` up among the saved designs — for tests, which must never
+    /// touch the real stamps file.
     static func runStamp(files: [URL], stamp: String, scope: StampScope, out: String,
-                         dryRun: Bool, overwrite: Bool) throws -> CommandResult {
+                         dryRun: Bool, overwrite: Bool, job givenJob: StampJob? = nil) throws -> CommandResult {
         let folder = try outputFolder(out, create: !dryRun)
         let targets = files.map { folder.appendingPathComponent($0.deletingPathExtension().lastPathComponent + ".pdf") }
         if Set(targets.map(\.lastPathComponent)).count != targets.count {
@@ -84,7 +86,7 @@ extension ScoreSortCLI {
         if !existing.isEmpty && !overwrite && !dryRun {
             throw CommandError("These already exist in \(folder.path): \(existing.joined(separator: ", ")). Add --overwrite to replace them.")
         }
-        let job = try stampJob(named: stamp, scope: scope)
+        let job = try givenJob ?? stampJob(named: stamp, scope: scope)
 
         var entries: [[String: Any]] = []
         var problems: [String] = []
@@ -92,7 +94,15 @@ extension ScoreSortCLI {
             var entry: [String: Any] = ["file": source.path, "output": target.path]
             if !dryRun {
                 if let doc = pdfDocument(forFileAt: source) {
-                    let stamped = applyingStamp(job, to: doc, partFirstPages: [0])
+                    let stamped: PDFDocument
+                    do {
+                        stamped = try applyingStamp(job, to: doc, partFirstPages: [0])
+                    } catch {
+                        problems.append("\(source.lastPathComponent): \(error.localizedDescription)")
+                        entry["error"] = error.localizedDescription
+                        entries.append(entry)
+                        continue
+                    }
                     if let reason = savePDFDocument(stamped, to: target) {
                         problems.append("\(source.lastPathComponent): \(reason)")
                         entry["error"] = reason

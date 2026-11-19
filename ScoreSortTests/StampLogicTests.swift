@@ -257,28 +257,91 @@ struct StampScopeTests {
 struct ApplyingStampTests {
 
     @Test("a nil job returns the same document untouched")
-    func nilJobIsPassThrough() {
+    func nilJobIsPassThrough() throws {
         let doc = document(pages: [a4Page(), a4Page()])
-        let result = applyingStamp(nil, to: doc, partFirstPages: [0])
+        let result = try applyingStamp(nil, to: doc, partFirstPages: [0])
         #expect(result === doc)
     }
 
     @Test("a blank stamp returns the same document untouched")
-    func blankJobIsPassThrough() {
+    func blankJobIsPassThrough() throws {
         let doc = document(pages: [a4Page()])
         var stamp = testStamp()
         stamp.text = ""
-        let result = applyingStamp(StampJob(stamp: stamp, scope: .everyPage),
+        let result = try applyingStamp(StampJob(stamp: stamp, scope: .everyPage),
                                    to: doc, partFirstPages: [0])
         #expect(result === doc)
     }
 
     @Test("a drawable job returns a new document with the same page count")
-    func drawableJobStamps() {
+    func drawableJobStamps() throws {
         let doc = document(pages: [a4Page(), a4Page(), a4Page()])
-        let result = applyingStamp(testJob(.firstPageOfEachPart), to: doc, partFirstPages: [0, 2])
+        let result = try applyingStamp(testJob(.firstPageOfEachPart), to: doc, partFirstPages: [0, 2])
         #expect(result !== doc)
         #expect(result.pageCount == 3)
+    }
+
+    @Test("a drawable job that can't be applied throws instead of returning the unstamped document")
+    func failedStampThrows() {
+        #expect(throws: StampFailedError.self) {
+            try applyingStamp(testJob(.everyPage), to: PDFDocument(), partFirstPages: [0])
+        }
+    }
+
+    @Test("a blank job on an empty document still passes through")
+    func blankJobOnEmptyDocument() throws {
+        var stamp = testStamp()
+        stamp.text = ""
+        let doc = PDFDocument()
+        #expect(try applyingStamp(StampJob(stamp: stamp, scope: .everyPage), to: doc, partFirstPages: [0]) === doc)
+    }
+}
+
+// MARK: - A stamp that fails is reported, not saved unstamped
+
+/// Forces the flatten to fail (a document with no pages, or a password-protected PDF): every caller must report it
+/// through its own error path instead of saving (and announcing) an unstamped file.
+@Suite("Failed stamping is reported")
+@MainActor
+struct FailedStampReportingTests {
+    private let job = StampJob(stamp: testStamp(), scope: .everyPage)
+
+    @Test("CombineManager reports it (Create PDF and Preview; Print shares the check) and saves nothing")
+    func combine() {
+        let manager = CombineManager()   // no files: the built document is empty
+        let out = FileManager.default.temporaryDirectory.appendingPathComponent("\(UUID().uuidString).pdf")
+        var result = (title: "", message: "", isError: false)
+        manager.createCombinedPDF(to: out, options: CombineOutputOptions(), stampJob: job) { result = ($0, $1, $2) }
+        #expect(result.isError)
+        #expect(result.title == "Couldn’t Stamp the Parts")
+        #expect(result.message == StampFailedError().localizedDescription)
+        #expect(!FileManager.default.fileExists(atPath: out.path))
+
+        var previewTitle = ""
+        manager.openInPreview(options: CombineOutputOptions(), stampJob: job) { title, _, _ in previewTitle = title }
+        #expect(previewTitle == "Couldn’t Stamp the Parts")
+    }
+
+    @Test("The stamp command reports the file as a problem and writes nothing for it")
+    func stampCommand() throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let outDir = dir.appendingPathComponent("out")
+        try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
+        // A password-protected PDF: it opens (locked), but its pages can't be flattened.
+        let source = dir.appendingPathComponent("Locked.pdf")
+        var box = CGRect(x: 0, y: 0, width: 595, height: 842)
+        let protection: [CFString: Any] = [kCGPDFContextUserPassword: "secret", kCGPDFContextOwnerPassword: "owner"]
+        let ctx = try #require(CGContext(source as CFURL, mediaBox: &box, protection as CFDictionary))
+        ctx.beginPDFPage(nil); ctx.endPDFPage(); ctx.closePDF()
+        try #require(PDFDocument(url: source)?.isLocked == true, "the fixture must open, so the stamp is what fails")
+
+        let result = try ScoreSortCLI.runStamp(files: [source], stamp: "Test", scope: .everyPage,
+                                               out: outDir.path, dryRun: false, overwrite: false, job: job)
+        #expect(result.exitCode == 1)
+        let problems = try #require(result.json["problems"] as? [String])
+        #expect(problems.count == 1)
+        #expect(problems.first?.contains("couldn’t put the stamp on the pages") == true)
+        #expect(!FileManager.default.fileExists(atPath: outDir.appendingPathComponent("Locked.pdf").path))
     }
 }
 

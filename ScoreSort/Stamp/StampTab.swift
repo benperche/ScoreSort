@@ -942,7 +942,13 @@ struct StampView: View {
                 continue
             }
             // A standalone file is one "part", so first-page scope means page 1 only.
-            let stamped = applyingStamp(job, to: doc, partFirstPages: [0])
+            let stamped: PDFDocument
+            do {
+                stamped = try applyingStamp(job, to: doc, partFirstPages: [0])
+            } catch {
+                failed.append("• \(item.url.lastPathComponent): \(error.localizedDescription)")
+                continue
+            }
             if let problem = savePDFDocument(stamped, to: destination) {
                 failed.append("• \(destination.lastPathComponent): "
                               + problem.replacingOccurrences(of: "\n\n", with: " "))

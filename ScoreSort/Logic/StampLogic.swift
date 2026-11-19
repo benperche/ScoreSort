@@ -605,12 +605,24 @@ nonisolated func stampedDocument(_ doc: PDFDocument, stamp: Stamp, pageIndices: 
     return PDFDocument(data: output as Data)
 }
 
-/// Applies `job` to `doc`, or returns `doc` unchanged when there's nothing to stamp or the
-/// flatten fails — so callers can use it inline without losing the document.
-nonisolated func applyingStamp(_ job: StampJob?, to doc: PDFDocument, partFirstPages: [Int]) -> PDFDocument {
+/// A stamp that should have been applied but couldn't be. Thrown rather than handing back the
+/// unstamped document, which every caller used to save and report as stamped.
+struct StampFailedError: LocalizedError, Equatable {
+    var errorDescription: String? {
+        "ScoreSort couldn’t put the stamp on the pages, so nothing was saved. The PDF may be damaged or protected with a password — try opening it in Preview, and if it opens, export it as a new PDF and stamp that."
+    }
+}
+
+/// Applies `job` to `doc`. Returns `doc` unchanged when there's nothing to stamp (no job, or
+/// a blank one); throws `StampFailedError` when a drawable stamp couldn't be applied, so the
+/// caller reports it through its own error path instead of saving an unstamped file.
+nonisolated func applyingStamp(_ job: StampJob?, to doc: PDFDocument, partFirstPages: [Int]) throws -> PDFDocument {
     guard let job, job.isDrawable else { return doc }
     let indices = job.pageIndices(pageCount: doc.pageCount, partFirstPages: partFirstPages)
-    return stampedDocument(doc, stamp: job.stamp, pageIndices: indices) ?? doc
+    guard let stamped = stampedDocument(doc, stamp: job.stamp, pageIndices: indices) else {
+        throw StampFailedError()
+    }
+    return stamped
 }
 
 // MARK: - Preview

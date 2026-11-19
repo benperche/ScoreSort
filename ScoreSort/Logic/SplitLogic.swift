@@ -403,7 +403,13 @@ nonisolated func writeSplitFiles(_ plans: [SplitFilePlan], from document: PDFDoc
             report.failures.append((plan.name, "None of its pages could be read."))
             continue
         }
-        let doc = applyingStamp(stampJob, to: assembled, partFirstPages: [0])
+        let doc: PDFDocument
+        do {
+            doc = try applyingStamp(stampJob, to: assembled, partFirstPages: [0])
+        } catch {
+            report.failures.append((plan.name, error.localizedDescription))
+            continue
+        }
         // A name can carry a section folder ("Brass/03 - Trumpet 1.pdf", `partFolderPath`).
         let destination = folder.appendingPathComponent(plan.name)
         do {
