@@ -101,6 +101,7 @@ Things that look wrong, or look like they could be simpler, but are the way they
 
 ## Command line and MCP
 
+- **"Is this the same file?" is `isSameFile`, never a path comparison** (#30). Mac disks usually ignore case, so `Part.PDF` and `part.pdf` are one file; so is a path through a symlinked folder. An exact `standardizedFileURL ==` let a stamped `Part.pdf` replace `Part.PDF`. `isSameFile` compares the file system's own identifier, so it's also right on case-sensitive disks, and it's false for a file that doesn't exist yet.
 - **Change behaviour in the shared logic, not in a command**, or the app and the CLI drift. → [cli-mcp.md](cli-mcp.md)
 - **MCP stdout is protocol only**: `run()` writes to a `dup` of fd 1 and points fd 1 at stderr. Never `print` to the protocol handle.
 - **Only an explicit verb switches to command-line mode** (Xcode and Launch Services pass `-NS…` arguments), and never under tests.

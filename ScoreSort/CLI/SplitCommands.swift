@@ -221,6 +221,11 @@ extension ScoreSortCLI {
         let shared = pageUse.filter { $0.value > 1 }.map(\.key)
         if !shared.isEmpty { warnings.append("Pages \(describePages(shared)) are in more than one part.") }
 
+        // Never over the PDF being split, even with --overwrite: it's still being read from.
+        // (The app asks first and saves through a temporary folder; see `saveSplitFiles`.)
+        if let clash = writable.first(where: { isSameFile(folder.appendingPathComponent($0.name), file) }) {
+            throw CommandError("“\(clash.name)” would replace \(file.lastPathComponent), the PDF being split. Choose another --out folder, or give that part a different name.")
+        }
         let existing = writable.map(\.name).filter {
             FileManager.default.fileExists(atPath: folder.appendingPathComponent($0).path)
         }
@@ -335,7 +340,7 @@ extension ScoreSortCLI {
         let doc = try openPDFDocument(file)
         var outURL = URL(fileURLWithPath: (out as NSString).expandingTildeInPath).standardizedFileURL
         if outURL.pathExtension.lowercased() != "pdf" { outURL.appendPathExtension("pdf") }
-        guard outURL != file.standardizedFileURL else {
+        guard outURL != file.standardizedFileURL, !isSameFile(outURL, file) else {
             throw CommandError("--out must be a new file, not the scan itself.")
         }
         if FileManager.default.fileExists(atPath: outURL.path) && !overwrite && !dryRun {

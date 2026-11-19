@@ -170,3 +170,20 @@ extension FollowsMovedFile {
         return true
     }
 }
+
+/// True when `a` and `b` are the same file on disk, however they're written: a different case
+/// on the Mac's (normally case-insensitive) disks, a path through a symlinked folder, or a
+/// hard link. Compared by the file system's own identity for the file, not by path, so it is
+/// right on case-sensitive disks too. False when either doesn't exist — writing to `a` then
+/// can't touch `b`.
+///
+/// Every "would this replace the original?" check uses this (#30): an exact path comparison
+/// let `Part.PDF` be replaced by a stamped `Part.pdf` in the same folder.
+nonisolated func isSameFile(_ a: URL, _ b: URL) -> Bool {
+    func identity(_ url: URL) -> (any NSCopying & NSSecureCoding & NSObjectProtocol)? {
+        try? url.standardizedFileURL.resolvingSymlinksInPath()
+            .resourceValues(forKeys: [.fileResourceIdentifierKey]).fileResourceIdentifier
+    }
+    guard let x = identity(a), let y = identity(b) else { return false }
+    return x.isEqual(y)
+}

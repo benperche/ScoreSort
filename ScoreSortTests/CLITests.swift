@@ -912,12 +912,16 @@ struct SingleFileSplitTests {
 
     @Test("An output landing on the original is spotted, whatever the case")
     func replacesSource() {
-        let folder = URL(fileURLWithPath: "/Users/x/Parts", isDirectory: true)
+        // Real files: the check is by the file's identity on disk (`isSameFile`, #30).
+        let folder = temporaryFolder("replaces")
         let source = folder.appendingPathComponent("02 Ebony Alto 1.pdf")
-        #expect(splitOutputReplacesSource(names: ["02 ebony alto 1.pdf"], folder: folder, source: source))
+        writeDrawnPDF(pages: 1, to: source)
+        let caseInsensitive = (try? folder.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey])
+            .volumeSupportsCaseSensitiveNames) == false
+        #expect(splitOutputReplacesSource(names: ["02 Ebony Alto 1.pdf"], folder: folder, source: source))
+        #expect(splitOutputReplacesSource(names: ["02 ebony alto 1.pdf"], folder: folder, source: source) == caseInsensitive)
         #expect(!splitOutputReplacesSource(names: ["02 Ebony Alto 1 - Flute.pdf"], folder: folder, source: source))
-        #expect(!splitOutputReplacesSource(names: ["02 Ebony Alto 1.pdf"],
-                                           folder: URL(fileURLWithPath: "/Users/x/Out", isDirectory: true), source: source))
+        #expect(!splitOutputReplacesSource(names: ["02 Ebony Alto 1.pdf"], folder: temporaryFolder("out"), source: source))
     }
 
     @Test("A single-file split saves under the base name")

@@ -36,7 +36,7 @@ Pure functions (`Logic/SplitLogic.swift`):
 | `splitActiveFileCount(pageToFile:skippedPages:)` | Files with at least one page not skipped; drives `onlyFile`. |
 | `firstKeptPage(fileStart:fileSize:skippedPages:)` | The page shown for a file in Steps 2–3: its first page that will be saved, so a skipped black or blank first page doesn't stand in for the part. |
 | `splitOutputIsWorthSaving(activeFiles:skippedPages:pagesRebuilt:)` | ≥ 1 active file and (≥ 2 files, or some pages skipped, or pages rebuilt). |
-| `splitOutputReplacesSource(names:folder:source:)` | Whether a name lands exactly on the source file (case-insensitive, symlinks resolved). |
+| `splitOutputReplacesSource(names:folder:source:)` | Whether a name lands exactly on the source file: `isSameFile`, so any case on a case-insensitive disk, a symlinked folder or a hard link counts. False when the output doesn't exist yet. |
 
 **Continuing.** `canContinueToNaming` (the Next button, Return, the menu's primary action and `saveSplitPDF`'s guard) and Step 2's `canSave` both use `splitOutputIsWorthSaving`. `documentRebuilt` is set by Split Double Pages, Swap with Next and Fix Booklet Order and cleared on a new or cleared document: without it a part scanned on A3 and cut to A4 — still one file, nothing skipped — couldn't be saved.
 

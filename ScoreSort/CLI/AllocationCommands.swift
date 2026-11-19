@@ -92,7 +92,7 @@ extension ScoreSortCLI {
         }
         if let excluding {
             let skip = excluding.resolvingSymlinksInPath().path
-            files.removeAll { $0.resolvingSymlinksInPath().path == skip }
+            files.removeAll { $0.resolvingSymlinksInPath().path == skip || isSameFile($0, excluding) }
         }
         guard !files.isEmpty else { throw CommandError("No PDFs or images there.") }
         return files

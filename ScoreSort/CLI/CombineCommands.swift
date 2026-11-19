@@ -77,7 +77,7 @@ extension ScoreSortCLI {
         if Set(targets.map(\.lastPathComponent)).count != targets.count {
             throw CommandError("Two of the files would be saved under the same name in \(folder.path).")
         }
-        for (source, target) in zip(files, targets) where target.standardizedFileURL == source.standardizedFileURL {
+        for (source, target) in zip(files, targets) where isSameFile(target, source) {
             throw CommandError("--out is the folder \(source.lastPathComponent) is in, so its stamped copy would replace it. Choose another folder (to replace originals, use the app).")
         }
         let existing = targets.filter { FileManager.default.fileExists(atPath: $0.path) }.map(\.lastPathComponent)

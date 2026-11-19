@@ -233,13 +233,10 @@ func splitOutputFileName(base: String, separator: String, suffix: String, fileIn
     return base.isEmpty ? "\(part).pdf" : "\(base)\(separator)\(part).pdf"
 }
 
-/// True when saving `names` into `folder` would put one exactly where the source file is
-/// (same folder, same name — compared without case, as the Mac's disks do).
+/// True when saving `names` into `folder` would put one exactly where the source file is:
+/// the same file on disk, whatever its case or however the folder is reached (`isSameFile`).
 func splitOutputReplacesSource(names: [String], folder: URL, source: URL) -> Bool {
-    let sourcePath = source.standardizedFileURL.resolvingSymlinksInPath().path.lowercased()
-    return names.contains {
-        folder.appendingPathComponent($0).standardizedFileURL.resolvingSymlinksInPath().path.lowercased() == sourcePath
-    }
+    names.contains { isSameFile(folder.appendingPathComponent($0), source) }
 }
 
 /// How many files a split will write: those with at least one page not skipped.
