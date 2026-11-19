@@ -516,7 +516,11 @@ Contributions are welcome! Please feel free to submit a Pull Request. For major 
 
 ## License
 
-This project is licensed under the MIT License — see the [LICENSE](LICENSE) file for details.
+ScoreSort is free software: you can redistribute it and/or modify it under the terms of the **GNU General Public License, version 3** (GPL-3.0), as published by the Free Software Foundation. In short, you may use, study, share and change it; if you distribute a changed version, you must share its source under the same licence. It comes with no warranty. See [LICENSE](LICENSE) for the full terms.
+
+ScoreSort includes [Sparkle](https://sparkle-project.org) for updates, under the MIT licence; its notice ships in the app (About ScoreSort, and `Acknowledgements.txt` inside the app bundle).
+
+To report a security problem privately, see [SECURITY.md](SECURITY.md).
 
 ## Acknowledgments
 

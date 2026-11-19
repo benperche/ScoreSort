@@ -110,6 +110,14 @@ struct ViewSmokeTests {
     func contentView() {
         render(ContentView())
     }
+
+    @Test("About credits carry the GPL line and Sparkle's licence notice")
+    func aboutCredits() {
+        let text = aboutPanelCredits().string
+        #expect(text.contains("GNU General Public License, version 3"))
+        #expect(text.contains("Sparkle"))
+        #expect(text.contains("Permission is hereby granted, free of charge"))
+    }
 }
 
 @MainActor

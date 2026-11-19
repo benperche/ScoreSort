@@ -6,6 +6,8 @@ _Draft for the next release after 1.11.0. Keep adding to this as more changes la
 
 - **AI assistants can tell which ScoreSort tools only look at your files and which can change them.** Each tool now says so, and has a plain name, so an assistant app can ask you before the ones that matter.
 
+- **ScoreSort is now free software**, under the GNU General Public License (version 3): anyone may use, share and improve it, as long as improved versions stay free too. About ScoreSort says so, and credits Sparkle, which keeps ScoreSort up to date.
+
 ## 🏷️ Rename Files
 
 ## 🔗 Combine PDFs

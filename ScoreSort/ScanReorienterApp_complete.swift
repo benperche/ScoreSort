@@ -357,14 +357,29 @@ func aboutPanelCredits() -> NSAttributedString {
         df.timeStyle = .none
         text = "Updated \(df.string(from: date))\n\(author)"
     }
+    text += "\n\nFree software under the GNU General Public License, version 3.\n"
+        + "Source code: github.com/benperche/ScoreSort"
     let para = NSMutableParagraphStyle()
     para.alignment = .center
     para.paragraphSpacing = 6
-    return NSAttributedString(string: text, attributes: [
+    let credits = NSMutableAttributedString(string: text, attributes: [
         .font: NSFont.systemFont(ofSize: 11),
         .foregroundColor: NSColor.secondaryLabelColor,
         .paragraphStyle: para
     ])
+    // Sparkle's MIT/BSD notices must ship with the app: `Acknowledgements.txt` is a bundle
+    // resource, and its text is shown in full below the credits (the panel scrolls).
+    if let url = Bundle.main.url(forResource: "Acknowledgements", withExtension: "txt"),
+       let notices = try? String(contentsOf: url, encoding: .utf8) {
+        let left = NSMutableParagraphStyle()
+        left.alignment = .left
+        credits.append(NSAttributedString(string: "\n\n" + notices, attributes: [
+            .font: NSFont.systemFont(ofSize: 9),
+            .foregroundColor: NSColor.secondaryLabelColor,
+            .paragraphStyle: left
+        ]))
+    }
+    return credits
 }
 
 // MARK: - App Delegate
