@@ -49,8 +49,10 @@ struct RotateView: View {
             
             // Main content area
             if let document = pdfManager.pdfDocument {
-                // PDF loaded - show preview and controls
-                VStack(spacing: 16) {
+                // PDF loaded - show preview and controls. No stack spacing: the preview's
+                // and the controls' own padding already space them either side of the
+                // divider, and spacing on top left an empty band the previews can use (#35).
+                VStack(spacing: 0) {
                     // Preview area
                     RotatePreviewSection(
                         document: document,
@@ -81,8 +83,12 @@ struct RotateView: View {
                                     Text("270°").tag(RotationAngle.rotate270)
                                 }
                                 .pickerStyle(.segmented)
+                                // "Rotate all pages:" is the visible label; the picker's own
+                                // label squeezed into the 280-pt frame and wrapped (#35).
+                                .labelsHidden()
+                                .accessibilityLabel("Base rotation")
                                 .frame(width: 280)
-                                
+
                                 Spacer()
                             }
                         }
@@ -333,15 +339,27 @@ struct RotatePreviewSection: View {
                     .buttonStyle(.bordered)
                     .help("Rotate this page 90° counter-clockwise (,)")
 
+                    // The middle is always as wide as its longest possible text, so the
+                    // rotate buttons either side stay put as the caption changes from
+                    // "No rotation" to the semibold "Rotated 270° (this page)" (#35).
                     VStack(spacing: 4) {
-                        Text("Page \(currentPage + 1) of \(totalPages)")
-                            .font(.headline)
+                        ZStack {
+                            Text("Page \(totalPages) of \(totalPages)").hidden()
+                            Text("Page \(currentPage + 1) of \(totalPages)")
+                        }
+                        .font(.headline)
+                        .monospacedDigit()
 
-                        Text(rotationDescription)
-                            .font(.caption)
-                            .foregroundColor(totalRotationForCurrentPage > 0 ? .orange : .secondary)
-                            .fontWeight(totalRotationForCurrentPage > 0 ? .semibold : .regular)
+                        ZStack {
+                            Text("Rotated 270° (this page)").fontWeight(.semibold).hidden()
+                            Text(rotationDescription)
+                                .foregroundColor(totalRotationForCurrentPage > 0 ? .orange : .secondary)
+                                .fontWeight(totalRotationForCurrentPage > 0 ? .semibold : .regular)
+                        }
+                        .font(.caption)
                     }
+                    .lineLimit(1)
+                    .fixedSize()
 
                     Button(action: onRotateCurrentPageRight) {
                         Image(systemName: "rotate.right")
@@ -363,6 +381,7 @@ struct RotatePreviewSection: View {
                 .disabled(currentPage >= totalPages - 1)
             }
             .padding(.horizontal)
+            .padding(.top, 10)
             
             // Preview images
             HStack(spacing: 16) {
@@ -398,7 +417,7 @@ struct RotatePreviewSection: View {
                 }
             }
             .frame(maxHeight: .infinity)
-            .padding()
+            .padding([.horizontal, .bottom])
         }
     }
     

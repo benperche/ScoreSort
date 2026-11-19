@@ -14,6 +14,10 @@ _Draft for the next release after 1.11.0. Keep adding to this as more changes la
 
 - **Saving a split no longer freezes ScoreSort on big scans.** A progress bar shows each part as it's saved, and you can cancel part-way: the parts already saved are kept, and you're told which weren't.
 
+## 🔄 Rotate Pages
+
+- **The Rotate buttons stay put as you rotate a page**, so you can click the same one repeatedly to turn a page round. The page previews are a little bigger too, and the "Base rotation" label no longer wraps across three lines.
+
 ## 🔖 Stamp
 
 ## 🐞 Fixed
