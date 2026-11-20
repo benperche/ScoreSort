@@ -55,7 +55,7 @@ All three outputs — `createCombinedPDF(to:options:stampJob:completion:)`, `ope
 - **Standalone file:** all its copies together.
 - **Group:** the consecutive files with the same `collateGroupId`, repeated `group.copies` times as a set.
 - **Blank entry:** one `PDFPage` of `options.paper` from `createBlankPage(_:)`; no bookmark. The pad after an odd-length part is the same page.
-- **Image:** `pdfPages(fromImageAt:paper:)` renders each frame onto a page of `options.paper` (`makePage(from:paper:)`: scaled to fit, white background). `options.paper` is A4 unless set; the tab and the CLI pass `PaperSize.current` ([shared.md § Paper size](shared.md#paper-size)).
+- **Image:** `pdfPages(fromImageAt:paper:)` renders each frame onto a page of `options.paper` (`makePage(from:paper:)`: scaled to fit, white background, the image placed into a real PDF page at its own resolution, capped at `maximumImagePageResolution` (600 ppi) — #36; it used to be redrawn at about 72 dpi). `options.paper` is A4 unless set; the tab and the CLI pass `PaperSize.current` ([shared.md § Paper size](shared.md#paper-size)).
 - **PDF:** `PDFDocument(url:)`, pages copied across. With `addBlankPages`, an odd-length file gets a trailing blank **unless the layout is `.booklet`** (padding to a multiple of 4 supersedes padding to 2).
 
 Each real file adds a `bookmarks` entry `(label, pageIndex)` — the filename without `.pdf`, or `"Filename N/Total"` for multiple copies — and a parallel `partLayouts` entry.

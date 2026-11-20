@@ -133,7 +133,7 @@ No longer the menu bridge. It survives for Combine's in-view keyboard handling: 
 |------|-------------------------|
 | `Logic/PDFSaving.swift` | `savePDFDocument(_:to:)` (a save that reports the real reason on failure) and `unreadableFilesMessage` |
 | `Logic/OutlineLogic.swift` | `outlineReadyDocument(from:)` — attach outlines to its result so they survive saving ([gotcha](gotchas.md#pdfkit-and-pdf-geometry)) |
-| `Logic/ImagePages.swift` | images → PDF pages of the default paper (`makePage(from:paper:)`, `pdfPages(fromImageAt:paper:)`, `pdfDocument(forFileAt:paper:)`; `makeA4Page` is the A4 case), and the supported-extension sets (Combine and Stamp) |
+| `Logic/ImagePages.swift` | images → PDF pages of the default paper, **at the image's own resolution** (#36: drawn into a `CGPDFContext`, not a page-sized bitmap; capped at 600 ppi via an ImageIO thumbnail; each page retains its one-page source document through an associated object, since a `PDFPage` doesn't keep its document alive) (`makePage(from:paper:)`, `pdfPages(fromImageAt:paper:)`, `pdfDocument(forFileAt:paper:)`; `makeA4Page` is the A4 case), and the supported-extension sets (Combine and Stamp) |
 | `Logic/PaperSize.swift` | the default paper — see [Paper size](#paper-size) below |
 | `Logic/InstrumentNames.swift` | instrument-name matching used by Combine presets, Rename and Split — see [rename.md](rename.md) and [split.md](split.md) |
 | `Logic/PartFolders.swift` | "Sort into folders" — see [rename.md](rename.md) |
