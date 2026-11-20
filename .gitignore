@@ -28,3 +28,9 @@ screenshots/appstore/*
 # Python (screenshot tooling)
 # =========================
 .venv/
+
+# =========================
+# Release builds (Scripts/release.sh)
+# =========================
+release/
+__pycache__/

@@ -65,6 +65,10 @@ jobs:
           path: ${{ env.SOURCE_PACKAGES }}
           key: swift-packages-xcode-${{ env.XCODE_VERSION }}-${{ hashFiles('ScoreSort.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/Package.resolved') }}
 
+      # Scripts/appcast_entry.py writes the appcast entry every release depends on.
+      - name: Release script tests
+        run: python3 -I -m unittest discover -s Scripts -p 'test_*.py'
+
       # -onlyUsePackageVersionsFromResolvedFile: build exactly the versions committed in
       # Package.resolved, and fail rather than quietly resolving to something newer.
       - name: Resolve packages

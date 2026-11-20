@@ -459,40 +459,20 @@ ScoreSort updates itself with [Sparkle](https://sparkle-project.org). The update
 
 ### Per release
 
-1. **Bump the version** (target ▸ General, or the build settings): raise **Marketing Version** (e.g. `1.5`) *and* **Current Project Version** (the build number). Sparkle only offers an update when the **build number increases**.
+1. **Bump the version** (target ▸ General, or the build settings): raise **Marketing Version** (e.g. `1.12.0`) *and* **Current Project Version** (the build number). Sparkle only offers an update when the **build number increases**. Commit and push.
 
-2. **Archive & notarise the app**: Product ▸ Archive ▸ **Distribute App** ▸ **Direct Distribution**. Xcode signs with Developer ID, notarises, and staples the app. Click **Export Notarized App** and note where you saved `ScoreSort.app`.
-
-3. **Build the DMG** (drag-to-Applications installer):
+2. **Check, then build**:
    ```bash
-   create-dmg \
-     --volname "ScoreSort" \
-     --window-size 600 400 \
-     --icon "ScoreSort.app" 150 200 \
-     --app-drop-link 450 200 \
-     "ScoreSort.dmg" "ScoreSort.app"
+   Scripts/release.sh 1.12.0 --summary "One or two sentences for the top of the release notes." --dry-run
+   Scripts/release.sh 1.12.0 --summary "One or two sentences for the top of the release notes."
    ```
+   The dry run lists anything that would stop a release and shows the appcast entry it would write. The real run checks again and runs the tests, then archives, exports with Developer ID, notarises and staples the app, builds the DMG with `create-dmg`, notarises and staples that, and signs it for Sparkle. It writes the new item into [`docs/appcast.xml`](docs/appcast.xml) (release notes from `RELEASE_NOTES_NEXT.md`, the stranded-1.5 block moved onto it) and resets `RELEASE_NOTES_NEXT.md`. Everything goes in `release/1.12.0/`, and **nothing is published**: review `git diff`, then run the commands it prints.
 
-4. **Notarise & staple the DMG** (so a direct website download opens without a Gatekeeper warning):
-   ```bash
-   xcrun notarytool submit ScoreSort.dmg --keychain-profile "ScoreSort-notary" --wait
-   xcrun stapler staple ScoreSort.dmg
-   ```
+3. **Publish**: run the printed commands, or re-run step 2 with `--publish` (it picks up where it left off). It creates the GitHub Release `v1.12.0` with `ScoreSort.dmg` first, then commits and pushes the appcast, which the **Deploy appcast** workflow publishes and checks (`gh run list --workflow pages.yml --limit 1`).
 
-5. **Sign the update for Sparkle** — prints `sparkle:edSignature` and `length`:
-   ```bash
-   "$(find ~/Library/Developer/Xcode/DerivedData/ScoreSort-*/SourcePackages/artifacts/sparkle/Sparkle/bin -name sign_update | head -1)" ScoreSort.dmg
-   ```
+4. **Check the AI connection with the released build** (it's the only build that runs exactly as users' will): install from the DMG, open ScoreSort, **Settings ▸ AI Assistants ▸ Connect to Claude**, share a folder that has a PDF in it, then ask Claude in a new chat to "find my most recent PDF with ScoreSort". If Claude lists it, the notarised app runs fine when Claude starts it. And from the previous version, **Check for Updates…** should find, download and install the new one.
 
-6. **Update [`docs/appcast.xml`](docs/appcast.xml)**: add (or fill in) an `<item>` with the new `title`, `sparkle:version` (build number), `sparkle:shortVersionString`, `pubDate`, `releaseNotesLink`, and the `enclosure` `url`, `sparkle:edSignature`, and `length` from step 5. A template is included in the file. **Keep the `<link>` and `<sparkle:informationalUpdate>` (`belowVersion` 9) block on the newest item**: 1.5 and 1.5.1 were sandboxed and can't run Sparkle's installer, so for them the update is shown as a link to the download page instead of an install that fails.
-
-7. **Create a GitHub Release** tagged `vX.X`, attach `ScoreSort.dmg`, and paste the release notes (these become the `releaseNotesLink` page).
-
-   **Check the AI connection with the released build** (it's the only build that runs exactly as users' will): install from the DMG, open ScoreSort, **Settings ▸ AI Assistants ▸ Connect to Claude**, share a folder that has a PDF in it, then ask Claude in a new chat to "find my most recent PDF with ScoreSort". If Claude lists it, the notarised app runs fine when Claude starts it.
-
-8. **Commit & push `docs/appcast.xml`** — the **Deploy appcast** workflow publishes it and checks the live feed matches the file (`gh run list --workflow pages.yml --limit 1`); existing users are then offered the update in-app.
-
-9. **Reset `RELEASE_NOTES_NEXT.md`** back to an empty per-section draft so it's ready to accumulate notes for the next release.
+The script's steps are the manual ones: Xcode's Product ▸ Archive ▸ Distribute App ▸ Direct Distribution, `create-dmg`, `xcrun notarytool submit … --keychain-profile "ScoreSort-notary" --wait` and `xcrun stapler staple`, Sparkle's `sign_update`, and an `<item>` added by hand (a template is at the end of the appcast). Keep the `<link>` and `<sparkle:informationalUpdate>` (`belowVersion` 9) block on the newest item only: 1.5 and 1.5.1 were sandboxed and can't run Sparkle's installer.
 
 The website's download button should point at `https://github.com/benperche/ScoreSort/releases/latest/download/ScoreSort.dmg`, which always resolves to the newest release's `ScoreSort.dmg` asset (keep the asset filename consistent).
 

@@ -32,16 +32,16 @@ Each `<item>` has `title`, `sparkle:version`, `sparkle:shortVersionString`, `spa
 
 So **the newest appcast item always carries** `<link>https://github.com/benperche/ScoreSort/releases/latest</link>` and `<sparkle:informationalUpdate><sparkle:belowVersion>9</sparkle:belowVersion></sparkle:informationalUpdate>` (with a comment saying why): below build 9, Sparkle shows the update as a link to the download page instead of an install that fails. `belowVersion` compares against **`CFBundleVersion`** (the same comparator as `sparkle:version`), not the marketing version — verified by running the edited feed through Sparkle's own `SUAppcast` parser (2.9.1 at the time) for builds 7, 8, 9, 14 and 15. It's honoured only while the feed is **unsigned** (signature status *Skipped*) or validly signed: a feed that fails signature validation drops informational flags and links. Carry the block over to each new item.
 
-## Release checklist
+## Release checklist — `Scripts/release.sh` (#11)
 
-The README has the commands; in outline:
+1. Raise **Marketing Version** and **Current Project Version** (build number — must increase) in both configurations, commit and push.
+2. `Scripts/release.sh X.Y.Z --summary "One or two sentences."` (try `--dry-run` first: it lists every problem and shows the sample appcast entry, touching nothing). It:
+   - **checks** a clean `main` equal to GitHub's, `MARKETING_VERSION` = X.Y.Z, the build higher than every published one, notes in the draft, and the tests (the suite plus the script's own; `--skip-tests` skips);
+   - **archives** (Release), exports with Developer ID (`ExportOptions.plist`, team `33H8SWK5BX`), **notarises** and staples the app (keychain profile `ScoreSort-notary`), builds the DMG with `create-dmg`, notarises and staples it, and checks Gatekeeper accepts it;
+   - **signs** it with Sparkle's `sign_update` (the private key never leaves the login Keychain) and checks the signed length matches;
+   - **writes** the `<item>` into `docs/appcast.xml` (`Scripts/appcast_entry.py`: the notes converted from `RELEASE_NOTES_NEXT.md` with the summary on top, the `<link>` + `informationalUpdate` block *moved* onto it), saves the GitHub notes to `release/X.Y.Z/notes.md`, and resets `RELEASE_NOTES_NEXT.md`.
+   Everything lands in `release/X.Y.Z/` (git-ignored). **It stops before anything public**: the appcast and notes changes are left uncommitted to review, and it prints the publishing commands.
+3. Publish: run the printed commands, or re-run with **`--publish`** (it resumes, skipping the build when the signed DMG is there): `gh release create vX.Y.Z` with the DMG and notes **first**, so the download exists before the feed points at it, then commit and push `docs/appcast.xml` + `RELEASE_NOTES_NEXT.md`. The Deploy appcast workflow publishes and verifies the feed (`gh run list --workflow pages.yml --limit 1`).
+4. Check the AI connection with the released build (it's the only build that runs exactly as users' will): install from the DMG, Settings ▸ AI Assistants ▸ Connect to Claude, share a folder with a PDF in it, and ask Claude in a new chat to find the most recent PDF with ScoreSort. Also Check for Updates… from the previous version, which is the only test of the update itself.
 
-1. Raise **Marketing Version** and **Current Project Version** (build number — must increase) in both configurations.
-2. Product ▸ Archive ▸ Distribute App ▸ **Direct Distribution** (Developer ID signing, notarisation, stapling) ▸ Export Notarized App.
-3. Build `ScoreSort.dmg` (`create-dmg`), then notarise and `xcrun stapler staple` the DMG.
-4. `sign_update ScoreSort.dmg` → `sparkle:edSignature` and `length`.
-5. Add the new `<item>` at the top of `docs/appcast.xml`, moving the `<link>` + `informationalUpdate` block onto it.
-6. Create the GitHub Release `vX.Y.Z` with `ScoreSort.dmg` attached (the name must match the enclosure URL) and the release notes, taken from `RELEASE_NOTES_NEXT.md`.
-7. Check the AI connection with the released build (it's the only build that runs exactly as users' will): install from the DMG, Settings ▸ AI Assistants ▸ Connect to Claude, share a folder with a PDF in it, and ask Claude in a new chat to find the most recent PDF with ScoreSort.
-8. Commit and push `docs/appcast.xml`; the Deploy appcast workflow publishes and verifies it (`gh run list --workflow pages.yml --limit 1`). Existing users are then offered the update.
-9. Reset `RELEASE_NOTES_NEXT.md` to an empty draft. Every user-visible change adds a line to it in the same commit, written for a musician — so the notes never have to be reconstructed from the log at release time (after 1.8.0, three changes shipped unmentioned that way).
+`Scripts/test_appcast_entry.py` tests the generator against the real `docs/appcast.xml` (newest first, the block moved and never duplicated, earlier items untouched, the build must increase, well-formed XML) and checks the reset draft has every heading `RELEASE_NOTES_NEXT.md` uses — **add a new section heading to `SECTIONS` in `appcast_entry.py`**. CI runs these tests. Every user-visible change still adds a line to `RELEASE_NOTES_NEXT.md` in the same commit, written for a musician (after 1.8.0, three changes shipped unmentioned).

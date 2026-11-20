@@ -92,6 +92,7 @@ These are non-obvious *whys* established across the sessions that built the app 
 - **Delete/backspace uses `NSEvent.addLocalMonitorForEvents(matching: .keyDown)`** — SwiftUI's `onKeyPress` does not reliably catch the delete key on macOS.
 - **Preset/name matching prefers graceful fallback over partial fill** — if bookmark labels don't cleanly parse as `"NN - Piece - Part"`, fall back to default behaviour rather than half-filling. Unmatched files/parts are highlighted orange and left for manual matching on purpose: real ensembles (Sydney school bands) have irregular parts — e.g. bass-guitar players covering whatever part exists — that Ben is always happy to assign by hand.
 - **Version comes from `Bundle.main` `CFBundleShortVersionString`**, not a hardcoded constant, and tracks the GitHub release version.
+- **Releases go through `Scripts/release.sh`** (`CodeRef/releasing.md`): it checks, builds, notarises, signs and writes the appcast entry, and publishes nothing without `--publish`. Ben decides when to release; never run it (or bump versions) unless he asks.
 - **Distribution is direct, not the App Store**: a Developer ID–signed, notarised and stapled DMG on GitHub Releases, updated with Sparkle (steps in the README's "Releasing Updates"). There are no App Store plans, so the AI access (CLI + MCP, which needs to read files wherever the user keeps them) doesn't have to survive sandboxing.
 
 ## Workflow conventions (from project memory)
