@@ -777,6 +777,9 @@ struct SplitView: View {
                 // monitor would otherwise fire on other tabs (it stays installed because
                 // TabView keeps hidden tabs mounted).
                 guard appState.selectedTab == 2 else { return event }
+                // Nor from a sheet on top (an open/save panel, Split Double Pages…):
+                // ⌫ there must not skip pages behind it.
+                if NSApp.keyWindow?.isSheet == true { return event }
                 // Don't steal keys from text fields (stride stepper, name fields, etc.)
                 let inTextField = NSApp.keyWindow?.firstResponder is NSTextView
                 // ⌘Z / ⌘⇧Z — undo/redo Step-1 split edits. Caught here (not via a menu
@@ -835,7 +838,7 @@ struct SplitView: View {
         panel.allowedContentTypes = [.pdf]
         panel.allowsMultipleSelection = false
         panel.title = "Select PDF"
-        panel.begin { response in
+        beginPanelSheet(panel) { response in
             if response == .OK, let url = panel.url { pdfManager.loadPDF(from: url) }
         }
     }
@@ -1111,7 +1114,7 @@ struct SplitView: View {
             panel.message = "Choose where to save the split PDF files"
             panel.directoryURL = outputDirectory(forSourceFile: pdfManager.sourceURL)
 
-            panel.begin { response in
+            beginPanelSheet(panel) { response in
                 guard response == .OK, let folderURL = panel.url else { return }
                 let folders = splitPartFolders()
                 var names: [String] = []
@@ -1151,7 +1154,7 @@ struct SplitView: View {
         panel.message = "Choose where to save the split PDF files"
         panel.directoryURL = outputDirectory(forSourceFile: pdfManager.sourceURL)
 
-        panel.begin { response in
+        beginPanelSheet(panel) { response in
             guard response == .OK, let folderURL = panel.url else { return }
             applyPrefixToFolder(folderURL, orderedItems: orderedItems)
         }

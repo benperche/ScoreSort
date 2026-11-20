@@ -864,7 +864,7 @@ struct StampView: View {
         // Folders are allowed here too, matching the drop behaviour.
         panel.canChooseDirectories = true
         panel.title = "Select PDFs, Images or a Folder to Stamp"
-        panel.begin { response in
+        beginPanelSheet(panel) { response in
             guard response == .OK else { return }
             let urls = panel.urls
             DispatchQueue.main.async { addInput(urls) }
@@ -907,7 +907,7 @@ struct StampView: View {
             panel.message = "Choose where to save the stamped PDFs"
             panel.directoryURL = outputDirectory(forSourceFile: items.first?.url)
 
-            panel.begin { response in
+            beginPanelSheet(panel) { response in
                 guard response == .OK, let folder = panel.url else { return }
                 DispatchQueue.main.async {
                     let destinations = items.map { item in

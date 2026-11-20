@@ -38,7 +38,7 @@ extension ScoreSortCLI {
               --kind    pdf (default), image (photos and scans as pictures), folder, or any.
               --limit   How many results (default 20).
 
-            Folders show how many PDFs they hold; PDFs show their page count. Looks a few
+            Folders show how many PDFs and images they hold; PDFs show their page count. Looks a few
             levels deep and skips app, system and developer folders, so it stays quick.
 
             Examples:

@@ -85,6 +85,11 @@ struct CombineOutputOptions {
     /// from the printer's own preset, so this describes what the printer will do, rather than
     /// telling it what to do.
     var duplexFlip: BookletDuplexFlip = .longEdge
+
+    /// What Print asks the print panel for: two-sided for a booklet, unless it's going out
+    /// single-sided. Only a hint (the panel resets duplex from the printer's preset), but a
+    /// single-sided job shouldn't ask for duplex at all.
+    var wantsTwoSidedPrinting: Bool { layout == .booklet && !singleSided }
 }
 
 // MARK: - Combine Manager
@@ -635,7 +640,7 @@ class CombineManager: ObservableObject {
         }
         printPDFDocument(built.doc,
                          jobName: "ScoreSort \u{2014} Combined",
-                         wantsTwoSided: options.layout == .booklet,
+                         wantsTwoSided: options.wantsTwoSidedPrinting,
                          in: window,
                          onError: onError)
     }

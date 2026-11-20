@@ -217,7 +217,7 @@ struct RotateView: View {
         panel.allowedContentTypes = [.pdf]
         panel.allowsMultipleSelection = false
         panel.title = "Select PDF"
-        panel.begin { response in
+        beginPanelSheet(panel) { response in
             if response == .OK, let url = panel.url { pdfManager.loadPDF(from: url) }
         }
     }
@@ -268,7 +268,7 @@ struct RotateView: View {
         savePanel.title = "Save Rotated PDF"
         savePanel.directoryURL = outputDirectory(forSourceFile: pdfManager.sourceURL)
 
-        savePanel.begin { response in
+        beginPanelSheet(savePanel) { response in
             if response == .OK, let url = savePanel.url {
                 pdfManager.saveRotatedPDF(
                     to: url,

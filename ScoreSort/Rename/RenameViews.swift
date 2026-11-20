@@ -475,6 +475,9 @@ struct ScoreOrderSortView: View {
                                 // Only act on the Rename tab — this app-global monitor stays
                                 // installed across tab switches (TabView keeps tabs mounted).
                                 guard appState.selectedTab == 1 else { return event }
+                                // Nor from a sheet on top (an open panel): ⌫ in its file
+                                // list must not drop files from the list behind it.
+                                if NSApp.keyWindow?.isSheet == true { return event }
                                 // keyCode 51 = Delete/Backspace
                                 if event.keyCode == 51, !selectedIDs.isEmpty {
                                     excludeSelected()
@@ -808,7 +811,7 @@ struct ScoreOrderSortView: View {
         panel.canCreateDirectories = false
         panel.title = "Select Files or Folders"
         panel.message = "Choose one or more folders to rename in a batch, or select individual PDF/image files"
-        panel.begin { response in
+        beginPanelSheet(panel) { response in
             guard response == .OK else { return }
             startInput(panel.urls)
         }
@@ -1529,7 +1532,7 @@ struct BulkRenameView: View {
         panel.allowedContentTypes = [.pdf]
         panel.title = "Select PDF Files or Folder"
         panel.message = "Choose a folder containing PDFs, or select individual PDF files"
-        panel.begin { response in
+        beginPanelSheet(panel) { response in
             guard response == .OK else { return }
             var isDir: ObjCBool = false
             if panel.urls.count == 1,

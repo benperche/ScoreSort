@@ -9,6 +9,8 @@ _Draft for the next release after 1.11.0. Keep adding to this as more changes la
 
 - **ScoreSort is now free software**, under the GNU General Public License (version 3): anyone may use, share and improve it, as long as improved versions stay free too. About ScoreSort says so, and credits Sparkle, which keeps ScoreSort up to date.
 
+- **Open and Save windows now slide down from the top of ScoreSort's window in every tool**, as they already did in Combine PDFs, and lock the window behind them until you're done. Before, in Split, Rotate, Stamp and Rename, pressing Delete in the file list of an Open window could skip pages or remove files in the tool behind it.
+
 ## 🏷️ Rename Files
 
 ## 🔗 Combine PDFs

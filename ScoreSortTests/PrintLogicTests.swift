@@ -84,4 +84,11 @@ struct PrintSettingsTests {
                                                  wantsTwoSided: false))
         #expect((simplex.printSettings[key] as? NSNumber)?.intValue == kPMDuplexNone)
     }
+
+    /// Print asks for two-sided only for a booklet that isn't going out single-sided.
+    @Test func singleSidedBookletDoesNotRequestDuplex() {
+        #expect(CombineOutputOptions(layout: .booklet).wantsTwoSidedPrinting)
+        #expect(!CombineOutputOptions(layout: .booklet, singleSided: true).wantsTwoSidedPrinting)
+        #expect(!CombineOutputOptions().wantsTwoSidedPrinting)
+    }
 }

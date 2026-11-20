@@ -32,4 +32,4 @@ Menu slice: Choose PDF… (⌘O), Save Rotated PDF (⌘S), Clear File (⌘⌫); 
 
 `saveRotatedPDF(document:)` opens an `NSSavePanel` (`<name>_rotated.pdf`, in `outputDirectory(forSourceFile: pdfManager.sourceURL)`). `PDFManager.saveRotatedPDF(to:baseRotation:additionalRotationMode:additionalRotationAngle:pageRotationOverrides:completion:)` copies every page into a new `PDFDocument`, adds base + per-page + odd/even degrees to each copy's `rotation`, and saves it through `savePDFDocument(_:to:)`, so a failure says why ("Couldn’t Save the PDF" with the reason, e.g. a read-only folder). The result goes to the `PDFAlertHandler`, which the view shows with `showNSAlert`.
 
-Its open and save panels use `begin {}`, not `beginSheetModal(for:)` ([gotcha](gotchas.md#swiftui-and-appkit)).
+Its open and save panels are sheets on the window (`beginPanelSheet`, [gotcha](gotchas.md#swiftui-and-appkit)).

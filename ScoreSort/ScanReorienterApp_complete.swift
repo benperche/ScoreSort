@@ -1811,7 +1811,7 @@ struct DropZoneView: View {
         panel.allowsMultipleSelection = false
         panel.title = "Select PDF"
         
-        panel.begin { response in
+        beginPanelSheet(panel) { response in
             if response == .OK, let url = panel.url {
                 pdfManager.loadPDF(from: url)
             }
