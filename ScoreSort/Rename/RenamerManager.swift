@@ -316,7 +316,10 @@ class RenamerManager: ObservableObject {
         detectScoreOrderInstrument(in: filename, order: customInstrumentOrder)
     }
 
+    /// `appendToJournal`: add to the undo journal rather than replace it — the later folders
+    /// of a batch, so Undo Rename puts the whole batch back.
     func executeRename(
+        appendToJournal: Bool = false,
         completion: ((_ folderURL: URL?, _ renamedNames: [String]) -> Void)? = nil
     ) {
         let toRename = operations.filter { $0.type == .rename || $0.type == .correct || $0.type == .manual }
@@ -324,7 +327,7 @@ class RenamerManager: ObservableObject {
         guard !toRename.isEmpty else { return }
 
         // The moves are shared with the command line; the alerts stay here.
-        let report = performRenames(toRename)
+        let report = performRenames(toRename, appendToJournal: appendToJournal)
         if report.blockedReadOnly {
             // The destination is read-only (cloud-sync placeholder, locked, read-only
             // volume): actionable guidance instead of a wall of failures.

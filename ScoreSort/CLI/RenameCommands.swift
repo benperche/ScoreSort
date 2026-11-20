@@ -11,6 +11,59 @@ import Foundation
 
 extension ScoreSortCLI {
 
+    static var undoRenameCommand: CommandSpec {
+        CommandSpec(
+            name: "undo-rename",
+            summary: "Put the last rename back (from the app or the command line); plans unless --apply",
+            help: """
+            Usage: ScoreSort undo-rename [--apply] [--json]
+
+            Puts the files from the last rename back under their old names: the last
+            Rename tab job (or batch of folders), or the last `rename --apply`. Folders
+            the rename made for Sort into Folders are removed if they're left empty.
+
+            A file is only put back if it's still where the rename left it and its old
+            name is free; anything else is listed and left alone.
+
+            Without --apply nothing is moved: you get the plan.
+
+              --apply   Put the files back.
+            """,
+            valueOptions: [],
+            flagOptions: ["apply"],
+            run: { args in
+                guard args.positionals.isEmpty else {
+                    throw CommandError("undo-rename takes no files: it undoes the last rename, wherever it was.")
+                }
+                return runUndoRename(apply: args.has("apply"))
+            })
+    }
+
+    static func runUndoRename(apply: Bool, journalAt url: URL? = RenameJournal.defaultURL) -> CommandResult {
+        let report = undoLastRename(apply: apply, journalAt: url)
+        if report.nothingToUndo {
+            return CommandResult(text: "There's no rename to undo.",
+                                 json: ["ok": true, "nothingToUndo": true, "files": [Any](), "problems": [Any]()])
+        }
+        let files: [[String: Any]] = report.restored.map { ["from": $0.from.path, "to": $0.to.path] }
+        let problems: [[String: Any]] = report.problems.map { ["file": $0.name, "reason": $0.reason] }
+        var lines = report.restored.map { "  \($0.from.lastPathComponent) → \($0.to.lastPathComponent)" }
+        lines += report.problems.map { "  \($0.name): can't be put back — \($0.reason)" }
+        let n = report.restored.count
+        var text = apply
+            ? "Put back \(n) file\(n == 1 ? "" : "s"):"
+            : "Plan — nothing moved yet; add --apply to put back \(n) file\(n == 1 ? "" : "s"):"
+        text += "\n" + lines.joined(separator: "\n")
+        if !report.removedFolders.isEmpty {
+            text += "\nRemoved empty folders: " + report.removedFolders.map(\.lastPathComponent).joined(separator: ", ")
+        }
+        let ok = report.problems.isEmpty
+        var json: [String: Any] = ["ok": ok, "applied": apply, "files": files, "problems": problems,
+                                   "removedFolders": report.removedFolders.map(\.path)]
+        if let date = report.renameDate { json["renamedAt"] = ISO8601DateFormatter().string(from: date) }
+        return CommandResult(text: text, json: json, exitCode: ok ? 0 : 1)
+    }
+
     static var renameCommand: CommandSpec {
         CommandSpec(
             name: "rename",

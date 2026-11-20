@@ -78,6 +78,15 @@ Final order: unrecognised first (so they're seen), then by new name, excluded la
 
 `RenamerManager.executeRename(completion:)` filters to `.rename`/`.correct`/`.manual` and calls `performRenames` (shared with the CLI), which pre-flights with `nonWritableParentDirectories` on the *source* folders (a new section folder doesn't exist yet), creates each destination folder, moves with `FileManager.moveItem`, and removes part folders left empty (`removeEmptiedPartFolders`: only folders holding nothing but `.DS_Store`). The manager then shows the read-only guidance or a "Partial Success" alert as needed, and either calls `completion(folderURL, renamedNames)` (so the view can show its summary) or rescans.
 
+### Undo Rename — `Logic/RenameJournal.swift` (#19)
+
+Every rename path records what it moved in **`last-rename.json`** (Application Support/ScoreSort): `performRenames` (the Score Order Sorter and the CLI's `rename --apply`) and both of Bulk Rename's own loops (`executeRename` with no prefix, `applyPrefixAndRenameBulk`; they keep their `NSFileCoordinator` moves and call `recordRenames` afterwards). Folders a rename makes go through `createFolderRecording`, so the journal knows which folders were new.
+- **Only the last rename is kept.** A new one replaces the journal; one that moved nothing leaves it alone. In a batch of folders, `executeRename(appendToJournal:)` is true after the first folder, so one undo puts the whole batch back.
+- **`undoLastRename(apply:journalAt:)`** works through the moves in reverse. A file goes back only if it's still where the rename left it and its old name is free (`isSameFile`, so a case-only rename undoes). Anything else is reported and stays in the journal for a later try. Folders the rename made are removed if left with nothing but `.DS_Store`. With `apply` false it only plans.
+- **App:** an **Undo Rename** button on both done screens (`ScoreOrderRenameSummaryView`, and `RenameSummaryView` for Bulk Rename; Split passes no `onUndo`) and **Actions ▸ Undo Last Rename…**, all through `confirmAndUndoLastRename()`: it plans, asks, undoes and reports (`undoRenameSummary`). Not ⌘Z: menus bind no editing keys (see `CLAUDE.md`).
+- **CLI/MCP:** `undo-rename` (plans unless `--apply`) and the `scoresort_undo_rename` tool. It's a separate command rather than `rename --undo`, because `rename` requires files and `--ensemble`.
+- **Tests:** `RenameJournal.defaultURL` is **nil under tests** (`XCTestConfigurationFilePath`), so no test can write the real journal; tests pass `journalAt:` a temporary file (`RenameUndoTests`).
+
 ### Instrument orders — `InstrumentOrders`
 
 Static accessors `band`, `jazz`, `orchestra`; `getOrder(for:)`. Lowercase name strings including every alias used for detection.

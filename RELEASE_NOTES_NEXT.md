@@ -14,6 +14,8 @@ _Draft for the next release after 1.11.0. Keep adding to this as more changes la
 
 ## 🏷️ Rename Files
 
+- **Undo Rename.** Renamed a folder of parts and wish you hadn't? **Undo Rename** on the finished screen (or **Actions ▸ Undo Last Rename…**) puts every file back under its old name and removes any section folders the rename made. It works for a whole batch of folders, for Bulk Rename, and after quitting ScoreSort. Files you've moved or renamed since are left alone and listed.
+
 ## 🔗 Combine PDFs
 
 ## ✂️ Split PDF

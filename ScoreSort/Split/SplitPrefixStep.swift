@@ -558,6 +558,8 @@ struct RenameSummaryView: View {
     /// Optional confirmation line shown under the header (e.g. "Original moved to the Trash.").
     var sourceTrashedNote: String? = nil
     let onStartOver: () -> Void
+    /// Bulk Rename: puts the files back under their old names (#19). Nil for the Splitter.
+    var onUndo: (() -> Void)? = nil
 
     var body: some View {
         VStack(spacing: 0) {
@@ -612,6 +614,13 @@ struct RenameSummaryView: View {
                         Label("Show in Finder", systemImage: "folder")
                     }
                     .buttonStyle(.bordered)
+                }
+                if let onUndo {
+                    Button(action: onUndo) {
+                        Label("Undo Rename", systemImage: "arrow.uturn.backward")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Put the files back under their old names")
                 }
 
                 Spacer()

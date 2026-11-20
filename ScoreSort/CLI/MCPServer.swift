@@ -146,6 +146,9 @@ enum ScoreSortMCPServer {
                           Param(key: "folderChoices", option: "folder", kind: .pairs(key: "file", value: "folder", valueIsNumber: false),
                                 description: "With folders: put a file in another folder where the plan's guess is wrong (folder \"\" = top level)."),
                           Param(key: "apply", option: "apply", kind: .boolean, description: "Rename the files (otherwise only plan).")]),
+            Tool(name: "scoresort_undo_rename", command: "undo-rename", title: "Undo the last rename", effect: .changesFiles,
+                 description: "Put the files from the last rename back under their old names — the last scoresort_rename with apply, or the last rename in ScoreSort's Rename tab. Plans only unless apply is true: show the person the plan, then call again with apply. Files moved or renamed since are listed and left alone.",
+                 params: [Param(key: "apply", option: "apply", kind: .boolean, description: "Put the files back (otherwise only plan).")]),
             Tool(name: "scoresort_allocate", command: "allocate", title: "Plan who plays what", effect: .readsOnly,
                  description: "Plan who plays what before combining: an ensemble preset's players (scoresort_presets) matched to a folder of parts. Shows each player group and the file(s) they'd get, groups with no part, groups shared across numbered parts, and files no one plays. Writes nothing. Settle the gaps with allocations (e.g. the Bass Guitar players get the Tuba part), check again, then pass the same allocations to scoresort_combine.",
                  params: [Param(key: "paths", option: nil, kind: .strings, description: "Absolute path of the folder of parts (or the files).", required: true),
@@ -494,6 +497,8 @@ Ground rules
      recognise are left alone: rename them to include an instrument, or place them with
      --number "FILE=NN". Then run again with --apply. --folders section|instrument also
      moves each part into a section or instrument folder (already-numbered parts too).
+     Got it wrong? ScoreSort undo-rename shows how the last rename would be put back;
+     add --apply to put it back.
 
 4. Combine parts to print for an ensemble — deciding who plays what
    ScoreSort presets                         (ensembles: player groups, e.g. "Flute × 12")

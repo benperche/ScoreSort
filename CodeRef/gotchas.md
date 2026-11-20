@@ -46,6 +46,8 @@ Things that look wrong, or look like they could be simpler, but are the way they
 - **Split suggestions show full saxophone names** ("Alto Saxophone") via `preferredInstrumentDisplayName`, while detection still matches "alto sax"; the suggestion walk skips aliases via `instrumentIdentityKey`.
 - **Tests must never set `RenamerManager.prefixSeparator`** (it writes real defaults), and set `partFolderMode = .off` on a new `RenamerManager()`. → [tests.md](tests.md#rules-for-tests)
 
+- **Every rename is recorded for Undo Rename** (`Logic/RenameJournal.swift`). A new rename path must record its moves (`recordRenames`, folders through `createFolderRecording`) or Undo can't put it back. Tests never write the real journal: `RenameJournal.defaultURL` is nil under tests. → [rename.md](rename.md)
+
 ## Saved files
 
 - **Saved lists go through `Logic/SavedListFile.swift`.** Presets and stamps used to decode the whole array with `try?` and come up empty on any failure — and the next save wrote that emptiness over the user's file. Now `readSavedList` tells *missing* from *loaded* (entry by entry, so one bad entry doesn't take the rest) from *unreadable*, and `SavedListFile` sets an unreadable file aside under a dated name (`ensemble-presets (unreadable 2026-11-16).json`, numbered rather than replacing an earlier copy) **before** anything can save over it; a file with some bad entries is copied aside whole before being rewritten. If the file can't be moved or copied aside, **saving is refused** rather than risked. A failed save is reported once (again only after one has worked). The on-disk format stays a bare JSON array, so older app versions and the CLI read the same files.

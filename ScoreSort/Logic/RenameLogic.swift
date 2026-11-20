@@ -449,8 +449,12 @@ struct RenameReport {
     var blockedReadOnly = false
 }
 
-/// Carries out the planned renames that move a file (`.rename`, `.correct`, `.manual`).
-func performRenames(_ operations: [RenameOperation]) -> RenameReport {
+/// Carries out the planned renames that move a file (`.rename`, `.correct`, `.manual`), and
+/// records them so they can be undone (`RenameJournal`; `append` adds to the journal, for the
+/// later folders of a batch).
+@discardableResult
+func performRenames(_ operations: [RenameOperation], appendToJournal: Bool = false,
+                    journalAt journalURL: URL? = RenameJournal.defaultURL) -> RenameReport {
     var report = RenameReport()
     let toRename = operations.filter { $0.type == .rename || $0.type == .correct || $0.type == .manual }
     guard !toRename.isEmpty else { return report }
@@ -459,11 +463,13 @@ func performRenames(_ operations: [RenameOperation]) -> RenameReport {
         report.blockedReadOnly = true
         return report
     }
+    var createdFolders: [URL] = []
+    defer { recordRenames(report.renamed, createdFolders: createdFolders, append: appendToJournal, journalAt: journalURL) }
     for operation in toRename {
         guard let newURL = operation.newURL else { continue }
         do {
             // Sorting into folders: the section/instrument folder may not exist yet.
-            try FileManager.default.createDirectory(at: newURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try createFolderRecording(newURL.deletingLastPathComponent(), into: &createdFolders)
             try FileManager.default.moveItem(at: operation.originalURL, to: newURL)
             report.renamed.append((operation.originalURL, newURL))
         } catch {

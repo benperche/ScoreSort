@@ -337,6 +337,16 @@ struct ScoreOrderSortView: View {
         startInput(urls)
     }
 
+    /// Undo Rename from the sorter's done screen or the Actions menu: puts the last rename
+    /// back, then shows the folder as it is now.
+    private func undoRenameFromSorter() {
+        guard confirmAndUndoLastRename() else { return }
+        renameResult = nil
+        resetBatch()
+        if renamerManager.folderURL != nil { renamerManager.scanFolder() } else { renamerManager.clearFolder() }
+        DispatchQueue.main.async { syncTabCommands() }
+    }
+
     private func syncTabCommands() {
         guard appState.selectedTab == 1 else { return }
         let reviewing = renamerManager.hasContent && renameResult == nil
@@ -345,7 +355,7 @@ struct ScoreOrderSortView: View {
         slice.open         = { selectFolder() }
         slice.primaryTitle = "Rename Files"
         slice.primarySave  = (reviewing && renamerManager.renameCount > 0) ? {
-            renamerManager.executeRename { folderURL, names in
+            renamerManager.executeRename(appendToJournal: !batchResults.isEmpty) { folderURL, names in
                 advanceOrFinish(recordResult: (folder: folderURL, names: names))
             }
         } : nil
@@ -374,6 +384,8 @@ struct ScoreOrderSortView: View {
                 MenuAction(title: "Skip Folder", isEnabled: reviewing && isBatchActive, perform: { skipCurrent() }),
             ]
         }
+        slice.tabActions.append(MenuAction(title: "Undo Last Rename\u{2026}", isEnabled: canUndoLastRename(),
+                                           perform: { undoRenameFromSorter() }))
         let revealTarget = renamerManager.folderURL ?? renameResult.flatMap(\.folderURL)
         slice.tabActions.append(MenuAction(title: "Show in Finder", key: KeyEquivalent("f"), modifiers: [.command, .shift],
                                            isEnabled: revealTarget != nil, perform: { revealInFinder(revealTarget) }))
@@ -395,7 +407,8 @@ struct ScoreOrderSortView: View {
                 onRescan: {
                     renameResult = nil
                     renamerManager.scanFolder()
-                }
+                },
+                onUndo: { undoRenameFromSorter() }
             )
             // Drop a new folder/files here to restart without clicking Start Over.
             .onDrop(of: [.fileURL], isTargeted: nil) { providers in handleRestartDrop(providers) }
@@ -784,7 +797,7 @@ struct ScoreOrderSortView: View {
                     .foregroundColor(.secondary)
                 Spacer()
                 Button {
-                    renamerManager.executeRename { folderURL, names in
+                    renamerManager.executeRename(appendToJournal: !batchResults.isEmpty) { folderURL, names in
                         advanceOrFinish(recordResult: (folder: folderURL, names: names))
                     }
                 } label: {
@@ -828,6 +841,8 @@ private struct ScoreOrderRenameSummaryView: View {
     var perFolder: [(folder: URL?, names: [String])]? = nil
     let onStartOver: () -> Void
     let onRescan: () -> Void
+    /// Puts the files back under their old names (#19).
+    var onUndo: (() -> Void)? = nil
 
     private var isBatch: Bool { (perFolder?.count ?? 0) > 1 }
     private var totalFileCount: Int {
@@ -903,6 +918,14 @@ private struct ScoreOrderRenameSummaryView: View {
                         Label("Show in Finder", systemImage: "folder")
                     }
                     .buttonStyle(.bordered)
+                }
+
+                if let onUndo {
+                    Button(action: onUndo) {
+                        Label("Undo Rename", systemImage: "arrow.uturn.backward")
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Put the files back under their old names")
                 }
 
                 Spacer()
@@ -1304,6 +1327,11 @@ struct BulkRenameView: View {
                 onStartOver: {
                     bulkStage = .base
                     clearFiles()
+                },
+                onUndo: {
+                    guard confirmAndUndoLastRename() else { return }
+                    bulkStage = .base
+                    clearFiles()
                 }
             )
             // Drop a new folder/files here to restart without clicking Start Over.
@@ -1469,7 +1497,7 @@ struct BulkRenameView: View {
                     Image(systemName: "exclamationmark.triangle.fill")
                         .foregroundColor(.orange)
                         .font(.caption)
-                    Text("This will rename the files in Finder. This cannot be undone.")
+                    Text("This will rename the files in Finder. You can put them back afterwards with Undo Rename.")
                         .font(.caption)
                         .foregroundColor(.orange)
                     Spacer()
@@ -1647,6 +1675,8 @@ struct BulkRenameView: View {
                 return
             }
 
+            var moved: [(from: URL, to: URL)] = []
+            var createdFolders: [URL] = []
             for (index, item) in loadedFiles.enumerated() {
                 let sfx = suffixes[index] ?? ""
                 let newName = sfx.isEmpty
@@ -1656,8 +1686,7 @@ struct BulkRenameView: View {
                     for: item.url.deletingLastPathComponent().appendingPathComponent(newName), partName: sfx,
                     mode: partFolderMode, ensemble: prefixEnsembleType, numbered: numberedFolders)
                 let shownName = sortedName(newName, from: item.url, to: newURL)
-                try? FileManager.default.createDirectory(at: newURL.deletingLastPathComponent(),
-                                                         withIntermediateDirectories: true)
+                try? createFolderRecording(newURL.deletingLastPathComponent(), into: &createdFolders)
                 var coordinatorError: NSError?
                 NSFileCoordinator().coordinate(
                     writingItemAt: item.url, options: .forMoving,
@@ -1667,6 +1696,7 @@ struct BulkRenameView: View {
                     do {
                         try FileManager.default.moveItem(at: src, to: dst)
                         finalNames.append(shownName)
+                        moved.append((item.url, newURL))
                     } catch {
                         if isFilePermissionError(error) { sawPermissionError = true }
                         errors.append("\(item.url.lastPathComponent): \(error.localizedDescription)")
@@ -1677,6 +1707,7 @@ struct BulkRenameView: View {
                     errors.append("\(item.url.lastPathComponent): \(e.localizedDescription)")
                 }
             }
+            recordRenames(moved, createdFolders: createdFolders)   // so Undo Rename can put them back
 
             if errors.isEmpty {
                 summaryNames = finalNames
@@ -1730,6 +1761,8 @@ struct BulkRenameView: View {
 
         // Same numbering the user saw in Step 2 — so the renames match the preview.
         let numbers = scoreOrderNumbers(forOrderedItems: orderedItems)
+        var moved: [(from: URL, to: URL)] = []
+        var createdFolders: [URL] = []
         for item in orderedItems {
             guard let originalURL = item.originalURL else { continue }
             guard let number = numbers[item.id] else { continue }  // skipped → leave unrenamed
@@ -1740,8 +1773,7 @@ struct BulkRenameView: View {
                 for: originalURL.deletingLastPathComponent().appendingPathComponent(finalName),
                 folder: item.folder)
             let shownName = sortedName(finalName, from: originalURL, to: targetURL)
-            try? FileManager.default.createDirectory(at: targetURL.deletingLastPathComponent(),
-                                                     withIntermediateDirectories: true)
+            try? createFolderRecording(targetURL.deletingLastPathComponent(), into: &createdFolders)
             var coordinatorError: NSError?
             NSFileCoordinator().coordinate(
                 writingItemAt: originalURL, options: .forMoving,
@@ -1751,6 +1783,7 @@ struct BulkRenameView: View {
                 do {
                     try FileManager.default.moveItem(at: src, to: dst)
                     finalNames.append(shownName)
+                    moved.append((originalURL, targetURL))
                 } catch {
                     if isFilePermissionError(error) { sawPermissionError = true }
                     errors.append("\(item.proposedName): \(error.localizedDescription)")
@@ -1761,6 +1794,7 @@ struct BulkRenameView: View {
                 errors.append("\(item.proposedName): \(e.localizedDescription)")
             }
         }
+        recordRenames(moved, createdFolders: createdFolders)   // so Undo Rename can put them back
 
         if errors.isEmpty {
             summaryNames = finalNames
@@ -1784,4 +1818,36 @@ struct BulkRenameView: View {
             )
         }
     }
+}
+
+// MARK: - Undo Rename (#19)
+
+/// Asks, then puts the last rename back (`undoLastRename`, Logic/RenameJournal.swift) and says
+/// what happened. True if anything was undone.
+@discardableResult
+func confirmAndUndoLastRename() -> Bool {
+    let plan = undoLastRename(apply: false)
+    if plan.nothingToUndo {
+        showNSAlert(title: "Nothing to Undo", message: "There's no rename to undo.", isError: false)
+        return false
+    }
+    let n = plan.restored.count
+    var message = "\(n) file\(n == 1 ? "" : "s") will go back to \(n == 1 ? "its" : "their") old name\(n == 1 ? "" : "s")"
+    if let date = plan.renameDate {
+        message += " (renamed \(date.formatted(date: .abbreviated, time: .shortened)))"
+    }
+    message += "."
+    if !plan.problems.isEmpty {
+        message += " \(plan.problems.count) can\u{2019}t be, because they\u{2019}ve been moved or renamed since."
+    }
+    guard n > 0 else {
+        let summary = undoRenameSummary(plan)
+        showNSAlert(title: "Couldn\u{2019}t Undo the Rename", message: summary.message, isError: true)
+        return false
+    }
+    guard confirmNSAlert(title: "Undo the Last Rename?", message: message, confirmTitle: "Undo Rename") else { return false }
+    let report = undoLastRename(apply: true)
+    let summary = undoRenameSummary(report)
+    showNSAlert(title: summary.title, message: summary.message, isError: summary.isError)
+    return !report.restored.isEmpty
 }
