@@ -406,7 +406,7 @@ struct StampView: View {
     }
 
     private var previewCaption: String {
-        "Blank A4 page — drag the stamp to move it. Add a PDF below to preview on a real page."
+        "Blank \(PaperSize.current.name) page — drag the stamp to move it. Add a PDF below to preview on a real page."
     }
 
     /// Page/file navigation over the queued files, laid out like the Split and Rotate tabs:
@@ -723,7 +723,7 @@ struct StampView: View {
         let url = item.url
         guard url != loadedPreviewURL else { return }
         loadedPreviewURL = url
-        previewDocument = pdfDocument(forFileAt: url)
+        previewDocument = pdfDocument(forFileAt: url, paper: PaperSize.current)
     }
 
     /// Points `previewPage` at the current file/page. Cached rather than computed per redraw —
@@ -937,7 +937,7 @@ struct StampView: View {
         var failed: [String] = []   // "• name: reason" lines
 
         for (item, destination) in destinations {
-            guard let doc = pdfDocument(forFileAt: item.url) else {
+            guard let doc = pdfDocument(forFileAt: item.url, paper: PaperSize.current) else {
                 failed.append("• \(item.url.lastPathComponent): \(unreadableFileReason(item.url)).")
                 continue
             }
@@ -1096,7 +1096,7 @@ private struct StampPreviewCanvas: View {
 
     var body: some View {
         GeometryReader { geo in
-            let pageBox = visualPageBox(for: page)
+            let pageBox = visualPageBox(for: page, blank: PaperSize.current)
             let scale = min(geo.size.width / pageBox.width, geo.size.height / pageBox.height)
             let viewSize = CGSize(width: pageBox.width * scale, height: pageBox.height * scale)
 
@@ -1127,7 +1127,7 @@ private struct StampPreviewCanvas: View {
     private func refreshPageImage() {
         guard page !== renderedPage || pageImage == nil else { return }
         renderedPage = page
-        pageImage = stampPagePreviewImage(page: page)
+        pageImage = stampPagePreviewImage(page: page, blank: PaperSize.current)
     }
 
     /// The stamp itself, drawn through the shared `drawStamp` so the preview can't drift from

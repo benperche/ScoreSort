@@ -24,6 +24,10 @@ struct CombineView: View {
     @State private var addBlankPages = false
     @AppStorage("combineLayout") private var layout: CombineLayout = .singlePages
     @AppStorage("combineBookletSheetSize") private var bookletSheetSize: BookletSheetSize = .doubleSize
+    /// Settings ▸ Combiner ▸ Paper size: the paper for images, blank pages, a fitted booklet
+    /// and the test sheet. Watched so labels follow a change.
+    @AppStorage(PaperSizeChoice.defaultsKey) private var paperChoice: PaperSizeChoice = .automatic
+    private var paper: PaperSize { paperChoice.resolved(automatic: .system) }
     /// Stored as whole percent so the stepper and text field agree exactly — a Double would
     /// drift and start showing 102.99999%.
     @AppStorage("combineBookletScalePercent") private var bookletScalePercent = 100
@@ -308,7 +312,7 @@ struct CombineView: View {
                             Label("Add Blank Page", systemImage: "doc.badge.plus")
                         }
                         .buttonStyle(.bordered)
-                        .help("Insert a blank A4 page after the selected file (or at the end)")
+                        .help("Insert a blank \(paper.name) page after the selected file (or at the end)")
 
                         Button(action: removeSelected) {
                             Label("Remove", systemImage: "minus")
@@ -1012,7 +1016,8 @@ struct CombineView: View {
     private func printCalibrationSheet() {
         guard let sheet = bookletCalibrationSheet(sheetSize: bookletSheetSize,
                                                   pageScale: Double(bookletScalePercent) / 100,
-                                                  rotateBackFaces: duplexFlip.rotatesBackFaces) else {
+                                                  rotateBackFaces: duplexFlip.rotatesBackFaces,
+                                                  paper: paper) else {
             showNSAlert(title: "Error", message: "Could not build the test sheet.", isError: true)
             return
         }
@@ -1039,7 +1044,8 @@ struct CombineView: View {
                              bookletPageScale: Double(bookletScalePercent) / 100,
                              addBlankPages: addBlankPages,
                              singleSided: singleSided && canGoSingleSided,
-                             duplexFlip: duplexFlip)
+                             duplexFlip: duplexFlip,
+                             paper: paper)
     }
 
     /// True when no part needs the back of its sheet, so the blank backs can be left out without

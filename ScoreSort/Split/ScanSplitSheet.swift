@@ -333,7 +333,7 @@ struct ScanSplitSheet: View {
                     get: { model.sameCutForAll },
                     set: { model.setSameCutForAll($0) }))
                     .toggleStyle(.checkbox)
-                    .help("Cut every scan in two at the same place — for scans of identical sheets, such as A3")
+                    .help("Cut every scan in two at the same place — for scans of identical sheets, such as A3 or tabloid")
                     .padding(.trailing, 12)
                 Picker("First page:", selection: $model.leftFirst) {
                     Text("Left").tag(true)

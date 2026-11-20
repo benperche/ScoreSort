@@ -264,10 +264,11 @@ func remapFileNames(_ names: [Int: String], from oldSizes: [Int], to newSizes: [
 }
 
 /// Returns true if every checked page in `doc` looks like A3 landscape
-/// (~1190 × 842 pt — twice the width of A4 portrait).
+/// (~1190 × 842 pt — twice the width of A4 portrait) or Tabloid landscape (1224 × 792 pt,
+/// two Letter pages side by side; also within the window below).
 /// Checks up to the first three pages for consistency.
 /// A4 landscape has the same √2 aspect ratio, so width > 1000 pt is used to
-/// distinguish the two formats.
+/// distinguish the two formats (Letter landscape is only 792 pt wide).
 func isA3Landscape(_ doc: PDFDocument) -> Bool {
     guard doc.pageCount > 0 else { return false }
     let pagesToCheck = min(doc.pageCount, 3)

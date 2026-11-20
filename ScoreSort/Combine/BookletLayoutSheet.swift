@@ -122,7 +122,7 @@ struct BookletLayoutReviewView: View {
     /// yield between, which keeps the window responsive without moving anything off the actor.
     private func load(_ file: CombineFile) async {
         guard cache[file.id] == nil else { return }
-        guard let doc = pdfDocument(forFileAt: file.url) else {
+        guard let doc = pdfDocument(forFileAt: file.url, paper: PaperSize.current) else {
             cache[file.id] = []          // cached so a broken file isn't retried on every step
             return
         }

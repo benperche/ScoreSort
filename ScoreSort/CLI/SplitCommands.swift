@@ -277,7 +277,7 @@ extension ScoreSortCLI {
     static var splitScansCommand: CommandSpec {
         CommandSpec(
             name: "split-scans",
-            summary: "Cut scans of double pages (A3, or a book scanner's spreads) into single pages",
+            summary: "Cut scans of double pages (A3 or tabloid sheets, or a book scanner's spreads) into single pages",
             help: """
             Usage: ScoreSort split-scans <file.pdf> --out <new.pdf>
                                          [--same-cut | --cut FRACTION | --per-scan]
@@ -290,7 +290,7 @@ extension ScoreSortCLI {
 
             Where the cut goes:
               (default)     As the app does: the same cut down the middle of every page when
-                            every page is the same landscape sheet (a flatbed A3 scan);
+                            every page is the same landscape sheet (a flatbed A3 or tabloid scan);
                             otherwise each scan is cut at the gap between its pages, or where
                             the black scanner background starts.
               --same-cut    Cut every scan down the middle.

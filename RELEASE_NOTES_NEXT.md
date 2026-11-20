@@ -18,6 +18,8 @@ _Draft for the next release after 1.11.0. Keep adding to this as more changes la
 
 ## 🔗 Combine PDFs
 
+- **US Letter and Tabloid paper.** In North America, pictures, blank pages, booklets shrunk onto one sheet and the two-sided test sheet now come out on Letter instead of A4, and the booklet menu talks about Letter → Tabloid and half-letter booklets. ScoreSort follows your printer's paper (or your region) automatically; to choose, go to **Settings ▸ Combiner ▸ Paper size**. PDFs always keep their own page size, and nothing changes if you print on A4.
+
 ## ✂️ Split PDF
 
 - **Saving a split no longer freezes ScoreSort on big scans.** A progress bar shows each part as it's saved, and you can cancel part-way: the parts already saved are kept, and you're told which weren't.

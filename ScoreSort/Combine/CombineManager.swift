@@ -85,6 +85,10 @@ struct CombineOutputOptions {
     /// from the printer's own preset, so this describes what the printer will do, rather than
     /// telling it what to do.
     var duplexFlip: BookletDuplexFlip = .longEdge
+    /// The paper for pages with no source to follow — images, blank pages — and for a booklet
+    /// fitted onto one sheet (`.fitA4Landscape`). A4 unless set: the Combine tab and the
+    /// command line pass `PaperSize.current`; PDFs always keep their own page size.
+    var paper: PaperSize = .a4
 
     /// What Print asks the print panel for: two-sided for a booklet, unless it's going out
     /// single-sided. Only a hint (the panel resets duplex from the printer's preset), but a
@@ -467,7 +471,7 @@ class CombineManager: ObservableObject {
 
         func addPages(from file: CombineFile, copyIndex: Int, totalCopies: Int) {
             if file.isBlankPage {
-                if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
+                if let blank = createBlankPage(options.paper) { doc.insert(blank, at: idx); idx += 1 }
                 return
             }
             let ext = file.url.pathExtension.lowercased()
@@ -478,7 +482,7 @@ class CombineManager: ObservableObject {
             // came from. One entry per part *per copy*, exactly like the bookmarks.
             partLayouts.append(file.effectiveBookletLayout)
             if ext != "pdf" {
-                let pages = pdfPages(fromImageAt: file.url)
+                let pages = pdfPages(fromImageAt: file.url, paper: options.paper)
                 if pages.isEmpty { noteUnreadable(file.url) }
                 for page in pages { doc.insert(page, at: idx); idx += 1 }
             } else {
@@ -492,7 +496,7 @@ class CombineManager: ObservableObject {
                 // Booklet output pads each part to a whole folded sheet, which subsumes
                 // padding to an even page count — so this only applies to single-page output.
                 if options.addBlankPages && options.layout != .booklet && src.pageCount % 2 == 1 {
-                    if let blank = createBlankPage() { doc.insert(blank, at: idx); idx += 1 }
+                    if let blank = createBlankPage(options.paper) { doc.insert(blank, at: idx); idx += 1 }
                 }
             }
         }
@@ -541,7 +545,8 @@ class CombineManager: ObservableObject {
                                                     pageScale: options.bookletPageScale,
                                                     rotateBackFaces: rotateBackFaces,
                                                     layouts: layouts,
-                                                    omitBlankFaces: options.singleSided) {
+                                                    omitBlankFaces: options.singleSided,
+                                                    paper: options.paper) {
                 doc = imposed.doc
                 pageCount = imposed.doc.pageCount
                 // Re-aim each bookmark at the sheet its booklet starts on. Match by looking
@@ -651,8 +656,9 @@ class CombineManager: ObservableObject {
     }
 
 
-    private func createBlankPage() -> PDFPage? {
-        let pageRect = CGRect(x: 0, y: 0, width: 595, height: 842) // A4
+    /// A blank page has no source to follow, so it takes the default paper.
+    private func createBlankPage(_ paper: PaperSize) -> PDFPage? {
+        let pageRect = paper.pageBox
         let blankPage = PDFPage()
         blankPage.setBounds(pageRect, for: .mediaBox)
         return blankPage

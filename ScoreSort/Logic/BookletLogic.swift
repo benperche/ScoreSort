@@ -19,27 +19,37 @@ import PDFKit
 
 /// The paper each pair of reading pages lands on.
 enum BookletSheetSize: String, CaseIterable, Identifiable, Codable {
-    /// Two pages side by side at full size — A4 reading pages give A3 sheets.
-    /// Needs an A3-capable printer, and gives a stand-sized booklet.
+    /// Two pages side by side at full size — A4 reading pages give A3 sheets, Letter pages
+    /// Tabloid. Follows the source page, so it needs a printer that takes the double sheet,
+    /// and gives a stand-sized booklet.
     case doubleSize
-    /// Two pages scaled down onto A4 landscape, giving an A5 booklet.
-    /// Prints on any printer, but the music ends up half-size.
+    /// Two pages scaled down onto the default paper turned landscape (`PaperSize`): an A5
+    /// booklet on A4, a half-letter one on Letter. Prints on any printer, but the music ends
+    /// up half-size. The name (and the raw value saved in `@AppStorage`) predates Letter.
     case fitA4Landscape
 
     var id: String { rawValue }
 
-    var label: String {
+    /// The A4 wording. The app shows `label(for: PaperSize.current)`.
+    var label: String { label(for: .a4) }
+
+    /// Short form for the menu button's own title, A4 wording.
+    var shortLabel: String { shortLabel(for: .a4) }
+
+    /// "Double size (A4 → A3)" / "Double size (Letter → Tabloid)", "Fit A4 landscape (A5
+    /// booklet)" / "Fit Letter landscape (half-letter booklet)".
+    func label(for paper: PaperSize) -> String {
         switch self {
-        case .doubleSize:     return "Double size (A4 \u{2192} A3)"
-        case .fitA4Landscape: return "Fit A4 landscape (A5 booklet)"
+        case .doubleSize:     return "Double size (\(paper.name) \u{2192} \(paper.doubleSheetName))"
+        case .fitA4Landscape: return "Fit \(paper.name) landscape (\(paper.halfName) booklet)"
         }
     }
 
-    /// Short form for the menu button's own title.
-    var shortLabel: String {
+    /// "A3" / "Tabloid", "A5" / "Half-letter".
+    func shortLabel(for paper: PaperSize) -> String {
         switch self {
-        case .doubleSize:     return "A3"
-        case .fitA4Landscape: return "A5"
+        case .doubleSize:     return paper.doubleSheetName
+        case .fitA4Landscape: return paper.halfName.prefix(1).uppercased() + paper.halfName.dropFirst()
         }
     }
 }
@@ -239,13 +249,16 @@ let bookletPageScaleRange: ClosedRange<Double> = 0.5...1.5
 /// returned document, or it won't be saved.
 /// `layouts` is index-aligned with `segments`; anything missing falls back to
 /// `bookletDefaultLayout(pageCount:)` for that segment's length.
+/// `paper` is the sheet `.fitA4Landscape` fits onto (turned landscape); `.doubleSize`
+/// follows the source pages and ignores it. The app passes `PaperSize.current`.
 func imposedBookletDocument(_ doc: PDFDocument,
                             segments: [Range<Int>],
                             sheetSize: BookletSheetSize,
                             pageScale: Double = 1.0,
                             rotateBackFaces: Bool = false,
                             layouts: [BookletPartLayout] = [],
-                            omitBlankFaces: Bool = false) -> (doc: PDFDocument, sheetStarts: [Int])? {
+                            omitBlankFaces: Bool = false,
+                            paper: PaperSize = .a4) -> (doc: PDFDocument, sheetStarts: [Int])? {
     guard doc.pageCount > 0, !segments.isEmpty else { return nil }
     guard let data = doc.dataRepresentation(),
           let provider = CGDataProvider(data: data as CFData),
@@ -253,8 +266,8 @@ func imposedBookletDocument(_ doc: PDFDocument,
 
     let output = NSMutableData()
     guard let consumer = CGDataConsumer(data: output as CFMutableData) else { return nil }
-    // A4 placeholder; every sheet then declares its own media box in beginPage.
-    var defaultBox = CGRect(x: 0, y: 0, width: 595, height: 842)
+    // A placeholder; every sheet then declares its own media box in beginPage.
+    var defaultBox = paper.pageBox
     guard let ctx = CGContext(consumer: consumer, mediaBox: &defaultBox, nil) else { return nil }
 
     var sheetStarts: [Int] = []
@@ -274,15 +287,15 @@ func imposedBookletDocument(_ doc: PDFDocument,
         guard !order.isEmpty else { continue }
 
         // Sheet size follows the segment's first page, so a booklet of A4 parts gives A3
-        // sheets and a booklet of A5 parts gives A4 ones.
+        // sheets (Letter parts, Tabloid) and a booklet of A5 parts gives A4 ones.
         let firstPage = source.page(at: segment.lowerBound + 1)
-        let sourceBox = firstPage.map(visualPageBox) ?? CGRect(x: 0, y: 0, width: 595, height: 842)
+        let sourceBox = firstPage.map(visualPageBox) ?? paper.pageBox
         var sheetBox: CGRect
         switch sheetSize {
         case .doubleSize:
             sheetBox = CGRect(x: 0, y: 0, width: sourceBox.width * 2, height: sourceBox.height)
         case .fitA4Landscape:
-            sheetBox = CGRect(x: 0, y: 0, width: 842, height: 595)
+            sheetBox = paper.landscapeBox
         }
         let halfWidth = sheetBox.width / 2
         let leftHalf  = CGRect(x: 0,         y: 0, width: halfWidth, height: sheetBox.height)

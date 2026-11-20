@@ -784,11 +784,11 @@ struct WelcomeTourPage {
             title: "Combine PDFs",
             useCase: "You have separate PDF files — one per instrument part — and want to merge them into a single document, ready to print all in one go.",
             bodyParagraphs: [
-                "Drag your files (or a whole folder) into the app, then reorder with **⌘↑ / ⌘↓** or by dragging. You can also drag in **images** (JPEG, PNG, TIFF…) — each becomes an A4 page — and insert a blank sheet anywhere with **Add Blank Page**. Set how many copies of each part you need with the stepper beside it.",
+                "Drag your files (or a whole folder) into the app, then reorder with **⌘↑ / ⌘↓** or by dragging. You can also drag in **images** (JPEG, PNG, TIFF…) — each becomes a page of your paper size (A4 or Letter, set in Settings ▸ Combiner) — and insert a blank sheet anywhere with **Add Blank Page**. Set how many copies of each part you need with the stepper beside it.",
                 "You can save your usual instrument allocations as **Ensemble Presets** in Preferences. These can be viewed in the Presets sidebar to help you remember the normal number of parts required. Use **Apply to Files** to attempt to automatically match your preset allocations to your filenames.",
                 "When ready, click **Create PDF** to save the combined file, **Print…** to send it straight to the printer, or **Open in Preview** to check it first without saving a new document. The combined PDF creates a clickable **table of contents** (one bookmark per file), shown in Preview's sidebar.",
-                "**Advanced: Booklets:** You can switch the output menu at the bottom left from *Single pages* to **Booklet** to let the app automatically impose the files onto the page as a booklet, ready to be folded. For example, you can have it print two pages onto an A3 sheet, or 4 pages double sided. **Double size** prints two A4 parts onto A3 paper, **fit A4 landscape** prints into an A5 booklet. The first time you choose Booklet, ScoreSort explains how to set your printer up for two-sided printing.",
-                "Published music rarely matches A4 exactly, so booklet mode has a **Scale** box beside the output menu: 100% fits each page to its half of the sheet, higher fills more of it, lower leaves more space around the music. It applies to Create PDF and Preview as well as printing, so a booklet you save is already the right size.",
+                "**Advanced: Booklets:** You can switch the output menu at the bottom left from *Single pages* to **Booklet** to let the app automatically impose the files onto the page as a booklet, ready to be folded. For example, you can have it print two pages onto an A3 (or tabloid) sheet, or 4 pages double sided. **Double size** prints two A4 pages onto A3 paper (or two Letter pages onto Tabloid), **Fit A4 landscape** (or Letter) prints into an A5 (or half-letter) booklet. The first time you choose Booklet, ScoreSort explains how to set your printer up for two-sided printing.",
+                "Published music rarely matches A4 or Letter exactly, so booklet mode has a **Scale** box beside the output menu: 100% fits each page to its half of the sheet, higher fills more of it, lower leaves more space around the music. It applies to Create PDF and Preview as well as printing, so a booklet you save is already the right size.",
                 "**Advanced: Collate Sets:** Select a group of parts and press **C** to interleave their pages in the output document. Ideal where you have a number of parts required for multiple players, for example in a percussion section — each player's copies will print together in a ready-to-distribute stack."
             ],
             tipText: "⌫ removes selected files · ⌘Z undoes any change · ⌘↑ / ⌘↓ reorders",
@@ -837,7 +837,7 @@ struct WelcomeTourPage {
             bodyParagraphs: [
                 "Drop the PDF and use **← →** to move through pages. Press **Space** to toggle a split marker, and **↑ ↓** to jump to the first page of each output file. Equally-spaced markers can be placed automatically using the **stride** control. Once you have entered your split markers, you can also choose to skip certain sections of the PDF in the output using your **Delete** key.",
                 "In Step 2, name each output file — the same flow as Rename Files. Toggle **Prefix score order** to add score-order numbers automatically in Step 3.",
-                "**Two-page & booklet scans:** Drop a scan with two pages side by side — A3 sheets, or a book scanner's mix of spreads and single pages — and ScoreSort offers to cut each one into separate pages, finding the gap between the pages and setting aside black or empty ones. If a booklet was scanned out of reading order, put each booklet in its own split, then use **Fix Booklet Order** to restore the page order automatically — or **Swap with Next (S)** to nudge individual pages."
+                "**Two-page & booklet scans:** Drop a scan with two pages side by side — A3 or tabloid sheets, or a book scanner's mix of spreads and single pages — and ScoreSort offers to cut each one into separate pages, finding the gap between the pages and setting aside black or empty ones. If a booklet was scanned out of reading order, put each booklet in its own split, then use **Fix Booklet Order** to restore the page order automatically — or **Swap with Next (S)** to nudge individual pages."
             ],
             tipText: "Space toggles a split marker · S swaps a page with the next · Delete skips a page or file · ⌘← / ⌘→ jumps to first / last page",
             imageName: "tour-splitter"
@@ -1423,6 +1423,30 @@ struct AppPreferencesView: View {
     }
 }
 
+// MARK: - Paper size (Combiner pane)
+
+/// Settings ▸ Combiner ▸ Paper size: Automatic (the default printer's paper, or the region's),
+/// A4 or Letter. Used only where there's no page to follow (`Logic/PaperSize.swift`).
+struct PaperSizeSettingRow: View {
+    @AppStorage(PaperSizeChoice.defaultsKey) private var choice: PaperSizeChoice = .automatic
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            Picker("Paper size:", selection: $choice) {
+                Text("Automatic (\(PaperSize.system.name))").tag(PaperSizeChoice.automatic)
+                Text("A4").tag(PaperSizeChoice.a4)
+                Text("US Letter").tag(PaperSizeChoice.letter)
+            }
+            .fixedSize()
+            Text("For pictures, blank pages, booklets fitted onto one sheet and the two-sided test sheet. PDFs keep their own page size.")
+                .font(.callout)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+    }
+}
+
 // MARK: - Combiner Preferences View
 struct CombinerPreferencesView: View {
     @EnvironmentObject var presetStore: EnsemblePresetStore
@@ -1670,6 +1694,16 @@ struct CombinerPreferencesView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
+        }
+        // Not about presets, but Combine is where the default paper shows: images, blank
+        // pages, booklets fitted onto one sheet and the two-sided test sheet.
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            VStack(spacing: 0) {
+                Divider()
+                PaperSizeSettingRow()
+                    .padding(12)
+            }
+            .background(.bar)
         }
         .onAppear {
             if selectedId == nil || !presetStore.presets.contains(where: { $0.id == selectedId }) {

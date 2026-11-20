@@ -576,7 +576,7 @@ nonisolated func stampedDocument(_ doc: PDFDocument, stamp: Stamp, pageIndices: 
 
     let output = NSMutableData()
     guard let consumer = CGDataConsumer(data: output as CFMutableData) else { return nil }
-    // A4 placeholder; every page then declares its own media box in beginPage.
+    // A placeholder (A4); every page then declares its own media box in beginPage.
     var defaultBox = CGRect(x: 0, y: 0, width: 595, height: 842)
     guard let ctx = CGContext(consumer: consumer, mediaBox: &defaultBox, nil) else { return nil }
 
@@ -628,9 +628,10 @@ nonisolated func applyingStamp(_ job: StampJob?, to doc: PDFDocument, partFirstP
 // MARK: - Preview
 
 /// The page box the preview (and the drag maths on top of it) works in: the crop box
-/// normalised to the origin and swapped for 90°/270° rotation, or A4 when there's no page.
-nonisolated func visualPageBox(for page: PDFPage?) -> CGRect {
-    guard let page else { return CGRect(x: 0, y: 0, width: 595, height: 842) }   // A4
+/// normalised to the origin and swapped for 90°/270° rotation, or a blank page of `blank`
+/// paper when there's no page (the designer passes `PaperSize.current`).
+nonisolated func visualPageBox(for page: PDFPage?, blank: PaperSize = .a4) -> CGRect {
+    guard let page else { return blank.pageBox }
     var box = page.bounds(for: .cropBox)
     if box.isEmpty { box = page.bounds(for: .mediaBox) }
     var w = box.width, h = box.height
@@ -659,13 +660,14 @@ func imageWithStamp(_ image: NSImage, stamp: Stamp) -> NSImage {
     return result
 }
 
-/// Renders `page` (or a blank A4 sheet when nil) as a bitmap, **without** any stamp.
+/// Renders `page` (or a blank sheet of `blank` paper when nil) as a bitmap, **without** any stamp.
 ///
 /// The designer draws the stamp as a separate live layer on top of this (see
 /// `StampPreviewCanvas`): rendering a dense score page costs tens of milliseconds, so it's
 /// cached per page while dragging redraws only the stamp.
-func stampPagePreviewImage(page: PDFPage?, maxDimension: CGFloat = 1400) -> NSImage? {
-    let pageBox = visualPageBox(for: page)
+func stampPagePreviewImage(page: PDFPage?, maxDimension: CGFloat = 1400,
+                           blank: PaperSize = .a4) -> NSImage? {
+    let pageBox = visualPageBox(for: page, blank: blank)
     guard pageBox.width > 0, pageBox.height > 0 else { return nil }
 
     let scale = maxDimension / max(pageBox.width, pageBox.height)

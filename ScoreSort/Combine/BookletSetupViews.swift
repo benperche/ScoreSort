@@ -236,6 +236,9 @@ struct CombineOutputMenuButton: View {
     let onSetUpTwoSided: () -> Void
     let onReviewLayout: () -> Void
     let hasFiles: Bool
+    /// Watched so the sheet-size labels follow a change in Settings ▸ Combiner ▸ Paper size.
+    @AppStorage(PaperSizeChoice.defaultsKey) private var paperChoice: PaperSizeChoice = .automatic
+    private var paper: PaperSize { paperChoice.resolved(automatic: .system) }
 
     var body: some View {
         Menu {
@@ -250,7 +253,7 @@ struct CombineOutputMenuButton: View {
 
             Picker("Sheet size", selection: $sheetSize) {
                 ForEach(BookletSheetSize.allCases) { option in
-                    Text(option.label).tag(option)
+                    Text(option.label(for: paper)).tag(option)
                 }
             }
             .pickerStyle(.inline)
@@ -295,7 +298,7 @@ struct CombineOutputMenuButton: View {
     }
 
     private var title: String {
-        layout == .booklet ? "Booklet \u{00B7} \(sheetSize.shortLabel)" : "Single pages"
+        layout == .booklet ? "Booklet \u{00B7} \(sheetSize.shortLabel(for: paper))" : "Single pages"
     }
 
     private var helpText: String {

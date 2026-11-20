@@ -4,7 +4,7 @@
 //
 //  Turning image files into PDF pages. Scanners and phones produce parts as JPEGs, PNGs and
 //  HEICs as often as PDFs, so the Combine and Stamp tabs both accept them and page them the
-//  same way: fitted onto A4, centred, on white.
+//  same way: fitted onto the default paper (A4 or Letter, `PaperSize`), centred, on white.
 //
 //  No view state; unit-tested directly.
 //
@@ -22,42 +22,49 @@ let pageableFileExtensions: Set<String> = supportedImageExtensions.union(["pdf"]
 
 /// Renders one frame of an image as an A4 PDF page, scaled to fit on a white background.
 func makeA4Page(from cgImage: CGImage) -> PDFPage? {
-    let a4 = CGSize(width: 595, height: 842)
+    makePage(from: cgImage, paper: .a4)
+}
+
+/// Renders one frame of an image as a page of `paper` (portrait), scaled to fit on a white
+/// background. An image has no page size of its own, so it takes the default paper.
+func makePage(from cgImage: CGImage, paper: PaperSize) -> PDFPage? {
+    let size = paper.pageSize
     let imgW = CGFloat(cgImage.width)
     let imgH = CGFloat(cgImage.height)
     guard imgW > 0, imgH > 0 else { return nil }
 
-    let scale = min(a4.width / imgW, a4.height / imgH)
+    let scale = min(size.width / imgW, size.height / imgH)
     let drawW = imgW * scale
     let drawH = imgH * scale
-    let drawRect = CGRect(x: (a4.width - drawW) / 2,
-                          y: (a4.height - drawH) / 2,
+    let drawRect = CGRect(x: (size.width - drawW) / 2,
+                          y: (size.height - drawH) / 2,
                           width: drawW, height: drawH)
 
     guard let ctx = CGContext(data: nil,
-                              width: Int(a4.width), height: Int(a4.height),
+                              width: Int(size.width), height: Int(size.height),
                               bitsPerComponent: 8, bytesPerRow: 0,
                               space: CGColorSpaceCreateDeviceRGB(),
                               bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue) else { return nil }
     ctx.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
-    ctx.fill(CGRect(origin: .zero, size: a4))
+    ctx.fill(CGRect(origin: .zero, size: size))
     ctx.draw(cgImage, in: drawRect)
 
     guard let rendered = ctx.makeImage() else { return nil }
-    let nsImage = NSImage(cgImage: rendered, size: a4)
+    let nsImage = NSImage(cgImage: rendered, size: size)
     guard let page = PDFPage(image: nsImage) else { return nil }
-    page.setBounds(CGRect(origin: .zero, size: a4), for: .mediaBox)
+    page.setBounds(CGRect(origin: .zero, size: size), for: .mediaBox)
     return page
 }
 
-/// Every frame of an image file as A4 PDF pages — multi-page TIFFs and animated GIFs
-/// therefore come through as several pages.
-func pdfPages(fromImageAt url: URL) -> [PDFPage] {
+/// Every frame of an image file as PDF pages of `paper` — multi-page TIFFs and animated GIFs
+/// therefore come through as several pages. The app and the command line pass
+/// `PaperSize.current`.
+func pdfPages(fromImageAt url: URL, paper: PaperSize = .a4) -> [PDFPage] {
     guard let source = CGImageSourceCreateWithURL(url as CFURL, nil) else { return [] }
     var pages: [PDFPage] = []
     for index in 0..<CGImageSourceGetCount(source) {
         guard let cgImage = CGImageSourceCreateImageAtIndex(source, index, nil),
-              let page = makeA4Page(from: cgImage) else { continue }
+              let page = makePage(from: cgImage, paper: paper) else { continue }
         pages.append(page)
     }
     return pages
@@ -68,12 +75,14 @@ func pdfPages(fromImageAt url: URL) -> [PDFPage] {
 /// Pages from `PDFPage(image:)` carry a `pageRef`, so they draw through Core Graphics like
 /// any other page — the stamp preview and the flattener both handle them as-is, with no
 /// round trip through PDF data needed.
-func pdfDocument(forFileAt url: URL) -> PDFDocument? {
+///
+/// `paper` is the page size an image is fitted onto; a PDF keeps its own.
+func pdfDocument(forFileAt url: URL, paper: PaperSize = .a4) -> PDFDocument? {
     if url.pathExtension.lowercased() == "pdf" {
         return PDFDocument(url: url)
     }
 
-    let pages = pdfPages(fromImageAt: url)
+    let pages = pdfPages(fromImageAt: url, paper: paper)
     guard !pages.isEmpty else { return nil }
 
     let document = PDFDocument()

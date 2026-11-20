@@ -17,7 +17,7 @@ ScoreSortApp
               └── 4: StampView       ⌘5
               overlays (not sheets): WelcomeTourView (⌘/), ShortcutsHelpView (⌘`)
   └── Settings  — AppPreferencesView (⌘,)
-        ├── "Combiner"       (tag "combiner") — CombinerPreferencesView   → combine.md
+        ├── "Combiner"       (tag "combiner") — CombinerPreferencesView   → combine.md (+ PaperSizeSettingRow, see Paper size)
         ├── "Renamer"        (tag "renamer")  — PreferencesView           → rename.md
         └── "AI Assistants"  (tag "ai")       — AIAssistantsPreferencesView (CLI/AIAssistantsPreferences.swift) → cli-mcp.md
 ```
@@ -133,7 +133,27 @@ No longer the menu bridge. It survives for Combine's in-view keyboard handling: 
 |------|-------------------------|
 | `Logic/PDFSaving.swift` | `savePDFDocument(_:to:)` (a save that reports the real reason on failure) and `unreadableFilesMessage` |
 | `Logic/OutlineLogic.swift` | `outlineReadyDocument(from:)` — attach outlines to its result so they survive saving ([gotcha](gotchas.md#pdfkit-and-pdf-geometry)) |
-| `Logic/ImagePages.swift` | images → A4 PDF pages, and the supported-extension sets (Combine and Stamp) |
+| `Logic/ImagePages.swift` | images → PDF pages of the default paper (`makePage(from:paper:)`, `pdfPages(fromImageAt:paper:)`, `pdfDocument(forFileAt:paper:)`; `makeA4Page` is the A4 case), and the supported-extension sets (Combine and Stamp) |
+| `Logic/PaperSize.swift` | the default paper — see [Paper size](#paper-size) below |
 | `Logic/InstrumentNames.swift` | instrument-name matching used by Combine presets, Rename and Split — see [rename.md](rename.md) and [split.md](split.md) |
 | `Logic/PartFolders.swift` | "Sort into folders" — see [rename.md](rename.md) |
 | `Logic/StampLogic.swift` | stamping, used by Combine, Split and Stamp — see [stamp.md](stamp.md) |
+
+## Paper size
+
+`Logic/PaperSize.swift` (#18). ScoreSort assumed A4 and A3; North America uses Letter, with booklets on Tabloid (11 × 17 in = 1224 × 792 pt, two Letter pages side by side).
+
+**What is really A4-specific, and what was only labelled so.** Output made from PDFs always keeps the source's page size: a booklet's double-size sheet is two of its first page side by side, a split half is half its sheet, stamping and rotating keep every page. Those needed only their *labels* changing. The default paper is used **only where there is no page to follow**: images turned into pages, Combine's blank pages (the Blank Page entry and the pad after an odd-length part), `.fitA4Landscape` booklets (fitted onto the paper turned landscape), the two-sided test sheet, and the Stamp designer's blank page with no file loaded.
+
+| Symbol | Behaviour |
+|--------|-----------|
+| `PaperSize` | `.a4` (595 × 842) / `.letter` (612 × 792). `pageSize`, `pageBox`, `landscapeBox`, `name` ("A4"/"Letter"), `doubleSheetName` ("A3"/"Tabloid"), `halfName` ("A5"/"half-letter"). `nonisolated`, so the `nonisolated` stamp helpers can take it. |
+| `PaperSize.matching(_:)` | A4 or Letter either way up, within 4 pt; nil otherwise. |
+| `PaperSize.forRegion(_:)` / `automatic(printerPaper:region:)` | Pure: the printer's paper if it is A4 or Letter, else Letter in `letterRegions` (US, CA, MX, …), else A4. |
+| `PaperSize.system` | `automatic` with `NSPrintInfo.shared.paperSize` (the default printer's paper, or macOS's default paper size) and `Locale.current.region`, cached once per launch. |
+| `PaperSize.current` | The Settings choice (`PaperSizeChoice`, UserDefaults `paperSize`: automatic / a4 / letter), Automatic resolved through `system`. Read by the CLI too (same bundle). |
+| `PaperSizeSettingRow` | Settings ▸ Combiner, a bar under the preset editor (`safeAreaInset`): "Automatic (A4)" / A4 / US Letter. Main file. |
+
+**The logic takes `paper:` and defaults to `.a4`; callers pass `PaperSize.current`.** This keeps the logic pure and the tests identical on any Mac — CI runs in the US, where Automatic could be Letter, and a test must never depend on Ben's own setting. `CombineOutputOptions.paper` (default `.a4`) carries it through `buildDocument`; `CombineView.outputOptions`, the CLI's `combine` and `stamp`, and the views (`CombineOutputMenuButton`, the Stamp designer, Booklet Page Turns) pass the current paper. Views that show labels observe `@AppStorage(PaperSizeChoice.defaultsKey)` so they update when Settings changes. **Nothing changes for A4 users**: on A4 every default, label and drawing position is what it was (the test sheet's text is laid out for A4 and centred, so on A4 it lands exactly where it did).
+
+Double-page scan detection already covered Tabloid: 1224 × 792 is inside `isA3Landscape`'s 1000–1500 pt window and `looksLikeA3Landscape`'s 1.3–1.6 ratio, while Letter landscape (792 pt wide, ratio 1.29) is in neither (`TabloidScanDetectionTests`).

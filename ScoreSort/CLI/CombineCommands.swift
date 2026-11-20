@@ -103,7 +103,7 @@ extension ScoreSortCLI {
         for (source, target) in zip(files, targets) {
             var entry: [String: Any] = ["file": source.path, "output": target.path]
             if !dryRun {
-                if let doc = pdfDocument(forFileAt: source) {
+                if let doc = pdfDocument(forFileAt: source, paper: PaperSize.current) {
                     let stamped: PDFDocument
                     do {
                         stamped = try applyingStamp(job, to: doc, partFirstPages: [0])
@@ -194,7 +194,7 @@ extension ScoreSortCLI {
             help: """
             Usage: ScoreSort combine <files… | folder> --out <file.pdf>
                                      [--preset NAME] [--allocate "PART=FILE[:N]"]… [--copies "FILE=N"]…
-                                     [--booklet] [--sheet double|fit-a4] [--blank-pages]
+                                     [--booklet] [--sheet double|fit|fit-a4|fit-letter] [--blank-pages]
                                      [--stamp NAME] [--stamp-scope first|every]
                                      [--dry-run] [--overwrite] [--json]
 
@@ -214,8 +214,12 @@ extension ScoreSortCLI {
                             name or a part of it that picks out one file. Applied last, so it
                             can correct anything; 0 leaves the file out.
               --booklet     Impose each part as a fold-and-staple booklet.
-              --sheet       Booklet paper: double (two A4 pages on A3, default) or fit-a4
-                            (an A5 booklet on A4).
+              --sheet       Booklet paper: double (default) puts two pages side by side at
+                            full size, so A4 parts print on A3 and Letter parts on Tabloid;
+                            fit shrinks them onto one sheet of the paper set in ScoreSort's
+                            Settings (an A5 booklet on A4, a half-letter one on Letter);
+                            fit-a4 and fit-letter choose that paper.
+                            Pictures and blank pages are made on the same paper.
               --blank-pages Single pages: add a blank page after each part with an odd number
                             of pages, so every part starts on a fresh sheet when printed
                             two-sided. Booklets always start each part on a fresh sheet,
@@ -233,10 +237,14 @@ extension ScoreSortCLI {
                 guard !args.positionals.isEmpty else { throw CommandError("Give the parts to combine (files or a folder).") }
                 var options = CombineOutputOptions()
                 if args.has("booklet") { options.layout = .booklet }
+                // The app's paper setting (Settings ▸ Combiner), for pages with no source to follow.
+                options.paper = PaperSize.current
                 switch args.value("sheet") ?? "double" {
                 case "double": options.sheetSize = .doubleSize
-                case "fit-a4": options.sheetSize = .fitA4Landscape
-                default: throw CommandError("--sheet is double or fit-a4.")
+                case "fit": options.sheetSize = .fitA4Landscape
+                case "fit-a4": options.sheetSize = .fitA4Landscape; options.paper = .a4
+                case "fit-letter": options.sheetSize = .fitA4Landscape; options.paper = .letter
+                default: throw CommandError("--sheet is double, fit, fit-a4 or fit-letter.")
                 }
                 options.addBlankPages = args.has("blank-pages")
                 return try runCombine(paths: args.positionals, out: args.required("out"),

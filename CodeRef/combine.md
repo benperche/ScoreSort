@@ -14,7 +14,7 @@ Gotchas that concern this tab: [gotchas.md § Combine](gotchas.md#combine), [§ 
 - `id` (auto UUID), `url` (where the file was last found), `name` (`url.lastPathComponent`, with extension; follows renames), `pageCount`
 - `copies` — ignored when `collateGroupId` is set
 - `collateGroupId: UUID?` — non-nil when the file belongs to a collate group
-- `isBlankPage` — a synthetic blank A4 entry; `url` is unused
+- `isBlankPage` — a synthetic blank entry (a page of `CombineOutputOptions.paper`); `url` is unused
 - `bookletLayout: BookletPartLayout?` — booklet output only; nil means "whatever suits this length". `effectiveBookletLayout` resolves it through `bookletDefaultLayout(pageCount:)`
 - `bookmark: Data?` — made in `addFiles`; finds the file again after a move or rename in Finder
 
@@ -32,7 +32,7 @@ Gotchas that concern this tab: [gotchas.md § Combine](gotchas.md#combine), [§ 
 |--------|-------|
 | `addFiles(urls:undoManager:)` | PDFs and images (JPEG, PNG, TIFF, HEIC, BMP, GIF). PDFs use `PDFDocument.pageCount`; images use `CGImageSourceGetCount`. Appends with `copies = 1`, no group, and a `fileBookmark(for:)`. |
 | `refreshFileLocations()` | Calls `followMove()` on each real file; if it moved or was renamed, updates `url` **and** `name` (so the list and the table of contents match the file). Called at the top of all three outputs and by `CombineView.createPDF()` before the save panel, so the panel opens in the file's *current* folder. A file it can't find keeps its old path and is then reported by name. Not undoable: it's a sync, not an edit. |
-| `addBlankPage(after:undoManager:)` | Inserts a blank A4 entry after the last selected file, or at the end. |
+| `addBlankPage(after:undoManager:)` | Inserts a blank entry after the last selected file, or at the end. |
 | `removeFiles(ids:undoManager:)` | Removes files and dissolves any group left with fewer than 2 members. |
 | `updateCopies(for:copies:undoManager:)` | Clamps to a minimum of 1. |
 | `clearAll(undoManager:)` | Clears files and groups. |
@@ -54,8 +54,8 @@ All three outputs — `createCombinedPDF(to:options:stampJob:completion:)`, `ope
 `buildDocument` runs one `while i < files.count` loop with a nested `addPages(from:copyIndex:totalCopies:)`:
 - **Standalone file:** all its copies together.
 - **Group:** the consecutive files with the same `collateGroupId`, repeated `group.copies` times as a set.
-- **Blank entry:** one A4 `PDFPage` from `createBlankPage()`; no bookmark.
-- **Image:** `pdfPages(fromImageAt:)` renders each frame onto an A4 page (`makeA4Page(from:)`: scaled to fit, white background).
+- **Blank entry:** one `PDFPage` of `options.paper` from `createBlankPage(_:)`; no bookmark. The pad after an odd-length part is the same page.
+- **Image:** `pdfPages(fromImageAt:paper:)` renders each frame onto a page of `options.paper` (`makePage(from:paper:)`: scaled to fit, white background). `options.paper` is A4 unless set; the tab and the CLI pass `PaperSize.current` ([shared.md § Paper size](shared.md#paper-size)).
 - **PDF:** `PDFDocument(url:)`, pages copied across. With `addBlankPages`, an odd-length file gets a trailing blank **unless the layout is `.booklet`** (padding to a multiple of 4 supersedes padding to 2).
 
 Each real file adds a `bookmarks` entry `(label, pageIndex)` — the filename without `.pdf`, or `"Filename N/Total"` for multiple copies — and a parallel `partLayouts` entry.

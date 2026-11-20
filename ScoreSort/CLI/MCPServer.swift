@@ -106,7 +106,7 @@ enum ScoreSortMCPServer {
                      if args["width"] == nil, (args["sheet"] as? Bool ?? true) { args["width"] = 450 }
                  }),
             Tool(name: "scoresort_split_scans", command: "split-scans", title: "Split double-page scans", effect: .changesFiles,
-                 description: "Cut scans of double pages (A3 sheets, or a book scanner's two-page spreads) into single pages, saved as a new PDF. Each scan is cut at the gap between its pages (or where black scanner background starts); identical sheets are all cut down the middle. Reports which new pages are black or empty (suggestedSkip, for scoresort_split's skip) and lists every scan's pages.",
+                 description: "Cut scans of double pages (A3 or tabloid sheets, or a book scanner's two-page spreads) into single pages, saved as a new PDF. Each scan is cut at the gap between its pages (or where black scanner background starts); identical sheets are all cut down the middle. Reports which new pages are black or empty (suggestedSkip, for scoresort_split's skip) and lists every scan's pages.",
                  params: [Param(key: "file", option: nil, kind: .string, description: "Absolute path to the scanned PDF.", required: true),
                           Param(key: "out", option: "out", kind: .string, description: "Absolute path for the new PDF.", required: true),
                           Param(key: "sameCut", option: "same-cut", kind: .boolean, description: "Cut every scan down the middle."),
@@ -167,7 +167,7 @@ enum ScoreSortMCPServer {
                           Param(key: "copies", option: "copies", kind: .pairs(key: "file", value: "copies", valueIsNumber: true),
                                 description: "A file's total copies, applied last: [{\"file\": \"Flute 1\", \"copies\": 3}] — file is the name or a unique part of it; 0 leaves it out."),
                           Param(key: "booklet", option: "booklet", kind: .boolean, description: "Impose each part as a fold-and-staple booklet."),
-                          Param(key: "sheet", option: "sheet", kind: .string, description: "Booklet paper: double (A4 pages on A3) or fit-a4 (A5 booklet).", choices: ["double", "fit-a4"]),
+                          Param(key: "sheet", option: "sheet", kind: .string, description: "Booklet paper: double (default; two pages side by side at full size: A4 parts on A3, Letter parts on Tabloid), fit (shrunk onto one sheet of the paper set in ScoreSort's Settings: an A5 booklet on A4, half-letter on Letter), or fit-a4 / fit-letter to choose that paper. Pictures and blank pages use the same paper.", choices: ["double", "fit", "fit-a4", "fit-letter"]),
                           Param(key: "blankPages", option: "blank-pages", kind: .boolean, description: "Single-page output only: add a blank page after each part with an odd number of pages, so every part starts on a fresh sheet when printed two-sided. Booklets always start each part on a fresh sheet; this has no effect with booklet."),
                           Param(key: "stamp", option: "stamp", kind: .string, description: "A saved stamp design."),
                           Param(key: "stampScope", option: "stamp-scope", kind: .string, description: "first (default) or every page.", choices: ["first", "every"]),
@@ -484,7 +484,7 @@ Ground rules
    jazz: Saxophones, Trumpets, Trombones, Rhythm) or
    --folders instrument: the files go into those folders inside --out.
 
-2. Scans with two pages side by side (A3 sheets, or a book scanner)
+2. Scans with two pages side by side (A3 or tabloid sheets, or a book scanner)
    ScoreSort split-scans <scan.pdf> --out <scan pages.pdf> --json
      Each two-page scan is cut at the gap between its pages; single pages stay whole;
      identical sheets are all cut down the middle. "suggestedSkip" lists the black or empty

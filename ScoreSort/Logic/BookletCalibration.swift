@@ -52,8 +52,13 @@ enum BookletDuplexDefaults {
 /// They are ordinary PDF pages carrying a large numeral and a line of instruction, so once the
 /// sheet is folded the whole test is "can you read 1, 2, 3, 4 the right way up?" — no reasoning
 /// about long edges or short edges required.
-func bookletCalibrationPages() -> PDFDocument? {
-    let pageBox = CGRect(x: 0, y: 0, width: 595, height: 842)   // A4 portrait
+///
+/// Generated, so there is no source page to follow: they are `paper` (portrait). The app passes
+/// `PaperSize.current`, so the test sheet comes out on the paper the user prints on.
+func bookletCalibrationPages(paper: PaperSize = .a4) -> PDFDocument? {
+    let pageBox = paper.pageBox
+    // Laid out on A4 and centred: on A4 these are exactly the original positions.
+    let w = pageBox.width, h = pageBox.height
     let bodies = [
         "Fold this sheet in half.\n\nThe four pages should read 1, 2, 3, 4 \u{2014} all the right way up.",
         "If pages 2 and 3 are upside down,\nchoose \u{201C}They\u{2019}re upside down\u{201D} back in ScoreSort\nand print another test sheet.",
@@ -73,10 +78,10 @@ func bookletCalibrationPages() -> PDFDocument? {
         NSGraphicsContext.current = graphics
 
         draw("\(index + 1)",
-             in: CGRect(x: 40, y: 430, width: 515, height: 300),
+             in: CGRect(x: (w - 515) / 2, y: h * 430 / 842, width: 515, height: 300),
              font: .systemFont(ofSize: 240, weight: .bold))
         draw(body,
-             in: CGRect(x: 60, y: 250, width: 475, height: 160),
+             in: CGRect(x: (w - 475) / 2, y: h * 250 / 842, width: 475, height: 160),
              font: .systemFont(ofSize: 21, weight: .regular),
              colour: .darkGray)
 
@@ -103,11 +108,13 @@ private func draw(_ text: String, in rect: CGRect, font: NSFont, colour: NSColor
 /// would prove nothing about what the user's actual booklets will do.
 func bookletCalibrationSheet(sheetSize: BookletSheetSize,
                              pageScale: Double = 1.0,
-                             rotateBackFaces: Bool) -> PDFDocument? {
-    guard let pages = bookletCalibrationPages() else { return nil }
+                             rotateBackFaces: Bool,
+                             paper: PaperSize = .a4) -> PDFDocument? {
+    guard let pages = bookletCalibrationPages(paper: paper) else { return nil }
     return imposedBookletDocument(pages,
                                   segments: [0..<pages.pageCount],
                                   sheetSize: sheetSize,
                                   pageScale: pageScale,
-                                  rotateBackFaces: rotateBackFaces)?.doc
+                                  rotateBackFaces: rotateBackFaces,
+                                  paper: paper)?.doc
 }

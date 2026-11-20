@@ -100,7 +100,7 @@ extension ScoreSortCLI {
         var hints: [String] = []
         if doublePages {
             hints.append(uniform
-                ? "Every page is the same landscape sheet (e.g. A3 with two pages side by side): run `split-scans --same-cut` to cut them all down the middle."
+                ? "Every page is the same landscape sheet (e.g. A3 or tabloid with two pages side by side): run `split-scans --same-cut` to cut them all down the middle."
                 : "This looks like a scan of double pages: run `split-scans` first to cut them into single pages.")
         }
         if hasBookmarks {
