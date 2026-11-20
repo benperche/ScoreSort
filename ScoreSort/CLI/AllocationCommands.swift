@@ -99,15 +99,21 @@ extension ScoreSortCLI {
     }
 
     /// A saved preset by name (case-insensitive; a unique partial match also works).
-    static func preset(named name: String) throws -> EnsemblePreset {
-        let presets = savedPresets()
+    /// Says why if the presets file can't be read. `presetsFile` is injectable for tests,
+    /// which never read the real one.
+    static func preset(named name: String,
+                       presetsFile: URL? = EnsemblePresetStore.defaultFileURL) throws -> EnsemblePreset {
+        let saved = savedPresets(at: presetsFile)
+        if let unreadable = saved.unreadable { throw CommandError(unreadable) }
+        let presets = saved.entries
         let lower = name.lowercased()
         let exact = presets.filter { $0.name.lowercased() == lower }
         let partial = presets.filter { $0.name.lowercased().contains(lower) }
         guard let preset = exact.first ?? (partial.count == 1 ? partial.first : nil) else {
-            throw CommandError(presets.isEmpty
+            throw CommandError((presets.isEmpty
                 ? "There are no saved presets — make one in ScoreSort's Combine tab."
                 : "No single preset called “\(name)”. Saved presets: \(presets.map { "“\($0.name)”" }.joined(separator: ", ")).")
+                + saved.mightBeUnreadable)
         }
         return preset
     }

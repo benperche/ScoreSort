@@ -30,13 +30,23 @@ extension ScoreSortCLI {
             run: { _ in runStamps() })
     }
 
-    static func runStamps() -> CommandResult {
-        let stamps = savedStamps()
+    /// `stampsFile` is injectable for tests, which never read the real stamps file.
+    static func runStamps(stampsFile: URL? = StampStore.defaultFileURL) -> CommandResult {
+        let saved = savedStamps(at: stampsFile)
+        if let unreadable = saved.unreadable {
+            return CommandResult(text: unreadable, json: ["ok": false, "error": unreadable, "stamps": []], exitCode: 1)
+        }
+        let stamps = saved.entries
         let entries: [[String: Any]] = stamps.map { ["name": $0.name, "text": $0.text] }
-        let text = stamps.isEmpty
+        var text = stamps.isEmpty
             ? "No saved stamps. Design one in ScoreSort's Stamp tab."
             : "Saved stamps:\n" + stamps.map { "  \($0.name)" + ($0.text.isEmpty ? "" : " — “\($0.text.replacingOccurrences(of: "\n", with: " / "))”") }.joined(separator: "\n")
-        return CommandResult(text: text, json: ["ok": true, "stamps": entries])
+        var json: [String: Any] = ["ok": true, "stamps": entries]
+        if let problem = saved.problem {
+            text += "\nNote: " + problem
+            json["warnings"] = [problem]
+        }
+        return CommandResult(text: text, json: json)
     }
 
     // MARK: - stamp
@@ -142,16 +152,19 @@ extension ScoreSortCLI {
             run: { _ in runPresets() })
     }
 
-    static func savedPresets() -> [EnsemblePreset] {
-        // Read-only, and entry by entry: one preset this version can't decode doesn't hide the rest.
-        guard let url = EnsemblePresetStore.defaultFileURL,
-              case .loaded(let presets, _) = readSavedList(EnsemblePreset.self, at: url) else { return [] }
-        return presets
-    }
-
-    static func runPresets() -> CommandResult {
-        let presets = savedPresets()
-        let stamps = savedStamps()
+    /// The files are injectable for tests, which never read the real ones.
+    static func runPresets(presetsFile: URL? = EnsemblePresetStore.defaultFileURL,
+                           stampsFile: URL? = StampStore.defaultFileURL) -> CommandResult {
+        let saved = savedPresets(at: presetsFile)
+        if let unreadable = saved.unreadable {
+            return CommandResult(text: unreadable, json: ["ok": false, "error": unreadable, "presets": []], exitCode: 1)
+        }
+        let presets = saved.entries
+        let savedStampList = savedStamps(at: stampsFile)
+        let stamps = savedStampList.entries
+        // The stamps file matters here only for presets that name a stamp.
+        let warnings = [saved.problem,
+                        presets.contains { $0.stampId != nil } ? savedStampList.problem : nil].compactMap { $0 }
         let entries: [[String: Any]] = presets.map { preset in
             var entry: [String: Any] = ["name": preset.name,
                                         "players": preset.parts.reduce(0) { $0 + $1.copies },
@@ -159,12 +172,17 @@ extension ScoreSortCLI {
             if let id = preset.stampId, let stamp = stamps.first(where: { $0.id == id }) { entry["stamp"] = stamp.name }
             return entry
         }
-        let text = presets.isEmpty
+        var text = presets.isEmpty
             ? "No saved presets. Make one in ScoreSort's Combine tab."
             : presets.map { preset in
                 "\(preset.name) (\(preset.parts.reduce(0) { $0 + $1.copies }) players):\n" + preset.parts.map { "  \($0.name) × \($0.copies)" }.joined(separator: "\n")
             }.joined(separator: "\n\n")
-        return CommandResult(text: text, json: ["ok": true, "presets": entries])
+        var json: [String: Any] = ["ok": true, "presets": entries]
+        if !warnings.isEmpty {
+            text += "\n\n" + warnings.map { "Note: " + $0 }.joined(separator: "\n")
+            json["warnings"] = warnings
+        }
+        return CommandResult(text: text, json: json)
     }
 
     // MARK: - combine
@@ -255,7 +273,7 @@ extension ScoreSortCLI {
         let allocation = try buildAllocation(files: allocationFiles, preset: preset,
                                              choices: allocations, copies: copies)
         let described = describeAllocation(allocation, files: allocationFiles)
-        let warnings = described.toDecide + described.notes
+        var warnings = described.toDecide + described.notes
         let leftOut = Set(manager.files.filter { (allocation.copies[$0.id] ?? 1) == 0 }.map(\.id))
         for file in manager.files where !leftOut.contains(file.id) {
             manager.updateCopies(for: file.id, copies: allocation.copies[file.id] ?? 1, undoManager: nil)
@@ -265,8 +283,14 @@ extension ScoreSortCLI {
 
         var stampName = stamp
         let presetUsed = preset?.name
-        if stampName == nil, let id = preset?.stampId, let s = savedStamps().first(where: { $0.id == id }) {
-            stampName = s.name
+        if stampName == nil, let id = preset?.stampId {
+            let saved = savedStamps()
+            if let s = saved.entries.first(where: { $0.id == id }) {
+                stampName = s.name
+            } else if let problem = saved.problem {
+                // Not silently: the preset asks for a stamp the file couldn't give.
+                warnings.append("“\(presetUsed ?? "")” has a stamp, but it wasn't used. \(problem)")
+            }
         }
 
         let job = try stampName.map { try stampJob(named: $0, scope: stampScope) }

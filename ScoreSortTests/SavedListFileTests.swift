@@ -553,3 +553,139 @@ struct SavedFileNoticeBarTests {
         #expect(host.fittingSize.height < withNotices)
     }
 }
+
+// MARK: - The command line says why
+
+/// `presets`, `stamps`, `combine --preset` and `--stamp` read the saved files read-only
+/// (issue #26). A file that can't be read is an error with the reason, not "no presets"; an
+/// entry that couldn't be read is mentioned. The CLI never moves or rewrites either file.
+@Suite("Command line: saved presets and stamps it can't read")
+struct CLISavedListTests {
+
+    private let damaged = "{ \"half\": \"writt"
+
+    /// A stamps file with one good stamp and one entry this version can't decode.
+    private func stampsWithOneBad(in scratch: Scratch) throws -> Data {
+        let good = Stamp(name: "Sydney Youth Band", text: "Sydney Youth Band")
+        let goodJSON = String(decoding: try JSONEncoder().encode(good), as: UTF8.self)
+        return try scratch.write("[\(goodJSON), {\"name\": 5}]", to: "stamps.json")
+    }
+
+    @Test("presets: a damaged file is an error that says why, and is left untouched")
+    func presetsUnreadable() throws {
+        let scratch = try Scratch()
+        defer { scratch.cleanUp() }
+        let original = try scratch.write(damaged, to: "ensemble-presets.json")
+        let result = ScoreSortCLI.runPresets(presetsFile: scratch.file("ensemble-presets.json"),
+                                             stampsFile: scratch.file("stamps.json"))
+        #expect(result.isError)
+        #expect(result.json["ok"] as? Bool == false)
+        #expect(result.text.contains("couldn't read"))
+        #expect(result.text.contains("damaged"))
+        #expect(result.text.contains(scratch.file("ensemble-presets.json").path))
+        #expect(!result.text.contains("No saved presets"))
+        #expect(try Data(contentsOf: scratch.file("ensemble-presets.json")) == original)
+        #expect(try scratch.setAside().isEmpty)
+    }
+
+    @Test("presets: entries that couldn't be read are mentioned; the rest are listed")
+    func presetsSkipped() throws {
+        let scratch = try Scratch()
+        defer { scratch.cleanUp() }
+        let original = try scratch.write(twoGoodPresetsAndOneBad, to: "ensemble-presets.json")
+        let result = ScoreSortCLI.runPresets(presetsFile: scratch.file("ensemble-presets.json"),
+                                             stampsFile: scratch.file("stamps.json"))
+        #expect(!result.isError)
+        #expect((result.json["presets"] as? [[String: Any]])?.count == 2)
+        #expect(result.text.contains("Concert Band"))
+        #expect(result.text.contains("1 saved preset"))
+        #expect((result.json["warnings"] as? [String])?.count == 1)
+        #expect(try Data(contentsOf: scratch.file("ensemble-presets.json")) == original)
+        #expect(try scratch.setAside().isEmpty)
+    }
+
+    @Test("presets: no file yet, or a clean one, has nothing to note")
+    func presetsMissingOrClean() throws {
+        let scratch = try Scratch()
+        defer { scratch.cleanUp() }
+        let none = ScoreSortCLI.runPresets(presetsFile: scratch.file("ensemble-presets.json"),
+                                           stampsFile: scratch.file("stamps.json"))
+        #expect(!none.isError)
+        #expect(none.text.contains("No saved presets"))
+        #expect(none.json["warnings"] == nil)
+
+        try scratch.write("[]", to: "ensemble-presets.json")
+        let empty = ScoreSortCLI.runPresets(presetsFile: scratch.file("ensemble-presets.json"),
+                                            stampsFile: scratch.file("stamps.json"))
+        #expect(!empty.isError)
+        #expect(empty.json["warnings"] == nil)
+    }
+
+    @Test("combine --preset: an unreadable file is the reason, not 'no saved presets'")
+    func presetLookup() throws {
+        let scratch = try Scratch()
+        defer { scratch.cleanUp() }
+        let url = scratch.file("ensemble-presets.json")
+        try scratch.write(damaged, to: "ensemble-presets.json")
+        do {
+            _ = try ScoreSortCLI.preset(named: "Concert Band", presetsFile: url)
+            Issue.record("expected an error")
+        } catch let error as CommandError {
+            #expect(error.message.contains("damaged"))
+            #expect(!error.message.contains("no saved presets"))
+        }
+
+        // A preset that isn't found may be one of the entries that couldn't be read.
+        try scratch.write(twoGoodPresetsAndOneBad, to: "ensemble-presets.json")
+        #expect(try ScoreSortCLI.preset(named: "stage", presetsFile: url).name == "Stage Band")
+        do {
+            _ = try ScoreSortCLI.preset(named: "From the future", presetsFile: url)
+            Issue.record("expected an error")
+        } catch let error as CommandError {
+            #expect(error.message.contains("No single preset"))
+            #expect(error.message.contains("1 saved preset"))
+        }
+    }
+
+    @Test("stamps: a damaged file is an error that says why, and is left untouched")
+    func stampsUnreadable() throws {
+        let scratch = try Scratch()
+        defer { scratch.cleanUp() }
+        let url = scratch.file("stamps.json")
+        let original = try scratch.write("", to: "stamps.json")
+        let result = ScoreSortCLI.runStamps(stampsFile: url)
+        #expect(result.isError)
+        #expect(result.text.contains("the file is empty"))
+        #expect(!result.text.contains("No saved stamps"))
+        do {
+            _ = try ScoreSortCLI.stampJob(named: "Sydney Youth Band", scope: .everyPage, stampsFile: url)
+            Issue.record("expected an error")
+        } catch let error as CommandError {
+            #expect(error.message.contains("the file is empty"))
+        }
+        #expect(try Data(contentsOf: url) == original)
+        #expect(try scratch.setAside().isEmpty)
+    }
+
+    @Test("stamps: entries that couldn't be read are mentioned; the rest still work")
+    func stampsSkipped() throws {
+        let scratch = try Scratch()
+        defer { scratch.cleanUp() }
+        let url = scratch.file("stamps.json")
+        let original = try stampsWithOneBad(in: scratch)
+        let result = ScoreSortCLI.runStamps(stampsFile: url)
+        #expect(!result.isError)
+        #expect((result.json["stamps"] as? [[String: Any]])?.count == 1)
+        #expect(result.text.contains("1 saved stamp"))
+        #expect(try ScoreSortCLI.stampJob(named: "sydney", scope: .everyPage, stampsFile: url).stamp.name == "Sydney Youth Band")
+        do {
+            _ = try ScoreSortCLI.stampJob(named: "Another School", scope: .everyPage, stampsFile: url)
+            Issue.record("expected an error")
+        } catch let error as CommandError {
+            #expect(error.message.contains("No single stamp"))
+            #expect(error.message.contains("1 saved stamp"))
+        }
+        #expect(try Data(contentsOf: url) == original)
+        #expect(try scratch.setAside().isEmpty)
+    }
+}

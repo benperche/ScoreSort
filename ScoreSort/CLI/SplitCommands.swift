@@ -481,27 +481,23 @@ extension ScoreSortCLI {
     }
 
     /// A saved stamp design by name (case-insensitive; a unique partial match also works).
-    static func stampJob(named name: String, scope: StampScope) throws -> StampJob {
-        let stamps = savedStamps()
+    /// Says why if the stamps file can't be read. `stampsFile` is injectable for tests,
+    /// which never read the real one.
+    static func stampJob(named name: String, scope: StampScope,
+                         stampsFile: URL? = StampStore.defaultFileURL) throws -> StampJob {
+        let saved = savedStamps(at: stampsFile)
+        if let unreadable = saved.unreadable { throw CommandError(unreadable) }
+        let stamps = saved.entries
         let lower = name.lowercased()
         let exact = stamps.filter { $0.name.lowercased() == lower }
         let partial = stamps.filter { $0.name.lowercased().contains(lower) }
         guard let stamp = exact.first ?? (partial.count == 1 ? partial.first : nil) else {
             let available = stamps.map { "“\($0.name)”" }.joined(separator: ", ")
-            throw CommandError(stamps.isEmpty
+            throw CommandError((stamps.isEmpty
                 ? "There are no saved stamps — design one in ScoreSort's Stamp tab first."
-                : "No single stamp called “\(name)”. Saved stamps: \(available).")
+                : "No single stamp called “\(name)”. Saved stamps: \(available).") + saved.mightBeUnreadable)
         }
         guard stamp.isDrawable else { throw CommandError("The stamp “\(stamp.name)” has nothing to draw.") }
         return StampJob(stamp: stamp, scope: scope)
-    }
-
-    /// The stamp designs saved in the app (stamps.json) — not the placeholder the app shows
-    /// when there are none.
-    static func savedStamps() -> [Stamp] {
-        // Read-only, and entry by entry: one stamp this version can't decode doesn't hide the rest.
-        guard let url = StampStore.defaultFileURL,
-              case .loaded(let stamps, _) = readSavedList(Stamp.self, at: url) else { return [] }
-        return stamps
     }
 }

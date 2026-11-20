@@ -17,7 +17,8 @@
 //  - a save that fails says so.
 //
 //  The format on disk stays a bare JSON array: older versions of the app and the command
-//  line (`savedPresets`, `savedStamps`) read the same files.
+//  line (`savedPresets(at:)`, `savedStamps(at:)` in CLI/SavedListReading.swift) read the
+//  same files.
 //
 
 import Foundation
