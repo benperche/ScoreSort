@@ -78,6 +78,10 @@ struct FilePreviewCard: View {
                     .font(.headline)
                     .foregroundColor(isFullySkipped ? .secondary : .primary)
                     .strikethrough(isFullySkipped)
+                    // The card's colours (the page showing now, selected) in words.
+                    .accessibilityValue([pagesInFile.isEmpty ? nil : (pagesInFile.count == 1 ? "page \(pagesInFile[0] + 1)" : "pages \(pagesInFile[0] + 1) to \(pagesInFile[pagesInFile.count - 1] + 1)"),
+                                         isActive ? "showing now" : nil, isSelected ? "selected" : nil]
+                                        .compactMap { $0 }.joined(separator: ", "))
 
                 if isFullySkipped {
                     Text("SKIPPED")
@@ -105,6 +109,7 @@ struct FilePreviewCard: View {
                     Button(action: fixBooklet) {
                         Image(systemName: "rectangle.stack")
                             .foregroundColor(.accentColor)
+                            .accessibilityLabel("Fix booklet order")
                     }
                     .buttonStyle(.plain)
                     .help("Fix booklet page order for this file")
@@ -114,6 +119,7 @@ struct FilePreviewCard: View {
                     Button(action: redoBooklet) {
                         Image(systemName: "rectangle.stack.badge.play")
                             .foregroundColor(.accentColor)
+                            .accessibilityLabel("Repeat the last booklet order")
                     }
                     .buttonStyle(.plain)
                     .help("Repeat the last booklet reordering on this file")
@@ -616,6 +622,17 @@ struct SplitFileNamingRow: View {
             }
     }
 
+    /// What VoiceOver says for a pan button.
+    private func panLabel(_ icon: String) -> String {
+        switch icon {
+        case "chevron.up": return "Pan up"
+        case "chevron.down": return "Pan down"
+        case "chevron.left": return "Pan left"
+        case "chevron.right": return "Pan right"
+        default: return "Back to the top of the page"
+        }
+    }
+
     private func panButton(_ icon: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
             Image(systemName: icon)
@@ -624,6 +641,7 @@ struct SplitFileNamingRow: View {
                 .background(.ultraThinMaterial)
                 .foregroundColor(.secondary)
                 .clipShape(Circle())
+                .accessibilityLabel(panLabel(icon))
         }
         .buttonStyle(.plain)
         // Never a tab stop. Tab is how you move from one instrument name to the next, and

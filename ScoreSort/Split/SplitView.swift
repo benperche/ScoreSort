@@ -465,7 +465,7 @@ struct SplitView: View {
                     .font(.callout)
                     Spacer()
                     Button { withAnimation(.easeInOut(duration: 0.2)) { a3HintVisible = false } }
-                        label: { Image(systemName: "xmark").foregroundColor(.secondary) }
+                        label: { Image(systemName: "xmark").foregroundColor(.secondary).accessibilityLabel("Dismiss") }
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal)
@@ -483,7 +483,7 @@ struct SplitView: View {
                         .font(.callout)
                     Spacer()
                     Button { withAnimation(.easeInOut(duration: 0.2)) { a3SplitNoticeVisible = false } }
-                        label: { Image(systemName: "xmark").foregroundColor(.secondary) }
+                        label: { Image(systemName: "xmark").foregroundColor(.secondary).accessibilityLabel("Dismiss") }
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal)
@@ -500,7 +500,7 @@ struct SplitView: View {
                         .font(.callout)
                     Spacer()
                     Button { withAnimation(.easeInOut(duration: 0.2)) { bookletRedoNoticeVisible = false } }
-                        label: { Image(systemName: "xmark").foregroundColor(.secondary) }
+                        label: { Image(systemName: "xmark").foregroundColor(.secondary).accessibilityLabel("Dismiss") }
                     .buttonStyle(.plain)
                 }
                 .padding(.horizontal)
@@ -1790,6 +1790,7 @@ private struct BookletOptionRow<Content: View>: View {
                         .foregroundColor(isSelected ? .accentColor : .secondary)
                         .font(.system(size: 16))
                         .padding(.top, 1)
+                        .accessibilityHidden(true)   // the button's text names it; selection is a trait below
                     VStack(alignment: .leading, spacing: 2) {
                         Text(label).fontWeight(.medium)
                         Text(description)
@@ -1800,6 +1801,7 @@ private struct BookletOptionRow<Content: View>: View {
                 }
             }
             .buttonStyle(.plain)
+            .accessibilityAddTraits(isSelected ? .isSelected : [])
 
             content()
                 .padding(.leading, 26)
@@ -1910,12 +1912,12 @@ struct SplitControlsSection: View {
             // ── Row 1: Navigation ──────────────────────────────────────────
             HStack {
                 Button(action: firstPage) {
-                    Image(systemName: "chevron.backward.to.line")
+                    Image(systemName: "chevron.backward.to.line").accessibilityLabel("First page")
                 }
                 .disabled(currentPage == 0)
 
                 Button(action: previousPage) {
-                    Image(systemName: "chevron.left")
+                    Image(systemName: "chevron.left").accessibilityLabel("Previous page")
                 }
                 .disabled(currentPage == 0)
 
@@ -1955,12 +1957,12 @@ struct SplitControlsSection: View {
                 Spacer()
 
                 Button(action: nextPage) {
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.right").accessibilityLabel("Next page")
                 }
                 .disabled(currentPage >= totalPages - 1)
 
                 Button(action: lastPage) {
-                    Image(systemName: "chevron.forward.to.line")
+                    Image(systemName: "chevron.forward.to.line").accessibilityLabel("Last page")
                 }
                 .disabled(currentPage >= totalPages - 1)
             }

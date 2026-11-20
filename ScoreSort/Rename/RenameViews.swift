@@ -1007,6 +1007,10 @@ private struct ScoreOrderFileRow: View {
                         : (operation.type == .alreadyPrefixed || operation.type == .skip) ? .secondary
                         : .primary
                     )
+                    // What will happen to it, read with the name (the colours say it only by sight).
+                    .accessibilityValue(operation.newName.isEmpty || operation.type == .excluded || operation.type == .skip || operation.type == .alreadyPrefixed
+                                        ? operation.statusText
+                                        : "\(operation.statusText): \(operation.newPathForDisplay)")
             }
             .padding(.leading, 16)
             .frame(maxWidth: .infinity, alignment: .leading)

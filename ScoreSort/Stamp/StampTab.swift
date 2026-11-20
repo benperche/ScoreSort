@@ -211,14 +211,14 @@ struct StampView: View {
                 }
                 .labelsHidden()
 
-                Button { addStamp() } label: { Image(systemName: "plus") }
+                Button { addStamp() } label: { Image(systemName: "plus").accessibilityLabel("Add a stamp") }
                     .help("Add a stamp")
 
-                Button { duplicateStamp() } label: { Image(systemName: "plus.square.on.square") }
+                Button { duplicateStamp() } label: { Image(systemName: "plus.square.on.square").accessibilityLabel("Duplicate this stamp") }
                     .help("Duplicate this stamp")
                     .disabled(stampStore.selectedStampId == nil)
 
-                Button { deleteStamp() } label: { Image(systemName: "trash") }
+                Button { deleteStamp() } label: { Image(systemName: "trash").accessibilityLabel("Delete this stamp") }
                     .help("Delete this stamp")
                     .disabled(stampStore.stamps.count <= 1)
             }
@@ -342,6 +342,9 @@ struct StampView: View {
                                 }
                                 .buttonStyle(.plain)
                                 .help(anchor.label)
+                                // The keyboard and VoiceOver way to place the stamp (dragging it is mouse-only).
+                                .accessibilityLabel("Place stamp \(anchor.label.lowercased())")
+                                .accessibilityAddTraits(stamp.matches(anchor) ? .isSelected : [])
                             }
                         }
                     }
@@ -413,10 +416,10 @@ struct StampView: View {
     /// jump-to-end and step buttons flanking the position label.
     private var pageNavigationBar: some View {
         HStack(spacing: 6) {
-            Button(action: firstPage) { Image(systemName: "chevron.backward.to.line") }
+            Button(action: firstPage) { Image(systemName: "chevron.backward.to.line").accessibilityLabel("First page") }
                 .disabled(!canGoBack)
                 .help("First page (⌘←)")
-            Button(action: previousPage) { Image(systemName: "chevron.left") }
+            Button(action: previousPage) { Image(systemName: "chevron.left").accessibilityLabel("Previous page") }
                 .disabled(!canGoBack)
                 .help("Previous page (←)")
 
@@ -446,10 +449,10 @@ struct StampView: View {
 
             Spacer()
 
-            Button(action: nextPage) { Image(systemName: "chevron.right") }
+            Button(action: nextPage) { Image(systemName: "chevron.right").accessibilityLabel("Next page") }
                 .disabled(!canGoForward)
                 .help("Next page (→)")
-            Button(action: lastPage) { Image(systemName: "chevron.forward.to.line") }
+            Button(action: lastPage) { Image(systemName: "chevron.forward.to.line").accessibilityLabel("Last page") }
                 .disabled(!canGoForward)
                 .help("Last page (⌘→)")
         }
@@ -632,7 +635,7 @@ struct StampView: View {
                         Button {
                             items.removeAll { $0.id == item.id }
                         } label: {
-                            Image(systemName: "xmark.circle.fill")
+                            Image(systemName: "xmark.circle.fill").accessibilityLabel("Remove this file")
                         }
                         .buttonStyle(.plain)
                         .foregroundColor(.secondary)
@@ -1172,6 +1175,8 @@ private struct StampPreviewCanvas: View {
                 .onHover { isHovering = $0 }
                 .gesture(dragGesture(pageBox: pageBox, textSize: textSize, scale: scale))
                 .help("Drag to move the stamp")
+                .accessibilityLabel("Stamp")
+                .accessibilityHint("Drag to move it, or use the position buttons beside the preview")
         }
     }
 

@@ -42,13 +42,13 @@ struct PresetPartRow: View {
             if onMoveUp != nil || onMoveDown != nil {
                 VStack(spacing: 1) {
                     Button { onMoveUp?() } label: {
-                        Image(systemName: "chevron.up").font(.system(size: 9, weight: .medium))
+                        Image(systemName: "chevron.up").font(.system(size: 9, weight: .medium)).accessibilityLabel("Move part up")
                     }
                     .buttonStyle(.plain)
                     .disabled(onMoveUp == nil)
 
                     Button { onMoveDown?() } label: {
-                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .medium))
+                        Image(systemName: "chevron.down").font(.system(size: 9, weight: .medium)).accessibilityLabel("Move part down")
                     }
                     .buttonStyle(.plain)
                     .disabled(onMoveDown == nil)
@@ -86,7 +86,7 @@ struct PresetPartRow: View {
                     } else {
                         onDelete()
                     }
-                } label: { Image(systemName: "minus.circle") }
+                } label: { Image(systemName: "minus.circle").accessibilityLabel("Fewer copies") }
                 .buttonStyle(.plain)
 
                 if isEditingCopies {
@@ -112,7 +112,7 @@ struct PresetPartRow: View {
                 Button {
                     part.copies += 1
                     onMarkDirty()
-                } label: { Image(systemName: "plus.circle") }
+                } label: { Image(systemName: "plus.circle").accessibilityLabel("More copies") }
                 .buttonStyle(.plain)
             }
         }
@@ -290,7 +290,7 @@ struct PresetSidebarView: View {
                         Button {
                             showingNewPreset = true
                         } label: {
-                            Image(systemName: "plus.circle")
+                            Image(systemName: "plus.circle").accessibilityLabel("New preset")
                         }
                         .buttonStyle(.plain)
                         .foregroundStyle(.secondary)

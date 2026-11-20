@@ -1231,7 +1231,7 @@ struct PreferencesView: View {
                                         Button(action: {
                                             if index > 0 { editableOrder.swapAt(index, index - 1) }
                                         }) {
-                                            Image(systemName: "chevron.up").font(.caption)
+                                            Image(systemName: "chevron.up").font(.caption).accessibilityLabel("Move \(instrument) up")
                                         }
                                         .buttonStyle(.plain)
                                         .disabled(index == 0)
@@ -1241,7 +1241,7 @@ struct PreferencesView: View {
                                                 editableOrder.swapAt(index, index + 1)
                                             }
                                         }) {
-                                            Image(systemName: "chevron.down").font(.caption)
+                                            Image(systemName: "chevron.down").font(.caption).accessibilityLabel("Move \(instrument) down")
                                         }
                                         .buttonStyle(.plain)
                                         .disabled(index == editableOrder.count - 1)
@@ -1258,6 +1258,7 @@ struct PreferencesView: View {
                                     Button(action: { editableOrder.remove(at: index) }) {
                                         Image(systemName: "minus.circle.fill")
                                             .foregroundColor(.red)
+                                            .accessibilityLabel("Remove \(instrument)")
                                     }
                                     .buttonStyle(.plain)
                                     .padding(.trailing, 4)
@@ -1276,7 +1277,7 @@ struct PreferencesView: View {
                                 .textFieldStyle(.roundedBorder)
                                 .onSubmit { addInstrument() }
                             Button(action: addInstrument) {
-                                Image(systemName: "plus.circle.fill")
+                                Image(systemName: "plus.circle.fill").accessibilityLabel("Add instrument")
                             }
                             .disabled(newInstrument.trimmingCharacters(in: .whitespaces).isEmpty)
                         }
@@ -1489,6 +1490,7 @@ struct CombinerPreferencesView: View {
                     Button { showingAddPreset = true } label: {
                         Image(systemName: "plus")
                             .frame(width: 28, height: 24)
+                            .accessibilityLabel("New preset")
                     }
                     .buttonStyle(.plain)
 
@@ -1656,7 +1658,7 @@ struct CombinerPreferencesView: View {
                             .textFieldStyle(.roundedBorder)
                             .onSubmit { addPart() }
                         Button(action: addPart) {
-                            Image(systemName: "plus.circle.fill")
+                            Image(systemName: "plus.circle.fill").accessibilityLabel("Add part")
                         }
                         .disabled(newPartName.trimmingCharacters(in: .whitespaces).isEmpty)
                     }
@@ -1868,6 +1870,14 @@ struct PDFPageView: View {
     /// Drawn into the preview image when set, so the Split tab can show what its output will
     /// look like. Nil elsewhere.
     var stamp: Stamp? = nil
+    /// Put before "page N" when VoiceOver reads the preview ("Before", "After"). Nil: just the page.
+    var accessibilityName: String? = nil
+
+    /// What VoiceOver says for the picture: which page it is.
+    private var accessibilityDescription: String {
+        let page = page.flatMap { p in p.label.map { "page \($0)" } } ?? "page"
+        return [accessibilityName, page].compactMap { $0 }.joined(separator: ", ").capitalizingFirstLetter()
+    }
 
     /// What the picture depends on — re-rendered only when one of these changes.
     private struct Key: Equatable {
@@ -1889,6 +1899,10 @@ struct PDFPageView: View {
                     .padding(4)
             }
         }
+        // One picture to VoiceOver, named by its page.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(accessibilityDescription)
+        .accessibilityAddTraits(.isImage)
         // Renders when the page, rotation or stamp changes; the previous picture stays up
         // until the new one is ready, so stepping through pages doesn't flash blank.
         .task(id: Key(page: page.map(ObjectIdentifier.init), rotation: rotation, stamp: stamp)) {
@@ -2155,4 +2169,9 @@ enum RotationAngle: Int {
     var degrees: Int {
         self.rawValue
     }
+}
+
+extension String {
+    /// The string with its first letter in capitals ("before, page 2" → "Before, page 2").
+    func capitalizingFirstLetter() -> String { prefix(1).uppercased() + dropFirst() }
 }

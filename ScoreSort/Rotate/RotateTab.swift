@@ -329,12 +329,12 @@ struct RotatePreviewSection: View {
             // Page navigation
             HStack {
                 Button(action: firstPage) {
-                    Image(systemName: "chevron.backward.to.line")
+                    Image(systemName: "chevron.backward.to.line").accessibilityLabel("First page")
                 }
                 .disabled(currentPage == 0)
 
                 Button(action: previousPage) {
-                    Image(systemName: "chevron.left")
+                    Image(systemName: "chevron.left").accessibilityLabel("Previous page")
                 }
                 .disabled(currentPage == 0)
 
@@ -343,7 +343,7 @@ struct RotatePreviewSection: View {
                 // Rotate-left button · page info · rotate-right button
                 HStack(spacing: 10) {
                     Button(action: onRotateCurrentPageLeft) {
-                        Image(systemName: "rotate.left")
+                        Image(systemName: "rotate.left").accessibilityLabel("Rotate this page left")
                     }
                     .buttonStyle(.bordered)
                     .help("Rotate this page 90° counter-clockwise (,)")
@@ -371,7 +371,7 @@ struct RotatePreviewSection: View {
                     .fixedSize()
 
                     Button(action: onRotateCurrentPageRight) {
-                        Image(systemName: "rotate.right")
+                        Image(systemName: "rotate.right").accessibilityLabel("Rotate this page right")
                     }
                     .buttonStyle(.bordered)
                     .help("Rotate this page 90° clockwise (.)")
@@ -380,12 +380,12 @@ struct RotatePreviewSection: View {
                 Spacer()
 
                 Button(action: nextPage) {
-                    Image(systemName: "chevron.right")
+                    Image(systemName: "chevron.right").accessibilityLabel("Next page")
                 }
                 .disabled(currentPage >= totalPages - 1)
 
                 Button(action: lastPage) {
-                    Image(systemName: "chevron.forward.to.line")
+                    Image(systemName: "chevron.forward.to.line").accessibilityLabel("Last page")
                 }
                 .disabled(currentPage >= totalPages - 1)
             }
@@ -402,7 +402,8 @@ struct RotatePreviewSection: View {
                     
                     PDFPageView(
                         page: document.page(at: currentPage),
-                        rotation: 0
+                        rotation: 0,
+                        accessibilityName: "Before"
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }
@@ -410,6 +411,7 @@ struct RotatePreviewSection: View {
                 Image(systemName: "arrow.right")
                     .font(.title2)
                     .foregroundColor(.secondary)
+                    .accessibilityHidden(true)
                 
                 // After
                 VStack {
@@ -420,7 +422,8 @@ struct RotatePreviewSection: View {
                     
                     PDFPageView(
                         page: document.page(at: currentPage),
-                        rotation: totalRotationForCurrentPage
+                        rotation: totalRotationForCurrentPage,
+                        accessibilityName: totalRotationForCurrentPage > 0 ? "After, rotated \(totalRotationForCurrentPage) degrees" : "After, not rotated"
                     )
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 }

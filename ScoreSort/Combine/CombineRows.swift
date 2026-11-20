@@ -52,6 +52,19 @@ struct CombineFileRow: View {
     @State private var copiesText = ""
     @FocusState private var copiesFieldFocused: Bool
 
+    /// What the row's look says, in words: pages, copies, and what the colours and indent mean.
+    var accessibilityStatus: String {
+        var parts: [String] = []
+        if !file.isBlankPage {
+            parts.append("\(file.pageCount) page\(file.pageCount == 1 ? "" : "s")")
+            if !isGrouped { parts.append("\(file.copies) cop\(file.copies == 1 ? "y" : "ies")") }
+        }
+        if isGrouped { parts.append("in a collate group") }
+        if isUnmatched { parts.append("not in the preset, check its copies") }
+        if hasSplitCopies { parts.append("copies shared out by the preset, check them") }
+        return parts.joined(separator: ", ")
+    }
+
     var body: some View {
         HStack {
             // The tick box is its own hit target: it always toggles membership, so you can
@@ -60,6 +73,10 @@ struct CombineFileRow: View {
                 .foregroundColor(isSelected ? .accentColor : .secondary)
                 .contentShape(Rectangle())
                 .onTapGesture { onToggleSelect() }
+                // A tick box drawn as an image: tell VoiceOver what it is and let it toggle it.
+                .accessibilityLabel("Select \(file.name)")
+                .accessibilityAddTraits(isSelected ? [.isButton, .isSelected] : .isButton)
+                .accessibilityAction { onToggleSelect() }
 
             Text(file.name)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -69,6 +86,9 @@ struct CombineFileRow: View {
                 .italic(file.isBlankPage)
                 // Indent grouped files so they visually sit under the group header
                 .padding(.leading, isGrouped ? 14 : 0)
+                // The row's colours (orange: no preset part; blue: copies the app shared out)
+                // and the indent mean nothing to VoiceOver, so say them.
+                .accessibilityValue(accessibilityStatus)
 
             Text("\(file.pageCount)")
                 .frame(width: 80, alignment: .center)
@@ -108,7 +128,7 @@ struct CombineFileRow: View {
                     Button(action: {
                         if file.copies > 1 { onCopiesChanged(file.copies - 1) } else { onRemove() }
                     }) {
-                        Image(systemName: "minus.circle")
+                        Image(systemName: "minus.circle").accessibilityLabel(file.copies > 1 ? "Fewer copies" : "Remove from list")
                     }
                     .buttonStyle(.plain)
 
@@ -133,7 +153,7 @@ struct CombineFileRow: View {
                     }
 
                     Button(action: { onCopiesChanged(file.copies + 1) }) {
-                        Image(systemName: "plus.circle")
+                        Image(systemName: "plus.circle").accessibilityLabel("More copies")
                     }
                     .buttonStyle(.plain)
                 }
@@ -211,6 +231,7 @@ struct CollateGroupHeaderRow: View {
                 Button(action: onUngroup) {
                     Image(systemName: "arrow.up.left.and.arrow.down.right")
                         .imageScale(.small)
+                        .accessibilityLabel("Dissolve group")
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.secondary)
@@ -226,7 +247,7 @@ struct CollateGroupHeaderRow: View {
             // Copies column ─ group-level stepper (double-click to type)
             HStack(spacing: 4) {
                 Button { if group.copies > 1 { onCopiesChanged(group.copies - 1) } } label: {
-                    Image(systemName: "minus.circle")
+                    Image(systemName: "minus.circle").accessibilityLabel("Fewer copies of the group")
                 }.buttonStyle(.plain)
 
                 if isEditingCopies {
@@ -250,7 +271,7 @@ struct CollateGroupHeaderRow: View {
                 }
 
                 Button { onCopiesChanged(group.copies + 1) } label: {
-                    Image(systemName: "plus.circle")
+                    Image(systemName: "plus.circle").accessibilityLabel("More copies of the group")
                 }.buttonStyle(.plain)
             }
             .frame(width: 100, alignment: .center)

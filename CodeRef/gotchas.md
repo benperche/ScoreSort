@@ -67,6 +67,8 @@ Things that look wrong, or look like they could be simpler, but are the way they
 
 ## SwiftUI and AppKit
 
+- **Every icon-only button needs a spoken label** (#22): `.accessibilityLabel(...)` at the end of the icon's modifier chain (the button takes it from the image), or `.accessibilityHidden(true)` for a decorative icon whose button has text. Without one, VoiceOver reads the SF Symbol's name ("Backward Chevron Pointing To A Line"); `.help` is a tooltip, not a label. `AccessibilityTests.iconButtonsAreLabelled` scans the sources and fails on a new unlabelled one. Meaning shown only by colour (Combine's orange and blue rows, Split's current and selected cards) goes in `.accessibilityValue`. Mouse-only gestures need another way in: the scan preview has an adjustable cut (1% a step) and Skip/Keep actions, and the stamp has the nine-position grid. `PDFPageView` is one image element named by its page (`accessibilityName` adds "Before"/"After").
+
 - **`.sheet(item:)`, not `.sheet(isPresented:)`** — the latter showed a blank sheet (first seen with `ManualAssignmentView`). And **one `.sheet` per view**: two on the same view fight over presentation (Combine routes its booklet intro and wizard through one `CombineSheet` enum).
 - **Don't duplicate `FocusState` across parent and child**: pass `FocusState<T>.Binding`; a local copy steals the first click in a `TextField`.
 - **`editMode` is iOS-only.** On macOS `ForEach.onMove` inside a `List` gives drag-to-reorder for free.

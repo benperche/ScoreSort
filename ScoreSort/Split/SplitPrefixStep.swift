@@ -37,13 +37,13 @@ private struct PrefixOrderRow: View {
             // Up / down arrows
             VStack(spacing: 2) {
                 Button { onMoveUp?() } label: {
-                    Image(systemName: "chevron.up").font(.caption)
+                    Image(systemName: "chevron.up").font(.caption).accessibilityLabel("Move up")
                 }
                 .buttonStyle(.plain)
                 .disabled(onMoveUp == nil)
 
                 Button { onMoveDown?() } label: {
-                    Image(systemName: "chevron.down").font(.caption)
+                    Image(systemName: "chevron.down").font(.caption).accessibilityLabel("Move down")
                 }
                 .buttonStyle(.plain)
                 .disabled(onMoveDown == nil)
@@ -95,7 +95,7 @@ private struct PrefixOrderRow: View {
             // Skip / include toggle
             if let onToggleSkip {
                 Button(action: onToggleSkip) {
-                    Image(systemName: item.isSkipped ? "arrow.uturn.backward.circle" : "slash.circle")
+                    Image(systemName: item.isSkipped ? "arrow.uturn.backward.circle" : "slash.circle").accessibilityLabel(item.isSkipped ? "Include this file" : "Skip this file")
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.secondary)

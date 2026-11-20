@@ -260,7 +260,7 @@ struct CombineView: View {
                 // affordance, and the only plain-styled thing here — sitting between two
                 // bordered buttons it read as a gap in the row.
                 Button(action: { showingKeyboardHelp = true }) {
-                    Image(systemName: "keyboard")
+                    Image(systemName: "keyboard").accessibilityLabel("Keyboard shortcuts")
                 }
                 .buttonStyle(.plain)
                 .foregroundColor(.secondary)

@@ -353,7 +353,7 @@ struct AIAssistantsPreferencesView: View {
                                 Button {
                                     model.removeSharedFolder(folder)
                                 } label: {
-                                    Image(systemName: "minus.circle")
+                                    Image(systemName: "minus.circle").accessibilityLabel("Stop sharing \(folder.lastPathComponent)")
                                 }
                                 .buttonStyle(.borderless)
                                 .help("Stop sharing this folder")

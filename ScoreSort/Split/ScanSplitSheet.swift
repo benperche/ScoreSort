@@ -413,6 +413,8 @@ private struct ScanSplitCard: View {
                         .fill(selected ? Color(NSColor.controlColor) : Color.clear)
                         .shadow(color: .black.opacity(selected ? 0.18 : 0), radius: 0.5, y: 0.5)
                 )
+                .accessibilityLabel(help)
+                .accessibilityAddTraits(selected ? .isSelected : [])
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -469,6 +471,28 @@ private struct ScanSplitPreview: View {
     private let grabDistance: CGFloat = 10
 
     var body: some View {
+        content
+            // Dragging the cut and clicking pieces are mouse-only; VoiceOver gets the same as
+            // an adjustable value (the cut, 1% a step) and an action per piece.
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("Scan \(scan.id + 1)")
+            .accessibilityValue(accessibilityValueText)
+            .accessibilityAdjustableAction { direction in
+                guard let f = cutFraction else { return }
+                let step = direction == .increment ? 0.01 : -0.01
+                model.moveCut(to: f + step, scan: scan.id, final: true)
+            }
+            .accessibilityActions {
+                ForEach(Array(scan.skip.enumerated()), id: \.offset) { i, skipped in
+                    let side = scan.skip.count == 2 ? (i == 0 ? "left page" : "right page") : "page"
+                    Button(skipped ? "Keep the \(side)" : "Skip the \(side)") {
+                        model.toggleSkip(piece: i, scan: scan.id)
+                    }
+                }
+            }
+    }
+
+    @ViewBuilder private var content: some View {
         Group {
             if let image = scan.image {
                 Image(decorative: image, scale: 1)
@@ -494,6 +518,18 @@ private struct ScanSplitPreview: View {
     private var cutFraction: Double? {
         if case .split(let f) = scan.layout { return f }
         return nil
+    }
+
+    /// The scan in words, for VoiceOver: its pages, where the cut is, and which pieces are skipped.
+    private var accessibilityValueText: String {
+        let sides = scan.skip.count == 2 ? ["left page", "right page"] : ["page"]
+        var parts: [String] = []
+        if let f = cutFraction { parts.append("cut at \(Int((f * 100).rounded())) percent across") }
+        else { parts.append("one page, not cut") }
+        for (i, skipped) in scan.skip.enumerated() where skipped && i < sides.count {
+            parts.append("\(sides[i]) skipped")
+        }
+        return parts.joined(separator: ", ")
     }
 
     @ViewBuilder
