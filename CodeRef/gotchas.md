@@ -27,6 +27,8 @@ Things that look wrong, or look like they could be simpler, but are the way they
 - **The page-reorder UI lives inside Step 1.** A separate `A3PageOrderView` stage was built and removed (slow, with `FocusState` and keyboard problems); Swap with Next (S) and Fix Booklet Order replaced it. Don't resurrect a separate reorder stage.
 - **Names follow their page** (`remapFileNames`), and every split file name goes through `splitOutputFileName` — Step 1, Step 2, Step 3, the summary, the save and the CLI — so they can't disagree. An empty base name is a real state.
 - **Bookmarks are offered, never silently applied**, and name matching **falls back rather than half-filling**: if titles don't parse cleanly, use the defaults instead of guessing.
+- **Read part names with Vision's `.accurate` level.** `.fast` doesn't see hand-copied lettering at all, and in parallel it's barely quicker. **Vision fails on GitHub's runners** (and may on some Macs): `recognizePageText` returns nil then, and everything treats that as "couldn't read", quietly. The one test that runs Vision is disabled under `SCORESORT_CI_NO_VISION`. → [split.md](split.md#reading-part-names-off-the-page--logicpartrecognitionswift-logicpagetextcacheswift-17)
+- **Recognised text is misread often on scans** ("Eb Alte Sexabhene", "Jrombore"): match instruments forgivingly, name parts from the instrument matched, and **find part starts from the repeated title** rather than from name changes when there is one — an instrument named inside a part (a doubling, a cue) otherwise makes a false split.
 
 ## Combine
 

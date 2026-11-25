@@ -199,6 +199,30 @@ Shows the file's first kept page in `PageInstrumentPreview` (a 150 pt strip) and
 - **Folders.** With a `PrefixFolderSorting`, recognised rows group under folder headers — see [rename.md § Sort into folders](rename.md#sort-into-folders). `onApply` gets each item's `folder`.
 - **Apply & Save** (Return) → Split's `applyPrefixAndSaveSplit`: the output-folder panel, then `applyPrefixToFolder`. Escape goes back.
 
+## Reading part names off the page — `Logic/PartRecognition.swift`, `Logic/PageTextCache.swift` (#17)
+
+On-device text recognition with Vision; nothing leaves the Mac. Used by Step 2's preview starting point, Step 1's Suggest Splits and the CLI's `read-parts`.
+
+**Recognition.** `recognizePageText(_:mode:)` renders the page through `renderScan` (Core Graphics, safe off the main thread), keeps the top 40% (`partNameReadFraction`) and runs `VNRecognizeTextRequest` without language correction. Boxes are fractions of the page, y from the top. It returns **nil when the page couldn't be rendered or Vision failed** (GitHub's runners, some Macs), `[]` for a page with no text. `recognizePages` reads many in parallel with `DispatchQueue.concurrentPerform`, with `isCancelled` and a per-page `progress`. **Measured on the *Ebony Concerto* scans: about 0.1 s a page in parallel, against 0.9 s one at a time.**
+
+**`.accurate`, not `.fast`.** `PartReadMode.fast` exists but nothing in the app uses it: on hand-copied parts it doesn't see the lettering at all (it returned only library stamps and scribbles where `.accurate` read "Eb Alte Sexabhene I"), and in parallel it saved little (40 pages: 2.6 s against 3.7 s). Step 2 and Suggest Splits therefore share one cache of accurate readings.
+
+**`PageTextCache`** (`@MainActor`, `.shared`): recognised lines per `PDFPage`, holding the page weakly with the crop box and rotation it was read at, so another PDF or a re-cut page is read afresh. `read(_ page:)` reads one page on an `OperationQueue` (a few at once, for Step 2's rows); `read(_ pages:cancel:progress:)` reads many through `recognizePages`, answering cached pages straight away. Pages built in memory (no `pageRef`) can't be read: nil.
+
+**Interpretation** (pure, `PartRecognitionTests`):
+
+| Function | Behaviour |
+|----------|-----------|
+| `InstrumentMatcher(order:)` / `.match(_:forgiving:)` | Whole-word instrument match against the instrument order: leftmost, longest at the same place. Jazz's `solo …` entries are left out (`recognisedPartName` adds "Solo" back). With `forgiving`, a line with no exact match may match a misreading: `misreadDistance` (edit distance with **lookalike letters at half cost**: j/t, i/t, e/o, a/o, n/m, b/p…) ≤ letters ÷ 4, for names of four letters or more, never for `notInstrumentWords` (brass, harmon, solo, cont…). |
+| `looksLikeScorePage` | Three or more different instruments (`instrumentIdentityKey`) in the read area: a score's staff labels. |
+| `partNameMatch` / `partNameLine` | The part name: a line in the **top 20%** (`partNameTopFraction`), starting in the left two-thirds (`partNameRightLimit`), at least `partNameMinHeight` (≈ 9 pt) tall, ≤ 6 words, not bracketed (cues), not a repeated title, naming an instrument (forgiving when confidence ≥ 0.5). Highest wins, then larger type. None on a score page. |
+| `recognisedPartName` | The name **built from the instrument matched**, not the text read: `preferredInstrumentDisplayName`, a bare Alto/Tenor/Bari/Baritone in the order's sax section is the saxophone, "Solo" if the line says so, plus a part number after it (1–9 or I–V) or an ordinal before it. "Jrumbet IV in Bb" → "Trumpet 4". |
+| `partNameFocus` | Step 2's starting point: the name's box, else the most top-left line with two or more letters or digits. |
+| `titlePages` | Title-like lines (`isTitleLikeLine`: top quarter, confident, ≥ 6 letters, no instrument, no tempo word or "=") clustered fuzzily across pages. A cluster **on the first page** that recurs in separate runs (not on ≥ 80% of pages) marks the pages that start parts: `.repeated(pages)`. A title only on the first page: `.onlyFirst`. |
+| `readParts(_:order:) -> PartReading` | Each page's name ("Score" for a score page) and the suggested parts. Fewer than half the pages read, no text at all, or nothing to go on → no parts and a `problem` for the person. With `.repeated` titles **every titled page starts a part**, named from its own name or "" — so a misread name still gets its split, and a doubling ("Bb Clarinet" in a sax part) or a cue doesn't make one. `.onlyFirst` → one part. Otherwise where the name changes (`suggestedParts(pageNames:)`). `method` says which. |
+
+**On the real scans** (98 single pages after Split Double Pages, plus a 40-page score): every part boundary was right in the three multi-part PDFs (horn and five trumpets, five rhythm parts, three trombones), every single-part PDF came back as one part and the score as "Score". 14 of 20 part names were right or right but for the number; six were unreadable ("Jrumtat", "DYSMS", "Hert", "Ixombrre") and left blank.
+
 ## Saving
 
 Both paths ask for an output folder (`NSOpenPanel`, `canCreateDirectories`, opening in `outputDirectory(forSourceFile: model.sourceURL)`):
