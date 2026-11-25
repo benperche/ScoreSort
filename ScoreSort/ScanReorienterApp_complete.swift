@@ -1792,7 +1792,14 @@ final class Unchecked<T>: @unchecked Sendable {
 struct DropZoneView: View {
     @ObservedObject var pdfManager: PDFManager
     var subtitle: String? = nil
+    /// Opens a chosen or dropped PDF instead of `pdfManager.loadPDF` — for a tab whose model
+    /// does more on opening (Split resets its split and checks for double pages).
+    var onOpen: ((URL) -> Void)? = nil
     @State private var isTargeted = false
+
+    private func open(_ url: URL) {
+        if let onOpen { onOpen(url) } else { pdfManager.loadPDF(from: url) }
+    }
 
     var body: some View {
         VStack(spacing: 20) {
@@ -1835,7 +1842,7 @@ struct DropZoneView: View {
                 guard let url = url else { return }
                 DispatchQueue.main.async {
                     if url.pathExtension.lowercased() == "pdf" {
-                        pdfManager.loadPDF(from: url)
+                        open(url)
                     } else {
                         showNSAlert(title: "Unsupported File Type",
                                     message: "This tab only accepts PDF files.",
@@ -1855,7 +1862,7 @@ struct DropZoneView: View {
         
         beginPanelSheet(panel) { response in
             if response == .OK, let url = panel.url {
-                pdfManager.loadPDF(from: url)
+                open(url)
             }
         }
     }

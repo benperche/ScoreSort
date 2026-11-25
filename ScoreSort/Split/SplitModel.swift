@@ -25,6 +25,18 @@ private struct SplitSnapshot {
     var customFileNames: [Int: String]
 }
 
+/// What the view should offer for a PDF `SplitModel.load(from:)` just opened.
+enum SplitLoadSuggestion: Equatable {
+    /// It looks like a scan of double pages (A3 sheets, a book scanner's spreads): open
+    /// Split Double Pages. Any bookmark offer waits until that's answered.
+    case splitDoublePages
+    /// The proportions are A3-like, but not enough to offer the split outright: show the
+    /// hint banner, then any bookmark offer.
+    case doublePageHint
+    /// Ordinary pages: just any bookmark offer.
+    case ordinaryPages
+}
+
 /// The most recently applied booklet order, kept so it can be repeated on another file.
 struct SplitBookletOrder: Equatable {
     /// The file's page count (only a file of the same length can take it).
@@ -44,7 +56,7 @@ final class SplitModel: ObservableObject {
     // e.g. [2, 2, 1, 3] means 4 files with 2, 2, 1, and 3 pages respectively.
     // This makes split point manipulation natural: adding a split just partitions
     // an existing entry, removing one merges two adjacent entries.
-    @Published var fileSizes: [Int] = []
+    @Published private(set) var fileSizes: [Int] = []
     /// Pages per file for Apply and Re-stride (1–20).
     @Published var stride: Int = 2
     @Published var currentPage: Int = 0
@@ -52,21 +64,21 @@ final class SplitModel: ObservableObject {
     /// File index → the part of its name after the base (Step 2's fields).
     @Published var customFileNames: [Int: String] = [:]
     /// Pages to omit from output. A file whose every page is in this set is treated as "fully skipped".
-    @Published var skippedPages: Set<Int> = []
+    @Published private(set) var skippedPages: Set<Int> = []
     /// File indices currently highlighted in the output-files list (for multi-select + Delete).
-    @Published var selectedFileIndices: Set<Int> = []
+    @Published private(set) var selectedFileIndices: Set<Int> = []
     /// Whether Delete / the Skip button targets the current page or the whole file.
     /// Defaults to `.file`; `.page` after a double-page split.
     @Published var skipMode: SkipMode = .file
     /// The loaded document's bookmarks as the files they'd split into; empty when it has none.
     /// Kept so Actions ▸ Use Bookmarks… can re-open the prompt after "Ignore".
-    @Published var documentBookmarks: [BookmarkSection] = []
+    @Published private(set) var documentBookmarks: [BookmarkSection] = []
     /// The most recently applied booklet order, stored so the user can repeat it.
-    @Published var lastBookletOrder: SplitBookletOrder? = nil
+    @Published private(set) var lastBookletOrder: SplitBookletOrder? = nil
     /// True once ScoreSort has rebuilt this document's pages — Split Double Pages, Swap with
     /// Next, Fix Booklet Order. Saving it then makes a new PDF even as a single file (an A3
     /// part split to A4, say), so one output file is allowed through to naming.
-    @Published var documentRebuilt = false
+    @Published private(set) var documentRebuilt = false
 
     /// Undo/redo stacks for Step-1 split edits (markers, skips, stride), capped at 50.
     private var undoStack: [SplitSnapshot] = []
@@ -86,6 +98,198 @@ final class SplitModel: ObservableObject {
     var document: PDFDocument? { pdfManager.pdfDocument }
 
     var totalPages: Int { document?.pageCount ?? 0 }
+
+    /// The loaded file's name without `.pdf` — the default base name.
+    var sourceFileName: String? { pdfManager.currentFileName }
+
+    /// The file the user loaded; it survives the in-place rebuilds, which drop
+    /// `PDFDocument.documentURL`.
+    var sourceURL: URL? { pdfManager.sourceURL }
+
+    // MARK: - Replacing the document
+    //
+    // Every change of document is one of these calls, so none has to guess afterwards what
+    // kind of change it was (the view used to, with flags set just before the assignment).
+    // Only `load(from:)` looks for double pages, so nothing ScoreSort builds itself is
+    // offered Split Double Pages, and no rebuild can stop the next PDF being offered it (#29).
+
+    /// Opens a PDF and starts its split afresh: one file named after the PDF, nothing
+    /// skipped, page 1, no undo history. Answers what the view should offer for it, or nil
+    /// when the file couldn't be opened (nothing changes then).
+    @discardableResult
+    func load(from url: URL) -> SplitLoadSuggestion? {
+        let previous = pdfManager.pdfDocument
+        pdfManager.loadPDF(from: url)
+        guard let doc = pdfManager.pdfDocument, doc !== previous else { return nil }
+        startAfresh()
+        // A scan of double pages (A3 sheets, or a book scanner's spreads): offer to split them.
+        if isA3Landscape(doc) || looksLikeDoublePageScan(doc) { return .splitDoublePages }
+        // The proportions look A3-like but the checks above didn't fire (an unusual
+        // scanner DPI, say): only a hint.
+        if looksLikeA3Landscape(doc) { return .doublePageHint }
+        return .ordinaryPages
+    }
+
+    /// Closes the document and forgets everything about it, the last booklet order included.
+    func clear() {
+        pdfManager.clearPDF()
+        fileSizes = []
+        currentPage = 0
+        customFileNames = [:]
+        baseFileName = ""
+        skippedPages = []
+        selectedFileIndices = []
+        skipMode = .file
+        documentRebuilt = false
+        documentBookmarks = []
+        lastBookletOrder = nil
+        clearUndoHistory()
+    }
+
+    /// Split Double Pages: replaces the document with its cut pages and starts the split
+    /// afresh (every page index changes), then skips the pieces the sheet marked and makes
+    /// Delete act on single pages, because blanks come one page at a time. The source file
+    /// and its name are kept. Answers the new document, or nil when nothing was cut and
+    /// nothing skipped (the document and any split points are left alone).
+    @discardableResult
+    func applyScanSplit(_ choice: ScanSplitChoice, to source: PDFDocument) -> PDFDocument? {
+        let split = splitScans(source, layouts: choice.layouts, leftFirst: choice.leftFirst)
+        guard split.pageCount > 0 else { return nil }
+        if split.pageCount == source.pageCount && choice.skippedPages.isEmpty { return nil }
+        pdfManager.pdfDocument = split
+        startAfresh()
+        skippedPages = choice.skippedPages.filter { $0 < totalPages }
+        skipMode = .page
+        documentRebuilt = true
+        return split
+    }
+
+    /// Swaps the current page with the next one, keeping split points, names and skips.
+    /// The current page stays put, so the preview shows what just moved up a slot.
+    func swapCurrentPageWithNext() {
+        guard let doc = document, currentPage < doc.pageCount - 1 else { return }
+        let newDoc = PDFDocument()
+        for i in 0..<doc.pageCount {
+            let srcIdx: Int
+            if i == currentPage            { srcIdx = currentPage + 1 }
+            else if i == currentPage + 1   { srcIdx = currentPage }
+            else                           { srcIdx = i }
+            if let page = doc.page(at: srcIdx) {
+                newDoc.insert(page, at: newDoc.pageCount)
+            }
+        }
+        replaceInPlace(with: newDoc)
+    }
+
+    /// Reorders the pages of one file (Fix Booklet Order), keeping split points and names;
+    /// the file's skipped pages move with their pages. Remembered as `lastBookletOrder`.
+    ///
+    /// - Parameters:
+    ///   - pages: Absolute page indices (in the full document) for the segment.
+    ///   - order: Permutation where `order[readingPos]` is the *local* index within
+    ///            `pages` that should appear at that reading position.
+    func applyBookletOrder(pages: [Int], order: [Int]) {
+        guard let doc = document else { return }
+        let newDoc = PDFDocument()
+
+        // Build the new absolute-page sequence, swapping only the segment's positions.
+        for absIdx in 0..<doc.pageCount {
+            let srcAbsIdx: Int
+            if let localIdx = pages.firstIndex(of: absIdx) {
+                // This slot belongs to the segment — use the permuted source.
+                srcAbsIdx = pages[order[localIdx]]
+            } else {
+                srcAbsIdx = absIdx
+            }
+            if let page = doc.page(at: srcAbsIdx) {
+                newDoc.insert(page, at: newDoc.pageCount)
+            }
+        }
+
+        // Re-map skipped pages within the segment to their new positions.
+        var newSkipped = skippedPages
+        for absIdx in pages { newSkipped.remove(absIdx) }
+        for (newLocal, oldLocal) in order.enumerated() {
+            if skippedPages.contains(pages[oldLocal]) {
+                newSkipped.insert(pages[newLocal])
+            }
+        }
+        skippedPages = newSkipped
+        lastBookletOrder = SplitBookletOrder(n: pages.count, order: order)
+        replaceInPlace(with: newDoc)
+    }
+
+    /// Applies a booklet order to **every** file of `n` pages in one rebuild (Apply to All).
+    func applyBookletOrderToAllMatchingFiles(order: [Int], n: Int) {
+        guard let doc = document else { return }
+        let mapping = pageToFileMapping
+        let newDoc = PDFDocument()
+        var newSkipped = skippedPages
+        var processedFiles = Set<Int>()
+
+        for absIdx in 0..<doc.pageCount {
+            guard let fi = mapping[absIdx] else {
+                // Shouldn't normally happen, but copy the page as-is.
+                if let page = doc.page(at: absIdx) { newDoc.insert(page, at: newDoc.pageCount) }
+                continue
+            }
+
+            let filePages = pagesForFile(fi)
+
+            if filePages.count == n && !processedFiles.contains(fi) {
+                // First encounter of a matching file — insert all pages in reading order.
+                processedFiles.insert(fi)
+                for oldLocal in order {
+                    if let page = doc.page(at: filePages[oldLocal]) {
+                        newDoc.insert(page, at: newDoc.pageCount)
+                    }
+                }
+                // Remap skipped pages within this file.
+                for absPage in filePages { newSkipped.remove(absPage) }
+                for (newLocal, oldLocal) in order.enumerated() {
+                    if skippedPages.contains(filePages[oldLocal]) {
+                        newSkipped.insert(filePages[newLocal])
+                    }
+                }
+            } else if filePages.count == n {
+                // Already inserted by the block above — skip.
+                continue
+            } else {
+                // Non-matching file — copy page as-is.
+                if let page = doc.page(at: absIdx) { newDoc.insert(page, at: newDoc.pageCount) }
+            }
+        }
+
+        skippedPages = newSkipped
+        lastBookletOrder = SplitBookletOrder(n: n, order: order)
+        replaceInPlace(with: newDoc)
+    }
+
+    /// A rebuilt document with the same pages in a new order: the split, names and skips
+    /// stay (the caller has already moved any skips), and the undo history goes, because a
+    /// reorder makes earlier snapshots' skips point at the wrong pages. Rebuilds are
+    /// deliberately not undoable.
+    private func replaceInPlace(with newDoc: PDFDocument) {
+        documentRebuilt = true
+        clearUndoHistory()
+        pdfManager.pdfDocument = newDoc
+    }
+
+    /// The reset for a document whose pages are all new: one file named after the PDF,
+    /// nothing skipped or selected, page 1, file skip mode, no undo history. The stride and
+    /// the last booklet order carry over.
+    private func startAfresh() {
+        currentPage = 0
+        fileSizes = totalPages > 0 ? [totalPages] : []
+        customFileNames = [:]
+        baseFileName = pdfManager.currentFileName ?? ""
+        skippedPages = []
+        selectedFileIndices = []
+        skipMode = .file
+        documentRebuilt = false
+        documentBookmarks = document.flatMap { bookmarkSections(in: $0) } ?? []
+        clearUndoHistory()
+    }
 
     // MARK: - Derived from fileSizes
 
@@ -210,7 +414,7 @@ final class SplitModel: ObservableObject {
 
     /// Forgets the undo history — a new document, or one whose pages moved (a reorder makes
     /// earlier snapshots' page-based skips point at the wrong pages).
-    func clearUndoHistory() {
+    private func clearUndoHistory() {
         undoStack = []
         redoStack = []
     }

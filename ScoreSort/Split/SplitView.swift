@@ -52,13 +52,6 @@ struct SplitView: View {
     /// a scan of double pages (A3 sheets, or an overhead scanner's mix of spreads and
     /// single pages), or chosen from the menu.
     @State private var scanSplitRequest: ScanSplitRequest? = nil
-    /// The pages to skip in a just-split document, applied once `onChange` has reset the
-    /// split state for it (the reset would otherwise clear them).
-    @State private var pendingScanSplitSkips: Set<Int>? = nil
-    /// Set before programmatically loading an A3-split document so onChange skips re-detection.
-    @State private var suppressNextA3Detection = false
-    /// Set before swapping pages so onChange skips the full state-reset (preserving split markers).
-    @State private var suppressDocumentReset = false
     /// Shows a gentle hint banner when a PDF looks like an A3 scan but didn't trigger auto-detection.
     @State private var a3HintVisible = false
     /// Shows a brief tip banner after a scan's double pages are split.
@@ -89,11 +82,10 @@ struct SplitView: View {
     @State private var sourceWasTrashed = false
 
     var body: some View {
-        // The onChange lives at the Group level — outside all stage views — so it
-        // fires regardless of which stage (split / naming / prefix / summary) is
-        // currently active.  Previously it was buried inside splitStageBody and
-        // therefore silent when a new PDF arrived during naming or later stages,
-        // causing stale customFileNames from an earlier file to bleed through.
+        // Every way a PDF arrives — whichever stage is on screen — goes through `openFile`,
+        // which has the model start afresh and brings the flow back to Step 1, so no names
+        // from an earlier file can bleed into naming or later. (The reset used to be an
+        // `onChange` of the document here, told apart from in-place rebuilds by flags.)
         Group {
             switch splitStage {
             case .summary:
@@ -102,11 +94,11 @@ struct SplitView: View {
                     outputFolderURL: pendingFolderURL,
                     sourceTrashedNote: sourceWasTrashed ? "Original moved to the Trash." : nil,
                     onStartOver: {
-                        model.pdfManager.clearPDF() // onChange handles full state reset
+                        clearFile()
                     }
                 )
-                // Drop a new PDF here to restart without clicking Start Over — loading a
-                // document fires the Group-level onChange, which resets the whole flow.
+                // Drop a new PDF here to restart without clicking Start Over — opening a
+                // document resets the whole flow.
                 .onDrop(of: [.fileURL], isTargeted: nil) { providers in handleSummaryPDFDrop(providers) }
             case .prefix:
                 PrefixOrderStepView(
@@ -124,7 +116,7 @@ struct SplitView: View {
                 )
                 .id(prefixRoundID)
             case .naming:
-                if let document = model.pdfManager.pdfDocument {
+                if let document = model.document {
                     SplitNamingStageView(
                         pdfDocument: document,
                         fileSizes: model.fileSizes,
@@ -138,93 +130,13 @@ struct SplitView: View {
                         onBack: { splitStage = .split },
                         onClear: {
                             splitStage = .split
-                            model.pdfManager.clearPDF()
+                            clearFile()
                         },
                         onSave: { saveSplitPDF() }
                     )
                 }
             case .split:
                 splitStageBody
-            }
-        }
-        .onChange(of: model.pdfManager.pdfDocument) { _, newValue in
-            if let doc = newValue {
-                // Page-swap replaces the document in-place: preserve all split state.
-                // But drop the undo history — a reorder (swap/booklet/A3) can make prior
-                // snapshots' page-based skip indices map onto the wrong pages.
-                if suppressDocumentReset {
-                    suppressDocumentReset = false
-                    // In-place rebuilds never reach the double-page check, so this
-                    // single-use flag must not linger into the next real load.
-                    suppressNextA3Detection = false
-                    model.clearUndoHistory()
-                    return
-                }
-
-                // New PDF loaded — reset the entire split flow so no state from
-                // a previous file can survive into the naming or prefix stages.
-                isViewFocused = true
-                // Reset navigation: dropping a new file straight onto the done screen
-                // skips the clear step, so a stale currentPage could point past the new
-                // (shorter) document and blank the Step 1 preview.
-                model.currentPage = 0
-                model.customFileNames.removeAll()
-                previewOffset = .zero
-                model.skippedPages = []
-                model.selectedFileIndices = []
-                model.skipMode = .file
-                model.documentRebuilt = false
-                model.clearUndoHistory()
-
-                // A scan of double pages (A3 sheets, or a book scanner's spreads) — offer to
-                // split them, unless this load is the result of doing exactly that. The
-                // split state is set up first so Step 1 is consistent behind the sheet;
-                // the bookmark offer waits until the sheet is answered.
-                if !suppressNextA3Detection && (isA3Landscape(doc) || looksLikeDoublePageScan(doc)) {
-                    setupSplitState(offerBookmarks: false)
-                    scanSplitRequest = ScanSplitRequest(document: doc, fromLoad: true)
-                    return
-                }
-                // If the page proportions look A3-like but the checks above didn't fire
-                // (e.g. unusual scanner DPI), show a gentle hint banner instead.
-                if !suppressNextA3Detection && looksLikeA3Landscape(doc) {
-                    withAnimation { a3HintVisible = true }
-                }
-                suppressNextA3Detection = false
-                setupSplitState()
-                // A just-split scan: skip the pieces the sheet marked (after the reset
-                // above, which clears skips), and make Delete act on single pages.
-                if let skips = pendingScanSplitSkips {
-                    pendingScanSplitSkips = nil
-                    model.skippedPages = skips.filter { $0 < model.totalPages }
-                    model.skipMode = .page
-                    model.documentRebuilt = true
-                }
-            } else {
-                // PDF cleared — reset all split flow state so nothing bleeds
-                // into the next session regardless of which stage we were on.
-                suppressNextA3Detection = false
-                pendingScanSplitSkips = nil
-                model.fileSizes = []
-                model.currentPage = 0
-                model.customFileNames.removeAll()
-                previewOffset = .zero
-                splitStage = .split
-                model.baseFileName = ""
-                prefixItems = []
-                summaryNames = []
-                pendingFolderURL = nil
-                model.skippedPages = []
-                model.selectedFileIndices = []
-                model.skipMode = .file
-                model.documentRebuilt = false
-                model.clearUndoHistory()
-                sourceWasTrashed = false
-                model.lastBookletOrder = nil
-                bookletRedoNoticeVisible = false
-                a3HintVisible = false
-                model.documentBookmarks = []
-                bookmarkOffer = nil
             }
         }
         // Files opened from Finder or the Dock (#21), handed over by AppState.
@@ -235,7 +147,7 @@ struct SplitView: View {
         .onChange(of: splitStage)               { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: model.fileSizes)                { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: model.skippedPages)             { DispatchQueue.main.async { syncTabCommands() } }
-        .onChange(of: model.pdfManager.pdfDocument)   { DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: model.document)   { DispatchQueue.main.async { syncTabCommands() } }
         .sheet(item: $saveProgress) { progress in
             SplitSaveProgressView(progress: progress)
         }
@@ -282,7 +194,7 @@ struct SplitView: View {
                 },
                 onApplyToAll: matchCount > 1 ? { order in
                     bookletFixRequest = nil
-                    applyBookletOrderToAllMatchingFiles(order: order, n: n)
+                    model.applyBookletOrderToAllMatchingFiles(order: order, n: n)
                 } : nil,
                 onCancel: { bookletFixRequest = nil }
             )
@@ -300,7 +212,7 @@ struct SplitView: View {
                     Text("Split PDF")
                         .font(.title2)
                         .fontWeight(.semibold)
-                    if model.pdfManager.pdfDocument != nil {
+                    if model.document != nil {
                         Text("Step 1 — set split points")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -310,7 +222,7 @@ struct SplitView: View {
 
                 Spacer()
 
-                if model.pdfManager.pdfDocument != nil {
+                if model.document != nil {
                     StampMenuButton(isEnabled: $stampEnabled, scope: $stampScope)
 
                     // Both of these correct how a scan came in, and both are occasional, so
@@ -325,7 +237,7 @@ struct SplitView: View {
                     .fixedSize()
                     .help("Cut two-page scans into single pages, or correct booklet scanning order")
 
-                    Button(action: { model.pdfManager.clearPDF() }) {
+                    Button(action: { clearFile() }) {
                         Label("Clear File", systemImage: "xmark.circle.fill")
                     }
                     .help("Remove the current file and start over")
@@ -396,7 +308,7 @@ struct SplitView: View {
             }
 
             // Main content area
-            if let document = model.pdfManager.pdfDocument {
+            if let document = model.document {
                 GeometryReader { geometry in
                     HStack(spacing: 0) {
                         // Left: Page preview and controls
@@ -416,7 +328,7 @@ struct SplitView: View {
                                     }
                                 },
                                 onSkipCurrentPage: { model.toggleSkipPage(model.currentPage) },
-                                onSwapWithNext: swapCurrentPageWithNext,
+                                onSwapWithNext: model.swapCurrentPageWithNext,
                                 onRestride: model.restrideFromCurrentPage
                             )
 
@@ -515,7 +427,7 @@ struct SplitView: View {
                                         let canRedo = model.lastBookletOrder?.n == filePageCount && canFix
                                         let bookletFixAction: (() -> Void)? = canFix ? {
                                             let pages = model.pagesForFile(fileIndex)
-                                            guard let doc = model.pdfManager.pdfDocument else { return }
+                                            guard let doc = model.document else { return }
                                             bookletFixRequest = BookletFixRequest(
                                                 fileIndex: fileIndex,
                                                 pages: pages,
@@ -603,7 +515,7 @@ struct SplitView: View {
                         default:
                             // S — swap current page with the next one
                             if press.characters == "s" || press.characters == "S" {
-                                swapCurrentPageWithNext()
+                                model.swapCurrentPageWithNext()
                                 return .handled
                             }
                             // R — re-apply stride from the current page to the end
@@ -618,7 +530,8 @@ struct SplitView: View {
             } else {
                 // No PDF loaded - show drop zone
                 DropZoneView(pdfManager: model.pdfManager,
-                             subtitle: "Divide a large PDF — e.g. a complete bound scan of all parts — into separate instrument files")
+                             subtitle: "Divide a large PDF — e.g. a complete bound scan of all parts — into separate instrument files",
+                             onOpen: { openFile($0) })
             }
         }
         .focused($isViewFocused)
@@ -663,7 +576,7 @@ struct SplitView: View {
         panel.allowsMultipleSelection = false
         panel.title = "Select PDF"
         beginPanelSheet(panel) { response in
-            if response == .OK, let url = panel.url { model.pdfManager.loadPDF(from: url) }
+            if response == .OK, let url = panel.url { openFile(url) }
         }
     }
 
@@ -672,17 +585,17 @@ struct SplitView: View {
     /// Loads files opened from Finder or the Dock when they're meant for this tab (#21).
     private func takePendingOpen() {
         guard let urls = appState.takePendingOpen(for: .split) else { return }
-        if let url = urls.first { model.pdfManager.loadPDF(from: url) }
+        if let url = urls.first { openFile(url) }
     }
 
     private func syncTabCommands() {
         guard appState.selectedTab == 2 else { return }
-        let loaded = model.pdfManager.pdfDocument != nil
+        let loaded = model.document != nil
         var slice = TabSlice()
         slice.openTitle  = "Choose PDF\u{2026}"
         slice.open       = { openPDF() }
         slice.clearTitle = "Clear File"
-        slice.clear      = loaded ? { model.pdfManager.clearPDF() } : nil
+        slice.clear      = loaded ? { clearFile() } : nil
 
         switch splitStage {
         case .split:
@@ -706,11 +619,11 @@ struct SplitView: View {
         case .summary:
             // Start Over is the "clear" action here — reuse ⌘⌫ (File ▸ Start Over).
             slice.clearTitle = "Start Over"
-            slice.clear = { model.pdfManager.clearPDF() }
+            slice.clear = { clearFile() }
         }
 
         // Show in Finder — reveal the output folder on the summary, else the source file.
-        let revealTarget = (splitStage == .summary ? pendingFolderURL : nil) ?? model.pdfManager.sourceURL
+        let revealTarget = (splitStage == .summary ? pendingFolderURL : nil) ?? model.sourceURL
         slice.tabActions.append(MenuAction(title: "Show in Finder", key: KeyEquivalent("f"), modifiers: [.command, .shift],
                                            isEnabled: revealTarget != nil, perform: { revealInFinder(revealTarget) }))
         appState.tabCommands.slice = slice
@@ -721,7 +634,7 @@ struct SplitView: View {
     /// after the split files have been written successfully, so the original is never
     /// removed before its replacements exist. Failures are surfaced but non-fatal.
     private func trashSourceFileIfRequested() -> Bool {
-        guard deleteSourceAfterSplit, let url = model.pdfManager.sourceURL else { return false }
+        guard deleteSourceAfterSplit, let url = model.sourceURL else { return false }
         do {
             try FileManager.default.trashItem(at: url, resultingItemURL: nil)
             return true
@@ -734,15 +647,15 @@ struct SplitView: View {
     }
 
     /// Loads a PDF dropped on the "done" summary screen, restarting the split flow.
-    /// The Group-level `onChange(of: pdfManager.pdfDocument)` resets all split state
-    /// (and re-runs A3 detection), so no extra cleanup is needed here.
+    /// `openFile` resets all split state (and re-runs the double-page check), so no extra
+    /// cleanup is needed here.
     private func handleSummaryPDFDrop(_ providers: [NSItemProvider]) -> Bool {
         guard let provider = providers.first else { return false }
         _ = provider.loadObject(ofClass: URL.self) { url, _ in
             guard let url = url else { return }
             DispatchQueue.main.async {
                 if url.pathExtension.lowercased() == "pdf" {
-                    model.pdfManager.loadPDF(from: url)
+                    openFile(url)
                 } else {
                     showNSAlert(title: "Unsupported File Type",
                                 message: "This tab only accepts PDF files.",
@@ -775,7 +688,7 @@ struct SplitView: View {
     }
 
     func saveSplitPDF() {
-        guard let document = model.pdfManager.pdfDocument,
+        guard let document = model.document,
               model.canContinueToNaming, saveProgress == nil else { return }
 
         if prefixEnabled {
@@ -807,7 +720,7 @@ struct SplitView: View {
             panel.canCreateDirectories = true
             panel.title = "Select Output Folder"
             panel.message = "Choose where to save the split PDF files"
-            panel.directoryURL = outputDirectory(forSourceFile: model.pdfManager.sourceURL)
+            panel.directoryURL = outputDirectory(forSourceFile: model.sourceURL)
 
             beginPanelSheet(panel) { response in
                 guard response == .OK, let folderURL = panel.url else { return }
@@ -847,7 +760,7 @@ struct SplitView: View {
         panel.canCreateDirectories = true
         panel.title = "Select Output Folder"
         panel.message = "Choose where to save the split PDF files"
-        panel.directoryURL = outputDirectory(forSourceFile: model.pdfManager.sourceURL)
+        panel.directoryURL = outputDirectory(forSourceFile: model.sourceURL)
 
         beginPanelSheet(panel) { response in
             guard response == .OK, let folderURL = panel.url else { return }
@@ -855,35 +768,59 @@ struct SplitView: View {
         }
     }
 
-    /// Initialises the split state for a newly loaded (non-A3) document: one file, named
-    /// after the PDF. If the document has bookmarks, asks what to do with them rather
-    /// than applying them unannounced.
-    private func setupSplitState(offerBookmarks: Bool = true) {
-        model.fileSizes = model.totalPages > 0 ? [model.totalPages] : []
-        model.baseFileName = model.pdfManager.currentFileName ?? ""
-        model.documentBookmarks = model.pdfManager.pdfDocument.flatMap { bookmarkSections(in: $0) } ?? []
+    /// Opens a PDF (the drop zone, Choose PDF…, Finder or the Dock, a drop on the summary).
+    /// The model starts the split afresh; this sets the screen back to Step 1 and offers what
+    /// the model suggests: Split Double Pages (bookmarks wait until it's answered), or the
+    /// double-page hint and then any bookmarks.
+    private func openFile(_ url: URL) {
+        guard let suggestion = model.load(from: url), let doc = model.document else { return }
+        showNewDocument()
+        switch suggestion {
+        case .splitDoublePages:
+            scanSplitRequest = ScanSplitRequest(document: doc, fromLoad: true)
+        case .doublePageHint:
+            withAnimation { a3HintVisible = true }
+            offerBookmarksIfAny()
+        case .ordinaryPages:
+            offerBookmarksIfAny()
+        }
+    }
+
+    /// Clear File, Start Over: closes the document and resets the whole flow, whichever
+    /// stage it was on.
+    private func clearFile() {
+        model.clear()
+        previewOffset = .zero
+        splitStage = .split
+        prefixItems = []
+        summaryNames = []
+        pendingFolderURL = nil
+        sourceWasTrashed = false
+        bookletRedoNoticeVisible = false
+        a3HintVisible = false
+        bookmarkOffer = nil
+    }
+
+    /// Back to Step 1 for a document whose pages are all new — opened, or just cut by Split
+    /// Double Pages — so nothing from an earlier file shows in naming or later.
+    private func showNewDocument() {
+        isViewFocused = true
+        previewOffset = .zero
         if splitStage != .split { splitStage = .split }
-        if offerBookmarks { offerBookmarksIfAny() }
     }
 
     /// Opens "Split Double Pages" for the current document.
     private func requestScanSplit() {
-        guard let doc = model.pdfManager.pdfDocument else { return }
+        guard let doc = model.document else { return }
         scanSplitRequest = ScanSplitRequest(document: doc, fromLoad: false)
     }
 
-    /// Replaces the document with its split pages. The new document goes through the
-    /// normal new-PDF reset in `onChange` (page count and every index change), which then
-    /// applies `pendingScanSplitSkips`.
+    /// Replaces the document with its split pages (`SplitModel.applyScanSplit`), then says
+    /// how many pages were skipped and points at Delete and Swap with Next.
     private func applyScanSplit(_ choice: ScanSplitChoice, to source: PDFDocument) {
-        let split = splitScans(source, layouts: choice.layouts, leftFirst: choice.leftFirst)
-        guard split.pageCount > 0 else { return }
-        // Nothing was cut and nothing skipped: leave the document (and any split points) alone.
-        if split.pageCount == source.pageCount && choice.skippedPages.isEmpty { return }
-
-        pendingScanSplitSkips = choice.skippedPages
-        suppressNextA3Detection = true
-        model.pdfManager.pdfDocument = split
+        guard let split = model.applyScanSplit(choice, to: source) else { return }
+        showNewDocument()
+        offerBookmarksIfAny()
 
         let skipped = choice.skippedPages.count
         var notice = try! AttributedString(markdown: "Split into \(split.pageCount) pages")
@@ -900,143 +837,30 @@ struct SplitView: View {
 
     /// Presents the bookmark sheet when the loaded document has usable bookmarks.
     private func offerBookmarksIfAny() {
-        guard model.pdfManager.pdfDocument != nil, !model.documentBookmarks.isEmpty else { return }
+        guard model.document != nil, !model.documentBookmarks.isEmpty else { return }
         bookmarkOffer = BookmarkOffer(sections: model.documentBookmarks,
-                                      sourceName: model.pdfManager.currentFileName ?? "")
+                                      sourceName: model.sourceFileName ?? "")
     }
 
     /// Builds a `BookletFixRequest` for the current file segment and presents the sheet.
     private func requestBookletFix() {
-        guard let doc = model.pdfManager.pdfDocument,
+        guard let doc = model.document,
               let fi = model.pageToFileMapping[model.currentPage] else { return }
         let pages = model.pagesForFile(fi)
         bookletFixRequest = BookletFixRequest(fileIndex: fi, pages: pages, document: doc)
     }
 
-    /// Reorders the pages of a file segment in the loaded document without resetting
-    /// split markers or skipped-page state.
-    ///
-    /// - Parameters:
-    ///   - pages: Absolute page indices (in the full document) for the segment.
-    ///   - order: Permutation where `order[readingPos]` is the *local* index within
-    ///            `pages` that should appear at that reading position.
+    /// Fix Booklet Order on one file (`SplitModel.applyBookletOrder`). The first time, a
+    /// banner points at the per-card icon that repeats the order.
     private func applyBookletOrder(pages: [Int], order: [Int]) {
-        guard let doc = model.pdfManager.pdfDocument else { return }
-        let newDoc = PDFDocument()
-
-        // Build the new absolute-page sequence, swapping only the segment's positions.
-        for absIdx in 0..<doc.pageCount {
-            let srcAbsIdx: Int
-            if let localIdx = pages.firstIndex(of: absIdx) {
-                // This slot belongs to the segment — use the permuted source.
-                srcAbsIdx = pages[order[localIdx]]
-            } else {
-                srcAbsIdx = absIdx
-            }
-            if let page = doc.page(at: srcAbsIdx) {
-                newDoc.insert(page, at: newDoc.pageCount)
-            }
-        }
-
-        // Update skippedPages: re-map skipped pages within the segment to their new positions.
-        var newSkipped = model.skippedPages
-        for absIdx in pages { newSkipped.remove(absIdx) }
-        for (newLocal, oldLocal) in order.enumerated() {
-            if model.skippedPages.contains(pages[oldLocal]) {
-                newSkipped.insert(pages[newLocal])
-            }
-        }
-        model.skippedPages = newSkipped
-
-        // On the very first fix, show a brief tip pointing to the per-card redo icon.
+        guard model.document != nil else { return }
         if model.lastBookletOrder == nil {
             withAnimation(.easeInOut(duration: 0.2)) { bookletRedoNoticeVisible = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 7) {
                 withAnimation(.easeInOut(duration: 0.2)) { bookletRedoNoticeVisible = false }
             }
         }
-
-        // Save the order so the user can repeat it with Redo.
-        model.lastBookletOrder = SplitBookletOrder(n: pages.count, order: order)
-
-        // Replace the document while preserving all other split state.
-        model.documentRebuilt         = true
-        suppressDocumentReset   = true
-        model.pdfManager.pdfDocument  = newDoc
-    }
-
-    /// Applies a booklet order to **every** file segment in the document whose page
-    /// count equals `n`, in a single document rebuild pass.  This avoids the
-    /// multiple-replacement problem (each `onChange` would clear `suppressDocumentReset`
-    /// before the next call could use it).
-    private func applyBookletOrderToAllMatchingFiles(order: [Int], n: Int) {
-        guard let doc = model.pdfManager.pdfDocument else { return }
-        let newDoc = PDFDocument()
-        var newSkipped = model.skippedPages
-        var processedFiles = Set<Int>()
-
-        for absIdx in 0..<doc.pageCount {
-            guard let fi = model.pageToFileMapping[absIdx] else {
-                // Shouldn't normally happen, but copy the page as-is.
-                if let page = doc.page(at: absIdx) { newDoc.insert(page, at: newDoc.pageCount) }
-                continue
-            }
-
-            let filePages = model.pagesForFile(fi)
-
-            if filePages.count == n && !processedFiles.contains(fi) {
-                // First encounter of a matching file — insert all pages in reading order.
-                processedFiles.insert(fi)
-                for oldLocal in order {
-                    if let page = doc.page(at: filePages[oldLocal]) {
-                        newDoc.insert(page, at: newDoc.pageCount)
-                    }
-                }
-                // Remap skipped pages within this file.
-                for absPage in filePages { newSkipped.remove(absPage) }
-                for (newLocal, oldLocal) in order.enumerated() {
-                    if model.skippedPages.contains(filePages[oldLocal]) {
-                        newSkipped.insert(filePages[newLocal])
-                    }
-                }
-            } else if filePages.count == n {
-                // Already inserted by the block above — skip.
-                continue
-            } else {
-                // Non-matching file — copy page as-is.
-                if let page = doc.page(at: absIdx) { newDoc.insert(page, at: newDoc.pageCount) }
-            }
-        }
-
-        model.skippedPages = newSkipped
-        model.lastBookletOrder = SplitBookletOrder(n: n, order: order)
-        model.documentRebuilt         = true
-        suppressDocumentReset   = true
-        model.pdfManager.pdfDocument  = newDoc
-    }
-
-    /// Swaps the current page with the next one in the loaded document, preserving
-    /// all split markers, skipped pages, and custom file names.
-    /// Uses `suppressDocumentReset` so `onChange` skips the normal full-reset path.
-    private func swapCurrentPageWithNext() {
-        guard let document = model.pdfManager.pdfDocument,
-              model.currentPage < document.pageCount - 1 else { return }
-
-        let newDoc = PDFDocument()
-        for i in 0..<document.pageCount {
-            let srcIdx: Int
-            if i == model.currentPage         { srcIdx = model.currentPage + 1 }
-            else if i == model.currentPage + 1 { srcIdx = model.currentPage }
-            else                          { srcIdx = i }
-            if let page = document.page(at: srcIdx) {
-                newDoc.insert(page, at: newDoc.pageCount)
-            }
-        }
-        model.documentRebuilt         = true
-        suppressDocumentReset   = true
-        model.pdfManager.pdfDocument  = newDoc
-        // currentPage stays the same so the preview immediately shows
-        // what was just moved down one slot.
+        model.applyBookletOrder(pages: pages, order: order)
     }
 
     /// The folder "Sort into folders" puts file `i` in (none when it's off), from its Step 2
@@ -1109,7 +933,7 @@ struct SplitView: View {
     private func saveSplitFiles(names: [String], plans: [SplitFilePlan], into folder: URL,
                                 finish: @escaping (Bool) -> Void) {
         guard saveProgress == nil else { return }
-        guard let source = model.pdfManager.sourceURL,
+        guard let source = model.sourceURL,
               splitOutputReplacesSource(names: names, folder: folder, source: source) else {
             Task {
                 guard let report = await writeInBackground(plans, to: folder) else { return }
@@ -1187,13 +1011,13 @@ struct SplitView: View {
     /// copy of the document (`SplitSaveSource`). Nil if the save couldn't start (the user has
     /// been told why).
     private func writeInBackground(_ plans: [SplitFilePlan], to folder: URL) async -> SplitWriteReport? {
-        guard let document = model.pdfManager.pdfDocument else { return nil }
+        guard let document = model.document else { return nil }
         let progress = SplitSaveProgress(total: plans.count)
         saveProgress = progress
         // Let the sheet appear before the one step that has to run here: a snapshot of a
         // document rebuilt in memory (an untouched one is reopened from its file instead).
         try? await Task.sleep(for: .milliseconds(80))
-        guard let source = SplitSaveSource.of(document, loadedFrom: model.pdfManager.sourceURL) else {
+        guard let source = SplitSaveSource.of(document, loadedFrom: model.sourceURL) else {
             saveProgress = nil
             showNSAlert(title: "Couldn't Save",
                         message: "ScoreSort couldn't put the pages together to save them. Try opening the PDF again.",
