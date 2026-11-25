@@ -81,6 +81,19 @@ struct ViewSmokeTests {
                                    ensembleType: .constant(.band), onBack: {}, onApply: { _ in }))
     }
 
+    @Test("Suggest Splits renders reading, with parts found, and with nothing to suggest")
+    func suggestSplitsSheet() {
+        let doc = PDFDocument()
+        for i in 0..<3 { doc.insert(PDFPage(), at: i) }
+        render(SuggestSplitsSheet(suggestion: SplitSuggestion(document: doc, ensemble: .band), onApply: { _ in }, onClose: {}))
+        let found = PartReading(pageNames: ["Horn", nil, "Trumpet 1"], pagesRead: 3,
+                                parts: [SuggestedPart(startPage: 0, name: "Horn"), SuggestedPart(startPage: 2, name: "")],
+                                problem: nil, method: "titles")
+        render(SuggestSplitsSheet(suggestion: SplitSuggestion(total: 3, reading: found), onApply: { _ in }, onClose: {}))
+        let none = PartReading(pageNames: [nil, nil], pagesRead: 0, parts: [], problem: "ScoreSort couldn't read the pages on this Mac.", method: nil)
+        render(SuggestSplitsSheet(suggestion: SplitSuggestion(total: 2, reading: none), onApply: { _ in }, onClose: {}))
+    }
+
     @Test("Bookmark split sheet renders")
     func bookmarkSplitSheet() {
         let offer = BookmarkOffer(sections: [BookmarkSection(startPage: 0, pageCount: 4, title: "Score"),

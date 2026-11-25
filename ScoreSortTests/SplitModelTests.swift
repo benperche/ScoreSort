@@ -6,6 +6,7 @@
 //  keeps — splits, skips, the in-place rebuilds (Swap with Next, Fix Booklet Order),
 //  Split Double Pages, undo and redo, clearing, and opening a new PDF after a rebuild (#29).
 //  Documents are real files drawn by Core Graphics (`writeDrawnPDF`, CLITests.swift).
+//  Suggest Splits (#17) is `SplitModelSuggestionTests`.
 //
 
 import Testing
@@ -514,5 +515,64 @@ struct SplitModelRebuildTests {
         #expect(model.fileSizes == [1, 1])
         #expect(!model.documentRebuilt)
         #expect(model.canUndo)
+    }
+}
+
+@MainActor
+@Suite("Split model: Suggest Splits")
+struct SplitModelSuggestionTests {
+
+    @Test("Start pages become file sizes; anything that doesn't fit the document is refused")
+    func sizesFromStarts() {
+        #expect(splitSizes(startPages: [0, 4, 9], totalPages: 12) == [4, 5, 3])
+        #expect(splitSizes(startPages: [0], totalPages: 5) == [5])
+        #expect(splitSizes(startPages: [1, 4], totalPages: 8) == nil)      // must start on page 1
+        #expect(splitSizes(startPages: [0, 4, 4], totalPages: 8) == nil)   // in order, no repeats
+        #expect(splitSizes(startPages: [0, 8], totalPages: 8) == nil)      // inside the document
+        #expect(splitSizes(startPages: [], totalPages: 8) == nil)
+    }
+
+    @Test("Applying a suggestion splits and names the files, keeps skips, and undoes in one step")
+    func apply() throws {
+        let (model, _) = try openedModel(pages: 10)
+        model.toggleSkipPage(9)
+        model.toggleSplitAt(page: 5)
+        model.customFileNames = [0: "Old"]
+        let parts = [SuggestedPart(startPage: 0, name: "Horn"), SuggestedPart(startPage: 4, name: "Trumpet 1"),
+                     SuggestedPart(startPage: 7, name: "")]
+        #expect(model.applySuggestedParts(parts))
+        #expect(model.fileSizes == [4, 3, 3])
+        #expect(model.customFileNames == [0: "Horn", 1: "Trumpet 1"])   // the unread name stays numbered
+        #expect(model.skippedPages == [9])
+        #expect(model.canContinueToNaming)
+
+        model.undo()
+        #expect(model.fileSizes == [5, 5])
+        #expect(model.customFileNames == [0: "Old"])
+        model.redo()
+        #expect(model.fileSizes == [4, 3, 3])
+    }
+
+    @Test("A suggestion that doesn't fit changes nothing; names are made file-name safe")
+    func refuseAndSanitise() throws {
+        let (model, _) = try openedModel(pages: 6)
+        #expect(!model.applySuggestedParts([SuggestedPart(startPage: 0, name: "Flute"), SuggestedPart(startPage: 9, name: "Oboe")]))
+        #expect(model.fileSizes == [6])
+        #expect(!model.canUndo)
+        #expect(model.applySuggestedParts([SuggestedPart(startPage: 0, name: "Flute 1/2"), SuggestedPart(startPage: 3, name: "Oboe")]))
+        #expect(model.customFileNames[0] == "Flute 1-2")
+    }
+
+    @Test("Reading a PDF with no text suggests nothing and says why, whether or not Vision runs here")
+    func readsNothing() async throws {
+        let url = temporaryFolder("suggest").appendingPathComponent("Blank.pdf")
+        writeDrawnPDF(pages: 3, size: a4, to: url)
+        let doc = try #require(PDFDocument(url: url))
+        let suggestion = SplitSuggestion(document: doc, ensemble: .band)
+        await suggestion.start()
+        let reading = try #require(suggestion.reading)
+        #expect(suggestion.parts == nil)
+        #expect(reading.problem != nil)
+        #expect(suggestion.read == 3)
     }
 }

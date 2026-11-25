@@ -64,6 +64,8 @@ struct SplitView: View {
     @State private var bookletFixRequest: BookletFixRequest? = nil
     /// A save in progress (the files are written in the background behind its sheet).
     @State private var saveProgress: SplitSaveProgress? = nil
+    /// Suggest Splits (#17), while its sheet is up.
+    @State private var splitSuggestion: SplitSuggestion? = nil
     @FocusState private var isViewFocused: Bool
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
@@ -152,6 +154,17 @@ struct SplitView: View {
         .sheet(item: $saveProgress) { progress in
             SplitSaveProgressView(progress: progress)
         }
+        .sheet(item: $splitSuggestion) { suggestion in
+            SuggestSplitsSheet(
+                suggestion: suggestion,
+                onApply: { parts in
+                    splitSuggestion = nil
+                    model.applySuggestedParts(parts)
+                    isViewFocused = true
+                },
+                onClose: { splitSuggestion = nil }
+            )
+        }
         .sheet(item: $scanSplitRequest) { request in
             ScanSplitSheet(
                 request: request,
@@ -224,6 +237,11 @@ struct SplitView: View {
                 Spacer()
 
                 if model.document != nil {
+                    Button(action: { requestSuggestedSplits() }) {
+                        Label("Suggest Splits", systemImage: "text.viewfinder")
+                    }
+                    .help("Read the part names at the tops of the pages and suggest where each part starts")
+
                     StampMenuButton(isEnabled: $stampEnabled, scope: $stampScope)
 
                     // Both of these correct how a scan came in, and both are occasional, so
@@ -606,6 +624,7 @@ struct SplitView: View {
             // Always list the actions (disabled until a PDF is loaded) so the menu
             // shows what's possible even in the empty state.
             slice.tabActions = [
+                MenuAction(title: "Suggest Splits\u{2026}", isEnabled: loaded, perform: { requestSuggestedSplits() }),
                 MenuAction(title: "Split Double Pages\u{2026}", isEnabled: loaded, perform: { requestScanSplit() }),
                 MenuAction(title: "Fix Booklet Order", isEnabled: loaded && model.canFixBookletOrder, perform: { requestBookletFix() }),
                 MenuAction(title: "Use Bookmarks\u{2026}", isEnabled: loaded && !model.documentBookmarks.isEmpty, perform: { offerBookmarksIfAny() }),
@@ -808,6 +827,13 @@ struct SplitView: View {
         isViewFocused = true
         previewOffset = .zero
         if splitStage != .split { splitStage = .split }
+    }
+
+    /// Suggest Splits (#17): reads the pages in a sheet with progress and Cancel, then offers
+    /// the parts it found to apply or dismiss. Part names follow Step 2's ensemble.
+    private func requestSuggestedSplits() {
+        guard let doc = model.document, splitSuggestion == nil else { return }
+        splitSuggestion = SplitSuggestion(document: doc, ensemble: prefixEnsembleType)
     }
 
     /// Opens "Split Double Pages" for the current document.

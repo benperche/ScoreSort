@@ -22,6 +22,7 @@ Gotchas that concern this tab: [gotchas.md § Split](gotchas.md#split), [§ PDFK
 | `swapCurrentPageWithNext()`, `applyBookletOrder(pages:order:)`, `applyBookletOrderToAllMatchingFiles(order:n:)` | In-place rebuilds (below), through the private `replaceInPlace`. |
 | `toggleSplitAt(page:)`, `applyStride()`, `restrideFromCurrentPage()`, `clearAllSplits()`, `toggleSkipPage(_:)`, `toggleSkipFiles(_:)`, `toggleSkipForDeleteKey()` | Undoable edits. |
 | `applyBookmarks(_:nameStyle:)` | Bookmarks (below); a new undo history. |
+| `applySuggestedParts(_:) -> Bool` | Suggest Splits (below): `fileSizes` from the parts' start pages (`splitSizes(startPages:totalPages:)`, nil → false and nothing changes), names through `fileNameSafe` (a blank one stays numbered); skips kept. **Undoable** (`pushUndo`). |
 | `undo()`, `redo()` | Step 1 undo (below). |
 | `goToPreviousPage(toFirst:)`, `goToNextPage(toLast:)`, `goToPreviousFile(extendingSelection:)`, `goToNextFile(extendingSelection:)`, `selectFile(_:command:shift:)` | Navigation and the card selection, for the keys and clicks the view handles. |
 
@@ -60,7 +61,16 @@ Pure functions (`Logic/SplitLogic.swift`):
 
 ### Layout
 
-Left half: `SplitControlsSection` over a `PDFPageView` of the current page (with the stamp drawn in when the page will be stamped — `previewStamp`). Right half: the Split Pattern box (Stride stepper, **Apply** (`applyStride`), **Clear All** (`clearAllMarkers`)), the Output Files list of `FilePreviewCard`s, and **Next: Name Files**. The toolbar has the `StampMenuButton`, a **Fix Scan** pull-down (Split Double Pages…, Fix Booklet Order) and **Clear File**.
+Left half: `SplitControlsSection` over a `PDFPageView` of the current page (with the stamp drawn in when the page will be stamped — `previewStamp`). Right half: the Split Pattern box (Stride stepper, **Apply** (`applyStride`), **Clear All** (`clearAllMarkers`)), the Output Files list of `FilePreviewCard`s, and **Next: Name Files**. The toolbar has **Suggest Splits**, the `StampMenuButton`, a **Fix Scan** pull-down (Split Double Pages…, Fix Booklet Order) and **Clear File**. The Actions menu has Suggest Splits…, Split Double Pages…, Fix Booklet Order, Use Bookmarks…, Clear All Splits.
+
+### Suggest Splits — `Split/SuggestSplitsSheet.swift` (#17)
+
+The toolbar button or **Actions ▸ Suggest Splits…** → `requestSuggestedSplits()` makes a `SplitSuggestion` (the document's pages and Step 2's ensemble order, `prefixEnsembleType`) and shows `SuggestSplitsSheet` (`.sheet(item:)`). **It is never applied silently.**
+1. **Reading**: `start()` → `PageTextCache.shared.read(pages, cancel:progress:)` (parallel, cached pages count at once), with a progress bar and **Cancel** (Escape; pages already read stay cached). Then `readParts` off the main actor.
+2. **Found two or more parts**: each part's pages and name ("Name not read" when blank), a note that names can be wrong, **Apply** (Return) → `model.applySuggestedParts` (undoable with ⌘Z) and **Dismiss** (Escape).
+3. **Otherwise** one message and OK: `PartReading.problem` (too few pages read, Vision unavailable, no text, no names), or "looks like a single part (Alto Saxophone 1)". Nothing changes.
+
+Reading the pages also fills the cache Step 2's previews use.
 
 `SplitControlsSection` binds `currentPage` and `skipMode`:
 
@@ -203,7 +213,7 @@ Shows the file's first kept page in `PageInstrumentPreview` (a 150 pt strip) and
 
 ## Reading part names off the page — `Logic/PartRecognition.swift`, `Logic/PageTextCache.swift` (#17)
 
-On-device text recognition with Vision; nothing leaves the Mac. Used by Step 2's preview starting point, Step 1's Suggest Splits and the CLI's `read-parts`.
+On-device text recognition with Vision; nothing leaves the Mac. Used by Step 2's preview starting point, Step 1's [Suggest Splits](#suggest-splits--splitsuggestsplitssheetswift-17) and the CLI's `read-parts`.
 
 **Recognition.** `recognizePageText(_:mode:)` renders the page through `renderScan` (Core Graphics, safe off the main thread), keeps the top 40% (`partNameReadFraction`) and runs `VNRecognizeTextRequest` without language correction. Boxes are fractions of the page, y from the top. It returns **nil when the page couldn't be rendered or Vision failed** (GitHub's runners, some Macs), `[]` for a page with no text. `recognizePages` reads many in parallel with `DispatchQueue.concurrentPerform`, with `isCancelled` and a per-page `progress`. **Measured on the *Ebony Concerto* scans: about 0.1 s a page in parallel, against 0.9 s one at a time.**
 

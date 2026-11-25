@@ -549,6 +549,24 @@ final class SplitModel: ObservableObject {
         clearUndoHistory()
     }
 
+    /// Suggest Splits (#17): splits where the suggested parts start and names each file from
+    /// its part (a blank name leaves the file numbered). Pages stay skipped as they were.
+    /// Undoable. Returns false, changing nothing, when the parts don't fit the document.
+    @discardableResult
+    func applySuggestedParts(_ parts: [SuggestedPart]) -> Bool {
+        guard let sizes = splitSizes(startPages: parts.map(\.startPage), totalPages: totalPages) else { return false }
+        pushUndo()
+        fileSizes = sizes
+        customFileNames = [:]
+        for (i, part) in parts.enumerated() {
+            let name = fileNameSafe(part.name)
+            if !name.isEmpty { customFileNames[i] = name }
+        }
+        selectedFileIndices = []
+        if let fi = currentFileIndex { selectedFileIndices = [fi] }
+        return true
+    }
+
     // MARK: - Moving around
 
     /// ← (⌘← to the first page). The selection follows the page.

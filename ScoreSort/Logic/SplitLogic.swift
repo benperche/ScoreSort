@@ -54,6 +54,17 @@ func splitSizes(totalPages: Int, stride: Int) -> [Int] {
     return sizes
 }
 
+/// File sizes for parts starting on `startPages` (0-based) in a document of `totalPages`:
+/// the first must be page 0 and each later one after the one before, all inside the document.
+/// Nil otherwise. Suggest Splits and the CLI's `read-parts` turn suggested parts into a split
+/// with it.
+func splitSizes(startPages: [Int], totalPages: Int) -> [Int]? {
+    guard totalPages > 0, startPages.first == 0,
+          zip(startPages, startPages.dropFirst()).allSatisfy({ $0 < $1 }),
+          let last = startPages.last, last < totalPages else { return nil }
+    return zip(startPages, startPages.dropFirst() + [totalPages]).map { $1 - $0 }
+}
+
 /// One output file a document's bookmarks would produce: where it starts, how long
 /// it is, and the bookmark's title. `title` is empty for pages ahead of the first
 /// bookmark, which belong to no bookmark but still need a file.
