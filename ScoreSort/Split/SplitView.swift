@@ -16,19 +16,6 @@ import Combine
 // MARK: - Split View
 private enum SplitStage { case split, naming, prefix, summary }
 
-/// Snapshot of the undoable Step-1 split state (file boundaries, skipped pages, and
-/// custom names). Does not include the PDF document — document-rebuild actions (page
-/// swap, booklet reorder, A3 split) are not part of this undo stack.
-private struct SplitSnapshot {
-    var fileSizes: [Int]
-    var skippedPages: Set<Int>
-    var customFileNames: [Int: String]
-}
-
-/// Controls whether the Delete key (and the Skip button) targets a single page or
-/// the whole output file that contains the current page.
-enum SkipMode { case page, file }
-
 // MARK: - Booklet Reorder Helpers
 
 /// A pending request to reorder the pages of one output-file segment.
@@ -44,17 +31,10 @@ struct BookletFixRequest: Identifiable {
 struct SplitView: View {
     @EnvironmentObject private var appState: AppState
     @EnvironmentObject private var stampStore: StampStore
-    @StateObject private var pdfManager = PDFManager()
-    // fileSizes stores the page count for each output file in order.
-    // e.g. [2, 2, 1, 3] means 4 files with 2, 2, 1, and 3 pages respectively.
-    // This makes split point manipulation natural: adding a split just partitions
-    // an existing entry, removing one merges two adjacent entries.
-    @State private var fileSizes: [Int] = []
-    @State private var stride: Int = 2
-    @State private var currentPage: Int = 0
+    /// The document and Step 1's split state, with the operations that change them
+    /// (`Split/SplitModel.swift`). The view keeps what's on screen: stages, sheets, banners, keys.
+    @StateObject private var model = SplitModel()
     @State private var splitStage: SplitStage = .split
-    @State private var baseFileName: String = ""
-    @State private var customFileNames: [Int: String] = [:]
     /// Shared pan offset for all naming-stage previews (PDF points from the default top-left position).
     /// Reset whenever a new PDF is loaded so it always starts at the instrument-name corner.
     @State private var previewOffset: CGPoint = .zero
@@ -64,19 +44,8 @@ struct SplitView: View {
     @State private var prefixRoundID: Int = 0
     @State private var summaryNames: [String] = []
     @State private var pendingFolderURL: URL? = nil
-    /// Pages to omit from output. A file whose every page is in this set is treated as "fully skipped".
-    @State private var skippedPages: Set<Int> = []
-    /// File indices currently highlighted in the output-files list (for multi-select + Delete).
-    @State private var selectedFileIndices: Set<Int> = []
-    /// Undo/redo stacks for Step-1 split edits (markers, skips, stride). Captured as
-    /// view-local @State because the split state lives in this view, not a manager.
-    @State private var undoStack: [SplitSnapshot] = []
-    @State private var redoStack: [SplitSnapshot] = []
     /// Retained reference to the local NSEvent monitor that handles the delete key.
     @State private var splitViewKeyMonitor: Any?
-    /// The loaded document's bookmarks as the files they'd split into; empty when it has none.
-    /// Kept so Actions ▸ Use Bookmarks… can re-open the prompt after "Ignore".
-    @State private var documentBookmarks: [BookmarkSection] = []
     /// Non-nil when the "this PDF has bookmarks" sheet should be presented.
     @State private var bookmarkOffer: BookmarkOffer? = nil
     /// Non-nil when the "Split Double Pages" sheet should be presented — offered on opening
@@ -94,23 +63,13 @@ struct SplitView: View {
     @State private var a3HintVisible = false
     /// Shows a brief tip banner after a scan's double pages are split.
     @State private var a3SplitNoticeVisible = false
-    /// True once ScoreSort has rebuilt this document's pages — Split Double Pages, Swap with
-    /// Next, Fix Booklet Order. Saving it then makes a new PDF even as a single file (an A3
-    /// part split to A4, say), so one output file is allowed through to naming.
-    @State private var documentRebuilt = false
     @State private var scanSplitNotice: AttributedString = ""
     /// Shows a brief tip banner after the first booklet fix, pointing to the per-card redo icon.
     @State private var bookletRedoNoticeVisible = false
-    /// Whether Delete / the Skip button targets the current page or the whole file.
-    /// Defaults to `.file`; set to `.page` automatically after an A3 split.
-    @State private var skipMode: SkipMode = .file
     /// Non-nil when the "Fix Booklet Order" sheet should be presented.
     @State private var bookletFixRequest: BookletFixRequest? = nil
     /// A save in progress (the files are written in the background behind its sheet).
     @State private var saveProgress: SplitSaveProgress? = nil
-    /// The most recently applied booklet order, stored so the user can repeat it.
-    /// Tuple carries the file's page count (for eligibility check) and the order array.
-    @State private var lastBookletOrder: (n: Int, order: [Int])? = nil
     @FocusState private var isViewFocused: Bool
     @AppStorage("filenameSeparator") private var filenameSeparator: String = " - "
     @AppStorage("prefixEnabled") private var prefixEnabled: Bool = true
@@ -129,76 +88,6 @@ struct SplitView: View {
     /// summary screen can confirm it. Reset whenever a new save round begins.
     @State private var sourceWasTrashed = false
 
-    var totalPages: Int {
-        pdfManager.pdfDocument?.pageCount ?? 0
-    }
-
-    // Split markers derived from fileSizes: the page that starts each file (except the first).
-    var splitMarkers: Set<Int> {
-        var markers: Set<Int> = []
-        var pos = 0
-        for size in fileSizes.dropLast() {
-            pos += size
-            markers.insert(pos)
-        }
-        return markers
-    }
-
-    var pageToFileMapping: [Int: Int] {
-        guard !fileSizes.isEmpty else { return [:] }
-        var mapping: [Int: Int] = [:]
-        var pos = 0
-        for (fileIndex, size) in fileSizes.enumerated() {
-            for pageIndex in pos..<(pos + size) {
-                mapping[pageIndex] = fileIndex
-            }
-            pos += size
-        }
-        return mapping
-    }
-
-    var numberOfFiles: Int {
-        fileSizes.count
-    }
-
-    /// Returns all page indices for a given output file index (sorted).
-    /// The pages of output file `fileIndex`: a run of `fileSizes[fileIndex]` pages. Worked out
-    /// from `fileSizes` directly — building the whole page → file map for it, as this used to,
-    /// ran several times per file card on every redraw.
-    func pagesForFile(_ fileIndex: Int) -> [Int] {
-        Array(splitFilePages(fileIndex, fileSizes: fileSizes))
-    }
-
-    /// True if every page in the output file is in skippedPages.
-    func isFileFullySkipped(_ fileIndex: Int) -> Bool {
-        let pages = pagesForFile(fileIndex)
-        return !pages.isEmpty && pages.allSatisfy { skippedPages.contains($0) }
-    }
-
-    /// True if some (but not all) pages in the output file are in skippedPages.
-    func isFilePartiallySkipped(_ fileIndex: Int) -> Bool {
-        let pages = pagesForFile(fileIndex)
-        let n = pages.filter { skippedPages.contains($0) }.count
-        return n > 0 && n < pages.count
-    }
-
-    /// Number of output files that have at least one non-skipped page.
-    var activeFileCount: Int {
-        (0..<numberOfFiles).filter { !isFileFullySkipped($0) }.count
-    }
-
-    /// Whether Step 1 can move on to naming: there must be something new to save — two or
-    /// more files, some pages left out, or pages ScoreSort has rebuilt.
-    var canContinueToNaming: Bool {
-        splitOutputIsWorthSaving(activeFiles: activeFileCount, skippedPages: skippedPages.count,
-                                 pagesRebuilt: documentRebuilt)
-    }
-
-    /// Indices of output files whose every page is skipped.
-    var skippedFileIndices: Set<Int> {
-        Set((0..<numberOfFiles).filter { isFileFullySkipped($0) })
-    }
-
     var body: some View {
         // The onChange lives at the Group level — outside all stage views — so it
         // fires regardless of which stage (split / naming / prefix / summary) is
@@ -213,7 +102,7 @@ struct SplitView: View {
                     outputFolderURL: pendingFolderURL,
                     sourceTrashedNote: sourceWasTrashed ? "Original moved to the Trash." : nil,
                     onStartOver: {
-                        pdfManager.clearPDF() // onChange handles full state reset
+                        model.pdfManager.clearPDF() // onChange handles full state reset
                     }
                 )
                 // Drop a new PDF here to restart without clicking Start Over — loading a
@@ -235,21 +124,21 @@ struct SplitView: View {
                 )
                 .id(prefixRoundID)
             case .naming:
-                if let document = pdfManager.pdfDocument {
+                if let document = model.pdfManager.pdfDocument {
                     SplitNamingStageView(
                         pdfDocument: document,
-                        fileSizes: fileSizes,
-                        skippedPages: skippedPages,
-                        skippedFileIndices: skippedFileIndices,
-                        baseFileName: $baseFileName,
-                        customFileNames: $customFileNames,
+                        fileSizes: model.fileSizes,
+                        skippedPages: model.skippedPages,
+                        skippedFileIndices: model.skippedFileIndices,
+                        baseFileName: $model.baseFileName,
+                        customFileNames: $model.customFileNames,
                         previewOffset: $previewOffset,
-                        pagesRebuilt: documentRebuilt,
+                        pagesRebuilt: model.documentRebuilt,
                         partFolderMode: $partFolderMode,
                         onBack: { splitStage = .split },
                         onClear: {
                             splitStage = .split
-                            pdfManager.clearPDF()
+                            model.pdfManager.clearPDF()
                         },
                         onSave: { saveSplitPDF() }
                     )
@@ -258,7 +147,7 @@ struct SplitView: View {
                 splitStageBody
             }
         }
-        .onChange(of: pdfManager.pdfDocument) { _, newValue in
+        .onChange(of: model.pdfManager.pdfDocument) { _, newValue in
             if let doc = newValue {
                 // Page-swap replaces the document in-place: preserve all split state.
                 // But drop the undo history — a reorder (swap/booklet/A3) can make prior
@@ -268,8 +157,7 @@ struct SplitView: View {
                     // In-place rebuilds never reach the double-page check, so this
                     // single-use flag must not linger into the next real load.
                     suppressNextA3Detection = false
-                    undoStack = []
-                    redoStack = []
+                    model.clearUndoHistory()
                     return
                 }
 
@@ -279,15 +167,14 @@ struct SplitView: View {
                 // Reset navigation: dropping a new file straight onto the done screen
                 // skips the clear step, so a stale currentPage could point past the new
                 // (shorter) document and blank the Step 1 preview.
-                currentPage = 0
-                customFileNames.removeAll()
+                model.currentPage = 0
+                model.customFileNames.removeAll()
                 previewOffset = .zero
-                skippedPages = []
-                selectedFileIndices = []
-                skipMode = .file
-                documentRebuilt = false
-                undoStack = []
-                redoStack = []
+                model.skippedPages = []
+                model.selectedFileIndices = []
+                model.skipMode = .file
+                model.documentRebuilt = false
+                model.clearUndoHistory()
 
                 // A scan of double pages (A3 sheets, or a book scanner's spreads) — offer to
                 // split them, unless this load is the result of doing exactly that. The
@@ -309,35 +196,34 @@ struct SplitView: View {
                 // above, which clears skips), and make Delete act on single pages.
                 if let skips = pendingScanSplitSkips {
                     pendingScanSplitSkips = nil
-                    skippedPages = skips.filter { $0 < totalPages }
-                    skipMode = .page
-                    documentRebuilt = true
+                    model.skippedPages = skips.filter { $0 < model.totalPages }
+                    model.skipMode = .page
+                    model.documentRebuilt = true
                 }
             } else {
                 // PDF cleared — reset all split flow state so nothing bleeds
                 // into the next session regardless of which stage we were on.
                 suppressNextA3Detection = false
                 pendingScanSplitSkips = nil
-                fileSizes = []
-                currentPage = 0
-                customFileNames.removeAll()
+                model.fileSizes = []
+                model.currentPage = 0
+                model.customFileNames.removeAll()
                 previewOffset = .zero
                 splitStage = .split
-                baseFileName = ""
+                model.baseFileName = ""
                 prefixItems = []
                 summaryNames = []
                 pendingFolderURL = nil
-                skippedPages = []
-                selectedFileIndices = []
-                skipMode = .file
-                documentRebuilt = false
-                undoStack = []
-                redoStack = []
+                model.skippedPages = []
+                model.selectedFileIndices = []
+                model.skipMode = .file
+                model.documentRebuilt = false
+                model.clearUndoHistory()
                 sourceWasTrashed = false
-                lastBookletOrder = nil
+                model.lastBookletOrder = nil
                 bookletRedoNoticeVisible = false
                 a3HintVisible = false
-                documentBookmarks = []
+                model.documentBookmarks = []
                 bookmarkOffer = nil
             }
         }
@@ -347,9 +233,9 @@ struct SplitView: View {
         .onAppear { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: appState.selectedTab)     { DispatchQueue.main.async { syncTabCommands() } }
         .onChange(of: splitStage)               { DispatchQueue.main.async { syncTabCommands() } }
-        .onChange(of: fileSizes)                { DispatchQueue.main.async { syncTabCommands() } }
-        .onChange(of: skippedPages)             { DispatchQueue.main.async { syncTabCommands() } }
-        .onChange(of: pdfManager.pdfDocument)   { DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: model.fileSizes)                { DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: model.skippedPages)             { DispatchQueue.main.async { syncTabCommands() } }
+        .onChange(of: model.pdfManager.pdfDocument)   { DispatchQueue.main.async { syncTabCommands() } }
         .sheet(item: $saveProgress) { progress in
             SplitSaveProgressView(progress: progress)
         }
@@ -375,18 +261,18 @@ struct SplitView: View {
                 offer: offer,
                 onSplitAndName: { style in
                     bookmarkOffer = nil
-                    applyBookmarks(offer.sections, nameStyle: style)
+                    model.applyBookmarks(offer.sections, nameStyle: style)
                 },
                 onSplitOnly: {
                     bookmarkOffer = nil
-                    applyBookmarks(offer.sections, nameStyle: nil)
+                    model.applyBookmarks(offer.sections, nameStyle: nil)
                 },
                 onIgnore: { bookmarkOffer = nil }
             )
         }
         .sheet(item: $bookletFixRequest) { req in
             let n = req.pages.count
-            let matchCount = fileSizes.filter { $0 == n }.count
+            let matchCount = model.fileSizes.filter { $0 == n }.count
             BookletOrderSheet(
                 request: req,
                 matchingFileCount: matchCount,
@@ -414,7 +300,7 @@ struct SplitView: View {
                     Text("Split PDF")
                         .font(.title2)
                         .fontWeight(.semibold)
-                    if pdfManager.pdfDocument != nil {
+                    if model.pdfManager.pdfDocument != nil {
                         Text("Step 1 — set split points")
                             .font(.caption)
                             .foregroundColor(.secondary)
@@ -424,7 +310,7 @@ struct SplitView: View {
 
                 Spacer()
 
-                if pdfManager.pdfDocument != nil {
+                if model.pdfManager.pdfDocument != nil {
                     StampMenuButton(isEnabled: $stampEnabled, scope: $stampScope)
 
                     // Both of these correct how a scan came in, and both are occasional, so
@@ -432,14 +318,14 @@ struct SplitView: View {
                     Menu {
                         Button("Split Double Pages\u{2026}") { requestScanSplit() }
                         Button("Fix Booklet Order") { requestBookletFix() }
-                            .disabled(!canFixBookletOrder)
+                            .disabled(!model.canFixBookletOrder)
                     } label: {
                         Label("Fix Scan", systemImage: "wrench.and.screwdriver")
                     }
                     .fixedSize()
                     .help("Cut two-page scans into single pages, or correct booklet scanning order")
 
-                    Button(action: { pdfManager.clearPDF() }) {
+                    Button(action: { model.pdfManager.clearPDF() }) {
                         Label("Clear File", systemImage: "xmark.circle.fill")
                     }
                     .help("Remove the current file and start over")
@@ -510,35 +396,35 @@ struct SplitView: View {
             }
 
             // Main content area
-            if let document = pdfManager.pdfDocument {
+            if let document = model.pdfManager.pdfDocument {
                 GeometryReader { geometry in
                     HStack(spacing: 0) {
                         // Left: Page preview and controls
                         VStack(spacing: 16) {
                             // Page navigation and controls
                             SplitControlsSection(
-                                currentPage: $currentPage,
-                                splitMarkers: splitMarkers,
-                                fileSizes: fileSizes,
-                                totalPages: totalPages,
-                                skippedPages: skippedPages,
-                                skipMode: $skipMode,
-                                onToggleMarker: { toggleSplitAt(page: currentPage) },
+                                currentPage: $model.currentPage,
+                                splitMarkers: model.splitMarkers,
+                                fileSizes: model.fileSizes,
+                                totalPages: model.totalPages,
+                                skippedPages: model.skippedPages,
+                                skipMode: $model.skipMode,
+                                onToggleMarker: { model.toggleSplitAt(page: model.currentPage) },
                                 onSkipCurrentFile: {
-                                    if let fi = pageToFileMapping[currentPage] {
-                                        toggleSkipFiles([fi])
+                                    if let fi = model.pageToFileMapping[model.currentPage] {
+                                        model.toggleSkipFiles([fi])
                                     }
                                 },
-                                onSkipCurrentPage: { toggleSkipPage(currentPage) },
+                                onSkipCurrentPage: { model.toggleSkipPage(model.currentPage) },
                                 onSwapWithNext: swapCurrentPageWithNext,
-                                onRestride: restrideFromCurrentPage
+                                onRestride: model.restrideFromCurrentPage
                             )
 
                             Divider()
 
                             // Preview
                             PDFPageView(
-                                page: document.page(at: currentPage),
+                                page: document.page(at: model.currentPage),
                                 rotation: 0,
                                 stamp: previewStamp
                             )
@@ -565,12 +451,12 @@ struct SplitView: View {
                                 HStack(spacing: 8) {
                                     Text("Stride:")
                                         .foregroundColor(.secondary)
-                                    Stepper(value: $stride, in: 1...20, label: {
-                                        Text("\(stride) \(stride == 1 ? "page" : "pages")")
+                                    Stepper(value: $model.stride, in: 1...20, label: {
+                                        Text("\(model.stride) \(model.stride == 1 ? "page" : "pages")")
                                             .frame(minWidth: 55, alignment: .leading)
                                     })
                                     Button("Apply") {
-                                        applyStride()
+                                        model.applyStride()
                                     }
                                     .buttonStyle(.bordered)
                                     .help("Re-apply stride from scratch, clearing any manual adjustments")
@@ -580,11 +466,11 @@ struct SplitView: View {
                                     // Lives here rather than the toolbar: it belongs with
                                     // Apply, which is the other thing that sets every split
                                     // marker at once.
-                                    Button(action: clearAllMarkers) {
+                                    Button(action: model.clearAllSplits) {
                                         Label("Clear All", systemImage: "trash")
                                     }
                                     .buttonStyle(.bordered)
-                                    .disabled(splitMarkers.isEmpty)
+                                    .disabled(model.splitMarkers.isEmpty)
                                     .help("Remove every split marker and start the pattern again")
                                 }
 
@@ -608,13 +494,13 @@ struct SplitView: View {
                             )
 
                             // ── Output files list ─────────────────────────────
-                            let skippedCount = numberOfFiles - activeFileCount
+                            let skippedCount = model.numberOfFiles - model.activeFileCount
                             Group {
                                 if skippedCount > 0 {
-                                    Text("Output Files (\(activeFileCount) active · \(skippedCount) skipped)")
+                                    Text("Output Files (\(model.activeFileCount) active · \(skippedCount) skipped)")
                                         .font(.headline)
                                 } else {
-                                    Text("Output Files (\(numberOfFiles))")
+                                    Text("Output Files (\(model.numberOfFiles))")
                                         .font(.headline)
                                 }
                             }
@@ -622,14 +508,14 @@ struct SplitView: View {
                             ScrollView {
                                 VStack(alignment: .leading, spacing: 4) {
                                     // Built once per redraw, not once per card.
-                                    let mapping = pageToFileMapping
-                                    ForEach(0..<numberOfFiles, id: \.self) { fileIndex in
-                                        let filePageCount = fileIndex < fileSizes.count ? fileSizes[fileIndex] : 0
+                                    let mapping = model.pageToFileMapping
+                                    ForEach(0..<model.numberOfFiles, id: \.self) { fileIndex in
+                                        let filePageCount = fileIndex < model.fileSizes.count ? model.fileSizes[fileIndex] : 0
                                         let canFix  = filePageCount >= 4 && filePageCount % 4 == 0
-                                        let canRedo = lastBookletOrder?.n == filePageCount && canFix
+                                        let canRedo = model.lastBookletOrder?.n == filePageCount && canFix
                                         let bookletFixAction: (() -> Void)? = canFix ? {
-                                            let pages = pagesForFile(fileIndex)
-                                            guard let doc = pdfManager.pdfDocument else { return }
+                                            let pages = model.pagesForFile(fileIndex)
+                                            guard let doc = model.pdfManager.pdfDocument else { return }
                                             bookletFixRequest = BookletFixRequest(
                                                 fileIndex: fileIndex,
                                                 pages: pages,
@@ -637,32 +523,32 @@ struct SplitView: View {
                                             )
                                         } : nil
                                         let bookletRedoAction: (() -> Void)? = canRedo ? {
-                                            guard let last = lastBookletOrder else { return }
-                                            let pages = pagesForFile(fileIndex)
+                                            guard let last = model.lastBookletOrder else { return }
+                                            let pages = model.pagesForFile(fileIndex)
                                             applyBookletOrder(pages: pages, order: last.order)
                                         } : nil
                                         FilePreviewCard(
                                             fileIndex: fileIndex,
                                             pageToFileMapping: mapping,
-                                            totalPages: totalPages,
-                                            baseFileName: baseFileName,
-                                            customFileNames: customFileNames,
-                                            currentPage: currentPage,
-                                            isFullySkipped: isFileFullySkipped(fileIndex),
-                                            isPartiallySkipped: isFilePartiallySkipped(fileIndex),
-                                            skippedPages: skippedPages,
-                                            isSelected: selectedFileIndices.contains(fileIndex),
+                                            totalPages: model.totalPages,
+                                            baseFileName: model.baseFileName,
+                                            customFileNames: model.customFileNames,
+                                            currentPage: model.currentPage,
+                                            isFullySkipped: model.isFileFullySkipped(fileIndex),
+                                            isPartiallySkipped: model.isFilePartiallySkipped(fileIndex),
+                                            skippedPages: model.skippedPages,
+                                            isSelected: model.selectedFileIndices.contains(fileIndex),
                                             // Both of these take focus back to the page
                                             // navigator. Clicking a card used to leave focus
                                             // wherever it landed, so ← → stopped paging until
                                             // you clicked the preview — the tap handler there
                                             // has always done this.
                                             onNavigate: { pageIndex in
-                                                currentPage = pageIndex
+                                                model.currentPage = pageIndex
                                                 isViewFocused = true
                                             },
                                             onSelect: { isCmd, isShift in
-                                                handleFileSelection(fileIndex, isCmd: isCmd, isShift: isShift)
+                                                model.selectFile(fileIndex, command: isCmd, shift: isShift)
                                                 isViewFocused = true
                                             },
                                             onFixBookletOrder: bookletFixAction,
@@ -680,7 +566,7 @@ struct SplitView: View {
                                 }
                                 .buttonStyle(.borderedProminent)
                                 .controlSize(.large)
-                                .disabled(!canContinueToNaming)
+                                .disabled(!model.canContinueToNaming)
                             }
                         }
                         .padding()
@@ -690,57 +576,26 @@ struct SplitView: View {
                         guard appState.selectedTab == 2 else { return .ignored }   // Split tab only
                         switch press.key {
                         case .leftArrow:
-                            if press.modifiers.contains(.command) {
-                                currentPage = 0
-                            } else if currentPage > 0 {
-                                currentPage -= 1
-                            }
-                            // Keep selection in sync with whichever file the page lands in
-                            if let fi = pageToFileMapping[currentPage] { selectedFileIndices = [fi] }
+                            // The selection follows whichever file the page lands in.
+                            model.goToPreviousPage(toFirst: press.modifiers.contains(.command))
                             return .handled
                         case .rightArrow:
-                            if press.modifiers.contains(.command) {
-                                currentPage = totalPages - 1
-                            } else if currentPage < totalPages - 1 {
-                                currentPage += 1
-                            }
-                            if let fi = pageToFileMapping[currentPage] { selectedFileIndices = [fi] }
+                            model.goToNextPage(toLast: press.modifiers.contains(.command))
                             return .handled
                         case .downArrow:
-                            let fileStartsDown = ([0] + splitMarkers.sorted())
-                            if let next = fileStartsDown.first(where: { $0 > currentPage }),
-                               let fi = pageToFileMapping[next] {
-                                currentPage = next
-                                if press.modifiers.contains(.shift) {
-                                    // Extend the range from the anchor (lowest selected index)
-                                    let anchor = selectedFileIndices.min() ?? fi
-                                    selectedFileIndices = Set(anchor...max(anchor, fi))
-                                } else {
-                                    selectedFileIndices = [fi]
-                                }
-                            }
+                            model.goToNextFile(extendingSelection: press.modifiers.contains(.shift))
                             return .handled
                         case .upArrow:
-                            let fileStartsUp = ([0] + splitMarkers.sorted())
-                            if let prev = fileStartsUp.last(where: { $0 < currentPage }),
-                               let fi = pageToFileMapping[prev] {
-                                currentPage = prev
-                                if press.modifiers.contains(.shift) {
-                                    let anchor = selectedFileIndices.max() ?? fi
-                                    selectedFileIndices = Set(min(anchor, fi)...anchor)
-                                } else {
-                                    selectedFileIndices = [fi]
-                                }
-                            }
+                            model.goToPreviousFile(extendingSelection: press.modifiers.contains(.shift))
                             return .handled
                         case .space:
-                            if currentPage > 0 {
-                                toggleSplitAt(page: currentPage)
+                            if model.currentPage > 0 {
+                                model.toggleSplitAt(page: model.currentPage)
                             }
                             return .handled
                         case .return:
                             // Advance to naming (same gate as the "Next: Name Files" button).
-                            if canContinueToNaming {
+                            if model.canContinueToNaming {
                                 splitStage = .naming
                                 return .handled
                             }
@@ -753,7 +608,7 @@ struct SplitView: View {
                             }
                             // R — re-apply stride from the current page to the end
                             if press.characters == "r" || press.characters == "R" {
-                                restrideFromCurrentPage()
+                                model.restrideFromCurrentPage()
                                 return .handled
                             }
                             return .ignored
@@ -762,7 +617,7 @@ struct SplitView: View {
                 }
             } else {
                 // No PDF loaded - show drop zone
-                DropZoneView(pdfManager: pdfManager,
+                DropZoneView(pdfManager: model.pdfManager,
                              subtitle: "Divide a large PDF — e.g. a complete bound scan of all parts — into separate instrument files")
             }
         }
@@ -786,13 +641,13 @@ struct SplitView: View {
                 // command) so it works without an Edit-menu UndoManager and never bonks.
                 if !inTextField, event.keyCode == 6, event.modifierFlags.contains(.command) {
                     DispatchQueue.main.async {
-                        if event.modifierFlags.contains(.shift) { self.redoSplit() } else { self.undoSplit() }
+                        if event.modifierFlags.contains(.shift) { self.model.redo() } else { self.model.undo() }
                     }
                     return nil
                 }
                 guard event.keyCode == 51 || event.keyCode == 117 else { return event }
                 if inTextField { return event }
-                DispatchQueue.main.async { self.handleDeleteKey() }
+                DispatchQueue.main.async { self.model.toggleSkipForDeleteKey() }
                 return nil  // consume — prevents the system bonk
             }
         }
@@ -802,44 +657,13 @@ struct SplitView: View {
         }
     } // end splitStageBody
     
-    // ── Undo / redo (Step 1 split edits) ──────────────────────────────────────
-    private func currentSplitSnapshot() -> SplitSnapshot {
-        SplitSnapshot(fileSizes: fileSizes, skippedPages: skippedPages, customFileNames: customFileNames)
-    }
-
-    /// Record the current state before a mutating action so ⌘Z can revert it.
-    private func pushUndo() {
-        undoStack.append(currentSplitSnapshot())
-        redoStack.removeAll()
-        if undoStack.count > 50 { undoStack.removeFirst() }
-    }
-
-    private func restoreSplit(_ s: SplitSnapshot) {
-        fileSizes = s.fileSizes
-        skippedPages = s.skippedPages
-        customFileNames = s.customFileNames
-        selectedFileIndices = []
-    }
-
-    private func undoSplit() {
-        guard let prev = undoStack.popLast() else { return }
-        redoStack.append(currentSplitSnapshot())
-        restoreSplit(prev)
-    }
-
-    private func redoSplit() {
-        guard let next = redoStack.popLast() else { return }
-        undoStack.append(currentSplitSnapshot())
-        restoreSplit(next)
-    }
-
     private func openPDF() {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.pdf]
         panel.allowsMultipleSelection = false
         panel.title = "Select PDF"
         beginPanelSheet(panel) { response in
-            if response == .OK, let url = panel.url { pdfManager.loadPDF(from: url) }
+            if response == .OK, let url = panel.url { model.pdfManager.loadPDF(from: url) }
         }
     }
 
@@ -848,30 +672,30 @@ struct SplitView: View {
     /// Loads files opened from Finder or the Dock when they're meant for this tab (#21).
     private func takePendingOpen() {
         guard let urls = appState.takePendingOpen(for: .split) else { return }
-        if let url = urls.first { pdfManager.loadPDF(from: url) }
+        if let url = urls.first { model.pdfManager.loadPDF(from: url) }
     }
 
     private func syncTabCommands() {
         guard appState.selectedTab == 2 else { return }
-        let loaded = pdfManager.pdfDocument != nil
+        let loaded = model.pdfManager.pdfDocument != nil
         var slice = TabSlice()
         slice.openTitle  = "Choose PDF\u{2026}"
         slice.open       = { openPDF() }
         slice.clearTitle = "Clear File"
-        slice.clear      = loaded ? { pdfManager.clearPDF() } : nil
+        slice.clear      = loaded ? { model.pdfManager.clearPDF() } : nil
 
         switch splitStage {
         case .split:
-            let canProceed = loaded && canContinueToNaming
+            let canProceed = loaded && model.canContinueToNaming
             slice.primaryTitle = "Continue to Naming"
             slice.primarySave  = canProceed ? { splitStage = .naming } : nil
             // Always list the actions (disabled until a PDF is loaded) so the menu
             // shows what's possible even in the empty state.
             slice.tabActions = [
                 MenuAction(title: "Split Double Pages\u{2026}", isEnabled: loaded, perform: { requestScanSplit() }),
-                MenuAction(title: "Fix Booklet Order", isEnabled: loaded && canFixBookletOrder, perform: { requestBookletFix() }),
-                MenuAction(title: "Use Bookmarks\u{2026}", isEnabled: loaded && !documentBookmarks.isEmpty, perform: { offerBookmarksIfAny() }),
-                MenuAction(title: "Clear All Splits", isEnabled: loaded && !splitMarkers.isEmpty, perform: { clearAllMarkers() }),
+                MenuAction(title: "Fix Booklet Order", isEnabled: loaded && model.canFixBookletOrder, perform: { requestBookletFix() }),
+                MenuAction(title: "Use Bookmarks\u{2026}", isEnabled: loaded && !model.documentBookmarks.isEmpty, perform: { offerBookmarksIfAny() }),
+                MenuAction(title: "Clear All Splits", isEnabled: loaded && !model.splitMarkers.isEmpty, perform: { model.clearAllSplits() }),
             ]
         case .naming:
             slice.primaryTitle = "Save Split Files"
@@ -882,143 +706,14 @@ struct SplitView: View {
         case .summary:
             // Start Over is the "clear" action here — reuse ⌘⌫ (File ▸ Start Over).
             slice.clearTitle = "Start Over"
-            slice.clear = { pdfManager.clearPDF() }
+            slice.clear = { model.pdfManager.clearPDF() }
         }
 
         // Show in Finder — reveal the output folder on the summary, else the source file.
-        let revealTarget = (splitStage == .summary ? pendingFolderURL : nil) ?? pdfManager.sourceURL
+        let revealTarget = (splitStage == .summary ? pendingFolderURL : nil) ?? model.pdfManager.sourceURL
         slice.tabActions.append(MenuAction(title: "Show in Finder", key: KeyEquivalent("f"), modifiers: [.command, .shift],
                                            isEnabled: revealTarget != nil, perform: { revealInFinder(revealTarget) }))
         appState.tabCommands.slice = slice
-    }
-
-    private func clearAllMarkers() {
-        pushUndo()
-        fileSizes = totalPages > 0 ? [totalPages] : []
-        customFileNames.removeAll()
-        skippedPages = []
-        selectedFileIndices = []
-    }
-
-    private func applyStride() {
-        pushUndo()
-        fileSizes = splitSizes(totalPages: totalPages, stride: stride)
-        customFileNames.removeAll()
-        skippedPages = []
-        selectedFileIndices = []
-    }
-
-    /// Re-applies the current stride from `currentPage` to the end of the document,
-    /// leaving all existing splits before `currentPage` untouched.
-    ///
-    /// If `currentPage` falls in the middle of an existing file segment, that segment
-    /// is trimmed to end at `currentPage` before the new stride begins.
-    ///
-    /// Example: stride = 4, fileSizes = [4, 4, 4 …], currentPage = 3
-    ///   → fileSizes becomes [3, 4, 4, 4 …]
-    private func restrideFromCurrentPage() {
-        guard currentPage > 0, totalPages > currentPage else { return }
-        pushUndo()
-
-        // Walk existing fileSizes, keeping every segment that ends at or before
-        // currentPage.  If currentPage falls inside a segment, keep only the
-        // portion before currentPage (i.e. trim that segment).
-        var prefixSizes: [Int] = []
-        var pos = 0
-        for size in fileSizes {
-            let end = pos + size
-            if end <= currentPage {
-                prefixSizes.append(size)
-                pos = end
-            } else {
-                // currentPage is inside this segment (or at its very start).
-                if pos < currentPage {
-                    prefixSizes.append(currentPage - pos)
-                }
-                break
-            }
-        }
-
-        let remaining = totalPages - currentPage
-        let suffixSizes = splitSizes(totalPages: remaining, stride: stride)
-        fileSizes = prefixSizes + suffixSizes
-
-        // Clear custom names for the re-strided region; prefix names stay intact.
-        customFileNames = customFileNames.filter { $0.key < prefixSizes.count }
-    }
-
-    private func toggleSplitAt(page: Int) {
-        pushUndo()
-        let newSizes = toggleSplit(in: fileSizes, at: page)
-        // Names follow the page their file starts on, not its position in the list.
-        customFileNames = remapFileNames(customFileNames, from: fileSizes, to: newSizes)
-        fileSizes = newSizes
-    }
-
-    /// Toggle skip on all pages of the given file indices.
-    /// If every file in the set is already fully skipped, they are un-skipped; otherwise all are skipped.
-    private func toggleSkipFiles(_ fileIndices: Set<Int>) {
-        pushUndo()
-        let allFullySkipped = fileIndices.allSatisfy { isFileFullySkipped($0) }
-        for idx in fileIndices {
-            let pages = pagesForFile(idx)
-            if allFullySkipped {
-                skippedPages.subtract(pages)
-            } else {
-                skippedPages.formUnion(pages)
-            }
-        }
-        selectedFileIndices = []
-    }
-
-    /// Called by the NSEvent monitor when Delete or Forward-Delete is pressed.
-    /// Behaviour depends on `skipMode`:
-    ///   • `.page` — toggles skip on the current page only.
-    ///   • `.file` — toggles skip on all selected file cards (or the file at the current page).
-    private func handleDeleteKey() {
-        switch skipMode {
-        case .page:
-            toggleSkipPage(currentPage)
-        case .file:
-            let targets = selectedFileIndices.isEmpty
-                ? Set([pageToFileMapping[currentPage]].compactMap { $0 })
-                : selectedFileIndices
-            if !targets.isEmpty { toggleSkipFiles(targets) }
-        }
-    }
-
-    /// Toggle skip on a single page.
-    private func toggleSkipPage(_ page: Int) {
-        pushUndo()
-        if skippedPages.contains(page) {
-            skippedPages.remove(page)
-        } else {
-            skippedPages.insert(page)
-        }
-    }
-
-    /// Handle a tap on a file card in the output-files list.
-    private func handleFileSelection(_ fileIndex: Int, isCmd: Bool, isShift: Bool) {
-        if isShift, let anchor = selectedFileIndices.min() {
-            let lo = min(anchor, fileIndex)
-            let hi = max(anchor, fileIndex)
-            selectedFileIndices = Set(lo...hi)
-        } else if isCmd {
-            if selectedFileIndices.contains(fileIndex) {
-                selectedFileIndices.remove(fileIndex)
-            } else {
-                selectedFileIndices.insert(fileIndex)
-            }
-        } else {
-            selectedFileIndices = [fileIndex]
-            // Also navigate the preview to the first page of this file.
-            if let firstPage = pagesForFile(fileIndex).first {
-                currentPage = firstPage
-            }
-        }
-        // Clicking a card in the right panel takes focus away from the key-press
-        // handler. Restore it so Delete/Space/arrows work without an extra click.
-        isViewFocused = true
     }
 
     /// If the "Move original to Trash after splitting" option is on, moves the loaded
@@ -1026,7 +721,7 @@ struct SplitView: View {
     /// after the split files have been written successfully, so the original is never
     /// removed before its replacements exist. Failures are surfaced but non-fatal.
     private func trashSourceFileIfRequested() -> Bool {
-        guard deleteSourceAfterSplit, let url = pdfManager.sourceURL else { return false }
+        guard deleteSourceAfterSplit, let url = model.pdfManager.sourceURL else { return false }
         do {
             try FileManager.default.trashItem(at: url, resultingItemURL: nil)
             return true
@@ -1047,7 +742,7 @@ struct SplitView: View {
             guard let url = url else { return }
             DispatchQueue.main.async {
                 if url.pathExtension.lowercased() == "pdf" {
-                    pdfManager.loadPDF(from: url)
+                    model.pdfManager.loadPDF(from: url)
                 } else {
                     showNSAlert(title: "Unsupported File Type",
                                 message: "This tab only accepts PDF files.",
@@ -1068,34 +763,34 @@ struct SplitView: View {
     /// will actually be stamped, so the preview doesn't promise a stamp that never arrives.
     /// A page that's being skipped isn't written at all, so it gets nothing either.
     private var previewStamp: Stamp? {
-        guard let job = activeStampJob, !skippedPages.contains(currentPage) else { return nil }
+        guard let job = activeStampJob, !model.skippedPages.contains(model.currentPage) else { return nil }
         switch job.scope {
         case .everyPage:
             return job.stamp
         case .firstPageOfEachPart:
             // Page 0 starts the first file; every split marker starts another.
-            let startsAPart = currentPage == 0 || splitMarkers.contains(currentPage)
+            let startsAPart = model.currentPage == 0 || model.splitMarkers.contains(model.currentPage)
             return startsAPart ? job.stamp : nil
         }
     }
 
     func saveSplitPDF() {
-        guard let document = pdfManager.pdfDocument,
-              canContinueToNaming, saveProgress == nil else { return }
+        guard let document = model.pdfManager.pdfDocument,
+              model.canContinueToNaming, saveProgress == nil else { return }
 
         if prefixEnabled {
             // Go straight to Step 3 — folder picker comes after the user confirms order.
             // Only include files that have at least one non-skipped page.
             var items: [PrefixItem] = []
             var pagePos = 0
-            for fileIndex in 0..<fileSizes.count {
-                let fileSize = fileSizes[fileIndex]
-                if !isFileFullySkipped(fileIndex) {
-                    let proposed = splitOutputFileName(base: baseFileName, separator: filenameSeparator,
-                                                       suffix: customFileNames[fileIndex] ?? "", fileIndex: fileIndex,
-                                                       onlyFile: activeFileCount == 1)
+            for fileIndex in 0..<model.fileSizes.count {
+                let fileSize = model.fileSizes[fileIndex]
+                if !model.isFileFullySkipped(fileIndex) {
+                    let proposed = splitOutputFileName(base: model.baseFileName, separator: filenameSeparator,
+                                                       suffix: model.customFileNames[fileIndex] ?? "", fileIndex: fileIndex,
+                                                       onlyFile: model.activeFileCount == 1)
                     let firstPage = document.page(at: firstKeptPage(fileStart: pagePos, fileSize: fileSize,
-                                                                    skippedPages: skippedPages))
+                                                                    skippedPages: model.skippedPages))
                     items.append(PrefixItem(id: fileIndex, proposedName: proposed, page: firstPage))
                 }
                 pagePos += fileSize
@@ -1112,23 +807,23 @@ struct SplitView: View {
             panel.canCreateDirectories = true
             panel.title = "Select Output Folder"
             panel.message = "Choose where to save the split PDF files"
-            panel.directoryURL = outputDirectory(forSourceFile: pdfManager.sourceURL)
+            panel.directoryURL = outputDirectory(forSourceFile: model.pdfManager.sourceURL)
 
             beginPanelSheet(panel) { response in
                 guard response == .OK, let folderURL = panel.url else { return }
                 let folders = splitPartFolders()
                 var names: [String] = []
-                for i in 0..<fileSizes.count {
-                    guard !isFileFullySkipped(i) else { continue }
-                    names.append(partFolderPath(splitOutputFileName(base: baseFileName, separator: filenameSeparator,
-                                                                    suffix: customFileNames[i] ?? "", fileIndex: i,
-                                                                    onlyFile: activeFileCount == 1),
+                for i in 0..<model.fileSizes.count {
+                    guard !model.isFileFullySkipped(i) else { continue }
+                    names.append(partFolderPath(splitOutputFileName(base: model.baseFileName, separator: filenameSeparator,
+                                                                    suffix: model.customFileNames[i] ?? "", fileIndex: i,
+                                                                    onlyFile: model.activeFileCount == 1),
                                                 folder: folders[i]))
                 }
-                let plans = pdfManager.splitPlans(baseFileName: baseFileName,
-                                                  customFileNames: customFileNames,
-                                                  pageToFileMapping: pageToFileMapping,
-                                                  skippedPages: skippedPages,
+                let plans = model.pdfManager.splitPlans(baseFileName: model.baseFileName,
+                                                  customFileNames: model.customFileNames,
+                                                  pageToFileMapping: model.pageToFileMapping,
+                                                  skippedPages: model.skippedPages,
                                                   separator: filenameSeparator,
                                                   partFolders: folders)
                 saveSplitFiles(names: names, plans: plans, into: folderURL, finish: { trashed in
@@ -1152,7 +847,7 @@ struct SplitView: View {
         panel.canCreateDirectories = true
         panel.title = "Select Output Folder"
         panel.message = "Choose where to save the split PDF files"
-        panel.directoryURL = outputDirectory(forSourceFile: pdfManager.sourceURL)
+        panel.directoryURL = outputDirectory(forSourceFile: model.pdfManager.sourceURL)
 
         beginPanelSheet(panel) { response in
             guard response == .OK, let folderURL = panel.url else { return }
@@ -1164,16 +859,16 @@ struct SplitView: View {
     /// after the PDF. If the document has bookmarks, asks what to do with them rather
     /// than applying them unannounced.
     private func setupSplitState(offerBookmarks: Bool = true) {
-        fileSizes = totalPages > 0 ? [totalPages] : []
-        baseFileName = pdfManager.currentFileName ?? ""
-        documentBookmarks = pdfManager.pdfDocument.flatMap { bookmarkSections(in: $0) } ?? []
+        model.fileSizes = model.totalPages > 0 ? [model.totalPages] : []
+        model.baseFileName = model.pdfManager.currentFileName ?? ""
+        model.documentBookmarks = model.pdfManager.pdfDocument.flatMap { bookmarkSections(in: $0) } ?? []
         if splitStage != .split { splitStage = .split }
         if offerBookmarks { offerBookmarksIfAny() }
     }
 
     /// Opens "Split Double Pages" for the current document.
     private func requestScanSplit() {
-        guard let doc = pdfManager.pdfDocument else { return }
+        guard let doc = model.pdfManager.pdfDocument else { return }
         scanSplitRequest = ScanSplitRequest(document: doc, fromLoad: false)
     }
 
@@ -1188,7 +883,7 @@ struct SplitView: View {
 
         pendingScanSplitSkips = choice.skippedPages
         suppressNextA3Detection = true
-        pdfManager.pdfDocument = split
+        model.pdfManager.pdfDocument = split
 
         let skipped = choice.skippedPages.count
         var notice = try! AttributedString(markdown: "Split into \(split.pageCount) pages")
@@ -1205,66 +900,17 @@ struct SplitView: View {
 
     /// Presents the bookmark sheet when the loaded document has usable bookmarks.
     private func offerBookmarksIfAny() {
-        guard pdfManager.pdfDocument != nil, !documentBookmarks.isEmpty else { return }
-        bookmarkOffer = BookmarkOffer(sections: documentBookmarks,
-                                      sourceName: pdfManager.currentFileName ?? "")
-    }
-
-    /// Splits at the bookmarks; with a `nameStyle`, also names the files from their titles.
-    /// Replaces the split state like a fresh load would, so it starts a new undo history.
-    private func applyBookmarks(_ sections: [BookmarkSection], nameStyle: BookmarkNameStyle?) {
-        guard sections.reduce(0, { $0 + $1.pageCount }) == totalPages else { return }
-        fileSizes = sections.map { $0.pageCount }
-        customFileNames.removeAll()
-        baseFileName = pdfManager.currentFileName ?? ""
-        if let nameStyle {
-            let names = bookmarkSplitNames(titles: sections.map { $0.title },
-                                           fallbackBaseName: baseFileName,
-                                           style: nameStyle)
-            baseFileName = names.baseName
-            for (i, suffix) in names.suffixes.enumerated() where !suffix.isEmpty {
-                customFileNames[i] = suffix
-            }
-        }
-        skippedPages = []
-        selectedFileIndices = []
-        undoStack = []
-        redoStack = []
-    }
-
-    /// True when the current file segment has ≥ 4 pages and a count divisible by 4,
-    /// meaning a booklet reorder is meaningful.
-    var canFixBookletOrder: Bool {
-        guard let fi = pageToFileMapping[currentPage] else { return false }
-        guard fi < fileSizes.count else { return false }
-        let n = fileSizes[fi]
-        return n >= 4 && n % 4 == 0
+        guard model.pdfManager.pdfDocument != nil, !model.documentBookmarks.isEmpty else { return }
+        bookmarkOffer = BookmarkOffer(sections: model.documentBookmarks,
+                                      sourceName: model.pdfManager.currentFileName ?? "")
     }
 
     /// Builds a `BookletFixRequest` for the current file segment and presents the sheet.
     private func requestBookletFix() {
-        guard let doc = pdfManager.pdfDocument,
-              let fi = pageToFileMapping[currentPage] else { return }
-        let pages = pagesForFile(fi)
+        guard let doc = model.pdfManager.pdfDocument,
+              let fi = model.pageToFileMapping[model.currentPage] else { return }
+        let pages = model.pagesForFile(fi)
         bookletFixRequest = BookletFixRequest(fileIndex: fi, pages: pages, document: doc)
-    }
-
-    /// `true` when the last booklet order can be re-applied to the current file —
-    /// i.e. a previous order was saved AND the current file has the same page count.
-    var canRedoBookletOrder: Bool {
-        guard let last = lastBookletOrder,
-              let fi = pageToFileMapping[currentPage],
-              fi < fileSizes.count else { return false }
-        return fileSizes[fi] == last.n
-    }
-
-    /// Re-applies the last booklet order to the current file segment.
-    private func redoBookletOrder() {
-        guard let last = lastBookletOrder,
-              let fi = pageToFileMapping[currentPage] else { return }
-        let pages = pagesForFile(fi)
-        guard pages.count == last.n else { return }
-        applyBookletOrder(pages: pages, order: last.order)
     }
 
     /// Reorders the pages of a file segment in the loaded document without resetting
@@ -1275,7 +921,7 @@ struct SplitView: View {
     ///   - order: Permutation where `order[readingPos]` is the *local* index within
     ///            `pages` that should appear at that reading position.
     private func applyBookletOrder(pages: [Int], order: [Int]) {
-        guard let doc = pdfManager.pdfDocument else { return }
+        guard let doc = model.pdfManager.pdfDocument else { return }
         let newDoc = PDFDocument()
 
         // Build the new absolute-page sequence, swapping only the segment's positions.
@@ -1293,17 +939,17 @@ struct SplitView: View {
         }
 
         // Update skippedPages: re-map skipped pages within the segment to their new positions.
-        var newSkipped = skippedPages
+        var newSkipped = model.skippedPages
         for absIdx in pages { newSkipped.remove(absIdx) }
         for (newLocal, oldLocal) in order.enumerated() {
-            if skippedPages.contains(pages[oldLocal]) {
+            if model.skippedPages.contains(pages[oldLocal]) {
                 newSkipped.insert(pages[newLocal])
             }
         }
-        skippedPages = newSkipped
+        model.skippedPages = newSkipped
 
         // On the very first fix, show a brief tip pointing to the per-card redo icon.
-        if lastBookletOrder == nil {
+        if model.lastBookletOrder == nil {
             withAnimation(.easeInOut(duration: 0.2)) { bookletRedoNoticeVisible = true }
             DispatchQueue.main.asyncAfter(deadline: .now() + 7) {
                 withAnimation(.easeInOut(duration: 0.2)) { bookletRedoNoticeVisible = false }
@@ -1311,12 +957,12 @@ struct SplitView: View {
         }
 
         // Save the order so the user can repeat it with Redo.
-        lastBookletOrder = (n: pages.count, order: order)
+        model.lastBookletOrder = SplitBookletOrder(n: pages.count, order: order)
 
         // Replace the document while preserving all other split state.
-        documentRebuilt         = true
+        model.documentRebuilt         = true
         suppressDocumentReset   = true
-        pdfManager.pdfDocument  = newDoc
+        model.pdfManager.pdfDocument  = newDoc
     }
 
     /// Applies a booklet order to **every** file segment in the document whose page
@@ -1324,19 +970,19 @@ struct SplitView: View {
     /// multiple-replacement problem (each `onChange` would clear `suppressDocumentReset`
     /// before the next call could use it).
     private func applyBookletOrderToAllMatchingFiles(order: [Int], n: Int) {
-        guard let doc = pdfManager.pdfDocument else { return }
+        guard let doc = model.pdfManager.pdfDocument else { return }
         let newDoc = PDFDocument()
-        var newSkipped = skippedPages
+        var newSkipped = model.skippedPages
         var processedFiles = Set<Int>()
 
         for absIdx in 0..<doc.pageCount {
-            guard let fi = pageToFileMapping[absIdx] else {
+            guard let fi = model.pageToFileMapping[absIdx] else {
                 // Shouldn't normally happen, but copy the page as-is.
                 if let page = doc.page(at: absIdx) { newDoc.insert(page, at: newDoc.pageCount) }
                 continue
             }
 
-            let filePages = pagesForFile(fi)
+            let filePages = model.pagesForFile(fi)
 
             if filePages.count == n && !processedFiles.contains(fi) {
                 // First encounter of a matching file — insert all pages in reading order.
@@ -1349,7 +995,7 @@ struct SplitView: View {
                 // Remap skipped pages within this file.
                 for absPage in filePages { newSkipped.remove(absPage) }
                 for (newLocal, oldLocal) in order.enumerated() {
-                    if skippedPages.contains(filePages[oldLocal]) {
+                    if model.skippedPages.contains(filePages[oldLocal]) {
                         newSkipped.insert(filePages[newLocal])
                     }
                 }
@@ -1362,33 +1008,33 @@ struct SplitView: View {
             }
         }
 
-        skippedPages = newSkipped
-        lastBookletOrder = (n: n, order: order)
-        documentRebuilt         = true
+        model.skippedPages = newSkipped
+        model.lastBookletOrder = SplitBookletOrder(n: n, order: order)
+        model.documentRebuilt         = true
         suppressDocumentReset   = true
-        pdfManager.pdfDocument  = newDoc
+        model.pdfManager.pdfDocument  = newDoc
     }
 
     /// Swaps the current page with the next one in the loaded document, preserving
     /// all split markers, skipped pages, and custom file names.
     /// Uses `suppressDocumentReset` so `onChange` skips the normal full-reset path.
     private func swapCurrentPageWithNext() {
-        guard let document = pdfManager.pdfDocument,
-              currentPage < document.pageCount - 1 else { return }
+        guard let document = model.pdfManager.pdfDocument,
+              model.currentPage < document.pageCount - 1 else { return }
 
         let newDoc = PDFDocument()
         for i in 0..<document.pageCount {
             let srcIdx: Int
-            if i == currentPage         { srcIdx = currentPage + 1 }
-            else if i == currentPage + 1 { srcIdx = currentPage }
+            if i == model.currentPage         { srcIdx = model.currentPage + 1 }
+            else if i == model.currentPage + 1 { srcIdx = model.currentPage }
             else                          { srcIdx = i }
             if let page = document.page(at: srcIdx) {
                 newDoc.insert(page, at: newDoc.pageCount)
             }
         }
-        documentRebuilt         = true
+        model.documentRebuilt         = true
         suppressDocumentReset   = true
-        pdfManager.pdfDocument  = newDoc
+        model.pdfManager.pdfDocument  = newDoc
         // currentPage stays the same so the preview immediately shows
         // what was just moved down one slot.
     }
@@ -1396,9 +1042,9 @@ struct SplitView: View {
     /// The folder "Sort into folders" puts file `i` in (none when it's off), from its Step 2
     /// part name — or, for a single file kept under its own name, the whole name.
     private func defaultPartFolder(forFile i: Int, mode: PartFolderMode, ensemble: EnsembleType) -> String? {
-        let suffix = customFileNames[i] ?? ""
-        let fileName = splitOutputFileName(base: baseFileName, separator: filenameSeparator, suffix: suffix,
-                                           fileIndex: i, onlyFile: activeFileCount == 1)
+        let suffix = model.customFileNames[i] ?? ""
+        let fileName = splitOutputFileName(base: model.baseFileName, separator: filenameSeparator, suffix: suffix,
+                                           fileIndex: i, onlyFile: model.activeFileCount == 1)
         return partFolderName(partName: suffix, fileName: fileName, mode: mode, ensemble: ensemble,
                               numbered: numberedFolders)
     }
@@ -1406,7 +1052,7 @@ struct SplitView: View {
     /// Each file's folder when saving straight from Step 2 (no prefix step).
     private func splitPartFolders() -> [Int: String] {
         var folders: [Int: String] = [:]
-        for i in 0..<fileSizes.count {
+        for i in 0..<model.fileSizes.count {
             folders[i] = defaultPartFolder(forFile: i, mode: partFolderMode, ensemble: prefixEnsembleType)
         }
         return folders
@@ -1421,7 +1067,7 @@ struct SplitView: View {
         let fullNames = scoreOrderFileNames(forOrderedItems: orderedItems, separator: sep)
         var finalCustomNames: [Int: String] = [:]
         var finalNamesForSummary: [String] = []
-        var omittedPages = skippedPages   // Step-1 skips, plus any Step-3 skips below
+        var omittedPages = model.skippedPages   // Step-1 skips, plus any Step-3 skips below
         // The folders as Step 3 showed them, including any the user chose there.
         var folders: [Int: String] = [:]
         for item in orderedItems { folders[item.id] = item.folder }
@@ -1429,16 +1075,16 @@ struct SplitView: View {
         for item in orderedItems {
             guard let fullName = fullNames[item.id] else {
                 // Skipped in Step 3 → drop this segment's pages so the file isn't written.
-                omittedPages.formUnion(pagesForFile(item.id))
+                omittedPages.formUnion(model.pagesForFile(item.id))
                 continue
             }
             finalCustomNames[item.id] = fullName.hasSuffix(".pdf") ? String(fullName.dropLast(4)) : fullName
             finalNamesForSummary.append(partFolderPath(fullName, folder: folders[item.id]))
         }
 
-        let plans = pdfManager.splitPlans(baseFileName: "",
+        let plans = model.pdfManager.splitPlans(baseFileName: "",
                                           customFileNames: finalCustomNames,
-                                          pageToFileMapping: pageToFileMapping,
+                                          pageToFileMapping: model.pageToFileMapping,
                                           skippedPages: omittedPages,
                                           separator: "",
                                           partFolders: folders)
@@ -1463,7 +1109,7 @@ struct SplitView: View {
     private func saveSplitFiles(names: [String], plans: [SplitFilePlan], into folder: URL,
                                 finish: @escaping (Bool) -> Void) {
         guard saveProgress == nil else { return }
-        guard let source = pdfManager.sourceURL,
+        guard let source = model.pdfManager.sourceURL,
               splitOutputReplacesSource(names: names, folder: folder, source: source) else {
             Task {
                 guard let report = await writeInBackground(plans, to: folder) else { return }
@@ -1541,13 +1187,13 @@ struct SplitView: View {
     /// copy of the document (`SplitSaveSource`). Nil if the save couldn't start (the user has
     /// been told why).
     private func writeInBackground(_ plans: [SplitFilePlan], to folder: URL) async -> SplitWriteReport? {
-        guard let document = pdfManager.pdfDocument else { return nil }
+        guard let document = model.pdfManager.pdfDocument else { return nil }
         let progress = SplitSaveProgress(total: plans.count)
         saveProgress = progress
         // Let the sheet appear before the one step that has to run here: a snapshot of a
         // document rebuilt in memory (an untouched one is reopened from its file instead).
         try? await Task.sleep(for: .milliseconds(80))
-        guard let source = SplitSaveSource.of(document, loadedFrom: pdfManager.sourceURL) else {
+        guard let source = SplitSaveSource.of(document, loadedFrom: model.pdfManager.sourceURL) else {
             saveProgress = nil
             showNSAlert(title: "Couldn't Save",
                         message: "ScoreSort couldn't put the pages together to save them. Try opening the PDF again.",
