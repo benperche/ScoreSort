@@ -30,6 +30,7 @@ _Draft for the next release after 1.11.0. Keep adding to this as more changes la
 
 - **Many more part names to pick from when naming split parts** (offered as you type): combined parts like **Flute/Piccolo**, **Oboe/Cor Anglais**, **Trumpet/Flugelhorn** and **Alto Saxophone/Flute**; key-named parts like **Bb Clarinet**, **Eb Alto Saxophone** and **C Trumpet**; flex-band parts **Part 1** to **Part 5**; and **Conductor**, **Condensed Score**, **Lead Sheet**, **Choir**, **Sousaphone**, **Bass Guitar** and **Synthesizer**.
 - **More part names to pick from when naming split parts.** Start typing and the list now offers **Flute Oboe**, **F Horn**, **Eb Horn**, **Tuned Percussion** and **Vocal**, as used in charts like Ed Wilson's.
+- **Naming split parts shows each part's name straight away.** The preview beside each name used to show the top-left corner of the part's first page, which was often blank, so you had to scroll every one to see whose part it was. ScoreSort now reads the top of each page (on your Mac; nothing is sent anywhere) and starts each preview at the part name. The arrows still move every preview together.
 - **Saving a split no longer freezes ScoreSort on big scans.** A progress bar shows each part as it's saved, and you can cancel part-way: the parts already saved are kept, and you're told which weren't.
 
 ## 🔄 Rotate Pages

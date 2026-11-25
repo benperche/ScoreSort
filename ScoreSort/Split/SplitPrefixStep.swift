@@ -663,17 +663,45 @@ func instrumentPreviewCrop(pageSize: CGSize, stripSize: CGSize) -> CGSize {
 }
 
 /// Top-left of the shown area, in PDF points from the page's top-left, for a pan `offset`
-/// (x right, y up — negative y is further down the page), clamped so it stays on the page.
-func instrumentPreviewOrigin(offset: CGPoint, pageSize: CGSize, crop: CGSize) -> CGPoint {
-    CGPoint(x: min(max(offset.x, 0), max(0, pageSize.width - crop.width)),
-            y: min(max(-offset.y, 0), max(0, pageSize.height - crop.height)))
+/// (x right, y up — negative y is further down the page) from the row's own starting point
+/// `start` (`instrumentPreviewStart`), clamped so it stays on the page.
+func instrumentPreviewOrigin(offset: CGPoint, pageSize: CGSize, crop: CGSize, start: CGPoint = .zero) -> CGPoint {
+    CGPoint(x: min(max(start.x + offset.x, 0), max(0, pageSize.width - crop.width)),
+            y: min(max(start.y - offset.y, 0), max(0, pageSize.height - crop.height)))
+}
+
+/// Where a row's preview starts (#17): just above and left of `focus` — the part name read off
+/// the page, or its first text from the top (`partNameFocus`, as fractions of the page, y
+/// from the top) — so the whole name shows. A name shorter than the shown area sits in its
+/// middle, with at least 6 pt above it; 12 pt to its left. The page's top-left when there's
+/// no focus (not read yet, or no text found). In PDF points from the top-left, on the page.
+func instrumentPreviewStart(focus: CGRect?, pageSize: CGSize, crop: CGSize) -> CGPoint {
+    guard let focus, pageSize.width > 0, pageSize.height > 0 else { return .zero }
+    let box = CGRect(x: focus.minX * pageSize.width, y: focus.minY * pageSize.height,
+                     width: focus.width * pageSize.width, height: focus.height * pageSize.height)
+    let x = box.minX - 12
+    let y = box.minY - max(6, (crop.height - box.height) / 2)
+    return CGPoint(x: min(max(x, 0), max(0, pageSize.width - crop.width)),
+                   y: min(max(y, 0), max(0, pageSize.height - crop.height)))
+}
+
+/// The starting point's focus for a page (#17): its part name, or its first text from the
+/// top, read in the background and remembered (`PageTextCache`). Nil while unknown, when the
+/// page has no text near the top, or when it can't be read on this Mac.
+@MainActor
+func instrumentPreviewFocus(for page: PDFPage, ensemble: EnsembleType) async -> CGRect? {
+    guard let lines = await PageTextCache.shared.read(page) else { return nil }
+    return partNameFocus(in: lines, order: InstrumentOrders.getOrder(for: ensemble))
 }
 
 struct PageInstrumentPreview: View {
     let page: PDFPage
-    /// Pan offset in PDF points from the default top-left position.
+    /// Pan offset in PDF points from the row's starting point.
     /// Positive y = up the page; negative y = down; positive x = right; negative x = left.
     var offset: CGPoint = .zero
+    /// Where the row starts on the page (`instrumentPreviewStart`): the part name, or the
+    /// top-left. The shared `offset` applies on top.
+    var focus: CGRect? = nil
 
     /// The full page, rendered once in the background at 2×; panning just moves it.
     @State private var cachedPageImage: NSImage?
@@ -686,7 +714,8 @@ struct PageInstrumentPreview: View {
                 // The shown area exactly fills the strip, so nothing is hidden by clipping
                 // that the minimap would still claim is visible.
                 let scale = geo.size.width / crop.width
-                let origin = instrumentPreviewOrigin(offset: offset, pageSize: pageSize, crop: crop)
+                let start = instrumentPreviewStart(focus: focus, pageSize: pageSize, crop: crop)
+                let origin = instrumentPreviewOrigin(offset: offset, pageSize: pageSize, crop: crop, start: start)
                 Image(nsImage: img)
                     .resizable()
                     .frame(width: pageSize.width * scale, height: pageSize.height * scale)
@@ -729,6 +758,8 @@ struct PageInstrumentPreview: View {
 struct PageCropOverview: View {
     let page: PDFPage
     var offset: CGPoint = .zero
+    /// The row's starting point, as `PageInstrumentPreview` takes it, so both show one window.
+    var focus: CGRect? = nil
     /// The area the preview strip shows, in PDF points (`instrumentPreviewCrop`).
     var visibleSize: CGSize? = nil
     /// When set, the minimap is draggable: reports an incremental PDF-point delta to add
@@ -802,7 +833,8 @@ struct PageCropOverview: View {
     private var cropIndicator: some View {
         let page = pageDims, thumb = thumbSize
         let crop = visibleSize ?? instrumentPreviewCrop(pageSize: page, stripSize: .zero)
-        let origin = instrumentPreviewOrigin(offset: offset, pageSize: page, crop: crop)
+        let start = instrumentPreviewStart(focus: focus, pageSize: page, crop: crop)
+        let origin = instrumentPreviewOrigin(offset: offset, pageSize: page, crop: crop, start: start)
         let sx = thumb.width / max(page.width, 1)
         let sy = thumb.height / max(page.height, 1)
         return Rectangle()

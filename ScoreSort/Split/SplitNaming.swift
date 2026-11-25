@@ -535,6 +535,9 @@ struct SplitFileNamingRow: View {
     @State private var stripSize: CGSize = .zero
     /// Running translation of the in-progress strip drag, so we apply incremental deltas.
     @State private var lastStripDrag: CGSize = .zero
+    /// Where on the page this row's preview starts: the part name read off it, or its first
+    /// text (#17). Nil — the top-left — until it's been read, or when there's none.
+    @State private var previewFocus: CGRect?
 
     /// (cropW, cropH, pageW, pageH) in PDF points: the area the preview strip shows
     /// (`instrumentPreviewCrop`, the same calculation the preview and minimap use).
@@ -544,13 +547,22 @@ struct SplitFileNamingRow: View {
         return (crop.width, crop.height, pageSize.width, pageSize.height)
     }
 
-    /// Adds a PDF-point delta to the shared pan offset, clamped to the page's valid range
-    /// (x: 0…pageW-cropW, y: -(pageH-cropH)…0) so dragging stops cleanly at the edges.
+    /// This row's starting point on `pg`, in PDF points from the top-left.
+    private func previewStart(_ pg: PDFPage) -> CGPoint {
+        let d = cropDims(pg)
+        return instrumentPreviewStart(focus: previewFocus, pageSize: CGSize(width: d.pageW, height: d.pageH),
+                                      crop: CGSize(width: d.cropW, height: d.cropH))
+    }
+
+    /// Adds a PDF-point delta to the shared pan offset, clamped so this row's window stays on
+    /// its page (x: −start…pageW−cropW−start, y the same way up), so dragging stops cleanly at
+    /// the edges. Other rows, starting elsewhere, clamp what they show themselves.
     private func applyPan(_ delta: CGSize) {
         guard let pg = page else { return }
         let d = cropDims(pg)
-        previewOffset.x = min(max(previewOffset.x + delta.width,  0), max(0, d.pageW - d.cropW))
-        previewOffset.y = min(max(previewOffset.y + delta.height, -(d.pageH - d.cropH)), 0)
+        let start = previewStart(pg)
+        previewOffset.x = min(max(previewOffset.x + delta.width, -start.x), max(-start.x, d.pageW - d.cropW - start.x))
+        previewOffset.y = min(max(previewOffset.y + delta.height, -(d.pageH - d.cropH - start.y)), start.y)
     }
 
     private var isFieldFocused: Bool { fieldFocus.wrappedValue == fileIndex }
@@ -824,7 +836,7 @@ struct SplitFileNamingRow: View {
                     // the overlay always receives the container's fixed 150 pt height as
                     // its layout size, completely independent of whatever
                     // PageInstrumentPreview draws (or redraws) inside.
-                    PageInstrumentPreview(page: pg, offset: previewOffset)
+                    PageInstrumentPreview(page: pg, offset: previewOffset, focus: previewFocus)
                         .allowsHitTesting(false)
                         .frame(maxWidth: .infinity)
                         .frame(height: 150)
@@ -834,11 +846,17 @@ struct SplitFileNamingRow: View {
                         .overlay { panOverlay }
 
                     // Minimap: full-page thumbnail with crop indicator (drag to reposition)
-                    PageCropOverview(page: pg, offset: previewOffset,
+                    PageCropOverview(page: pg, offset: previewOffset, focus: previewFocus,
                                      visibleSize: CGSize(width: cropDims(pg).cropW, height: cropDims(pg).cropH),
                                      onPanBy: applyPan)
                         .frame(width: 52, height: 70)
                         .padding(.top, (150 - 70) / 2)  // vertically centre against the 150pt strip
+                }
+                // Read the page in the background and start at its part name; until then (or
+                // with no text found) the preview shows the top-left, as it always did.
+                .task(id: ObjectIdentifier(pg)) {
+                    previewFocus = nil
+                    previewFocus = await instrumentPreviewFocus(for: pg, ensemble: ensemble)
                 }
             } else {
                 RoundedRectangle(cornerRadius: 4)

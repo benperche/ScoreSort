@@ -606,6 +606,32 @@ struct InstrumentPreviewAreaTests {
         #expect(instrumentPreviewOrigin(offset: CGPoint(x: 9999, y: -9999), pageSize: a4, crop: crop) == CGPoint(x: 395, y: 809))
         #expect(instrumentPreviewOrigin(offset: CGPoint(x: -50, y: 50), pageSize: a4, crop: crop) == .zero)
     }
+
+    @Test("Each row starts a little above and left of its part name; the shared pan applies on top")
+    func startsAtTheName() {
+        let crop = CGSize(width: 200, height: 30)
+        // A name 20 pt tall, 100 pt in and 80 pt down an A4 page.
+        let focus = CGRect(x: 100.0 / 595, y: 80.0 / 842, width: 120.0 / 595, height: 20.0 / 842)
+        let start = instrumentPreviewStart(focus: focus, pageSize: a4, crop: crop)
+        #expect(abs(start.x - 88) < 0.001)                       // 12 pt to its left
+        #expect(abs(start.y - 74) < 0.001)                       // 6 pt above it
+        // The shared offset moves every row from its own start; still kept on the page.
+        let moved = instrumentPreviewOrigin(offset: CGPoint(x: 10, y: 4), pageSize: a4, crop: crop, start: start)
+        #expect(abs(moved.x - 98) < 0.001 && abs(moved.y - 70) < 0.001)
+        #expect(instrumentPreviewOrigin(offset: CGPoint(x: -500, y: 500), pageSize: a4, crop: crop, start: start) == .zero)
+    }
+
+    @Test("A short name sits in the middle of a tall window; no focus is the top-left; near an edge it stays on the page")
+    func startEdges() {
+        let tall = CGSize(width: 100, height: 100)
+        let focus = CGRect(x: 0.5, y: 0.5, width: 0.1, height: 20.0 / 842)
+        #expect(abs(instrumentPreviewStart(focus: focus, pageSize: a4, crop: tall).y - (421 - 40)) < 0.001)
+        #expect(instrumentPreviewStart(focus: nil, pageSize: a4, crop: tall) == .zero)
+        let corner = CGRect(x: 0.005, y: 0.002, width: 0.1, height: 0.02)
+        #expect(instrumentPreviewStart(focus: corner, pageSize: a4, crop: tall) == .zero)
+        let farRight = CGRect(x: 0.95, y: 0.98, width: 0.04, height: 0.01)
+        #expect(instrumentPreviewStart(focus: farRight, pageSize: a4, crop: tall) == CGPoint(x: 495, y: 742))
+    }
 }
 
 @Suite("Naming preview page")
