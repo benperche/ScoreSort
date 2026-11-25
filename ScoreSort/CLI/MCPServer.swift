@@ -79,10 +79,10 @@ enum ScoreSortMCPServer {
                  description: "How to use ScoreSort's tools for common jobs (split and name parts, scans of double pages, score-order renaming, combining with presets). Read this first.",
                  params: []),
             Tool(name: "scoresort_find", command: "find", title: "Find files and folders", effect: .readsOnly,
-                 description: "Find the files the person means by name — PDFs, images or folders, newest first — to get the paths the other tools need. Searches only the folders the person has shared with AI assistants in ScoreSort's settings (or a folder they've given you by path). Use it whenever you're given a name rather than a full path (\"the Holst scan\", \"my Junior Band parts folder\"). If it finds nothing or there are no shared folders, ask the person to select the file in Finder, press Option-Command-C (Copy as Pathname) and paste the path — dragging a file into the chat sends you a copy, which ScoreSort can't use.",
+                 description: "Find the files the person means by name — PDFs, images or folders, newest first — to get the paths the other tools need. Searches only the folders the person has shared with AI assistants in ScoreSort's settings. Use it whenever you're given a name rather than a full path (\"the Holst scan\", \"my Junior Band parts folder\"). If it finds nothing or there are no shared folders, ask the person to select the file in Finder, press Option-Command-C (Copy as Pathname) and paste the path — dragging a file into the chat sends you a copy, which ScoreSort can't use.",
                  params: [Param(key: "words", option: nil, kind: .strings, description: "Words from the name, e.g. [\"holst\", \"scan\"]. All must appear, in any order."),
                           Param(key: "kind", option: "kind", kind: .string, description: "pdf (default), image (photos or scans saved as pictures), folder, or any.", choices: ["pdf", "image", "folder", "any"]),
-                          Param(key: "folders", option: "in", kind: .strings, description: "Absolute paths of folders to look in instead of the shared ones — only folders the person has given you."),
+                          Param(key: "folders", option: "in", kind: .strings, description: "Absolute paths of folders to look in instead of all the shared ones: inside a shared folder, unless the person has allowed other paths."),
                           Param(key: "limit", option: "limit", kind: .number, description: "How many results (default 20).")]),
             Tool(name: "scoresort_info", command: "info", title: "Describe a PDF", effect: .readsOnly,
                  description: "Describe a PDF: page count, page sizes, bookmarks (with the part names ScoreSort would suggest), and whether it's a scan of double pages that needs scoresort_split_scans first.",
@@ -317,9 +317,10 @@ enum ScoreSortMCPServer {
 
     static var instructions: String {
         """
-        ScoreSort manages music parts as PDFs. It works on files on the person's Mac, by path: given a name, \
-        find it with scoresort_find (it searches the folders they've shared); otherwise ask them to copy the \
-        path in Finder (select, Option-Command-C) and paste it. A file dragged into the chat is a copy \
+        ScoreSort manages music parts as PDFs. It works only on files in the folders the person has shared \
+        with AI assistants in ScoreSort's settings (unless they've also allowed paths they give). Given a name, \
+        find it with scoresort_find. A file outside those folders is refused with an error: ask them to share \
+        its folder in ScoreSort ▸ Settings ▸ AI Assistants. A file dragged into the chat is a copy \
         ScoreSort can't reach. \
         To split a PDF into named parts: scoresort_info, then \
         scoresort_preview to read the part names off the tops of the pages, then scoresort_split with \
@@ -329,7 +330,7 @@ enum ScoreSortMCPServer {
     }
 
     /// Handles one JSON-RPC message; returns the response, or nil for a notification.
-    static func handle(_ message: [String: Any]) -> [String: Any]? {
+    static func handle(_ message: [String: Any], access: AIFileAccess = .current) -> [String: Any]? {
         let id = message["id"]
         let method = message["method"] as? String ?? ""
         func reply(_ result: [String: Any]) -> [String: Any]? {
@@ -359,7 +360,7 @@ enum ScoreSortMCPServer {
             guard let name = params["name"] as? String, let tool = tools.first(where: { $0.name == name }) else {
                 return failure(-32602, "Unknown tool: \(params["name"] ?? "none")")
             }
-            return reply(callTool(tool, arguments: params["arguments"] as? [String: Any] ?? [:]))
+            return reply(callTool(tool, arguments: params["arguments"] as? [String: Any] ?? [:], access: access))
         case "resources/list":
             return reply(["resources": [Any]()])
         case "prompts/list":
@@ -370,7 +371,19 @@ enum ScoreSortMCPServer {
         }
     }
 
-    static func callTool(_ tool: Tool, arguments: [String: Any]) -> [String: Any] {
+    /// The file and folder paths a parsed call carries: every positional (except `find`'s
+    /// search words) and the `--out` / `--in` options — so a new tool is covered without listing
+    /// its parameters here. `undo-rename` takes none, but moves the files its journal names.
+    static func paths(in parsed: CommandArguments, command: String) -> [String] {
+        var paths = command == "find" ? [] : parsed.positionals
+        paths += parsed.all("out") + parsed.all("in")
+        if command == "undo-rename", let journal = RenameJournal.load(from: RenameJournal.defaultURL) {
+            paths += journal.moves.flatMap { [$0.from, $0.to] }
+        }
+        return paths
+    }
+
+    static func callTool(_ tool: Tool, arguments: [String: Any], access: AIFileAccess = .current) -> [String: Any] {
         func errorResult(_ text: String) -> [String: Any] {
             ["content": [["type": "text", "text": text]], "isError": true]
         }
@@ -381,6 +394,9 @@ enum ScoreSortMCPServer {
         do {
             let argv = try argv(for: tool, arguments: arguments)
             let parsed = try CommandArguments.parse(argv, valueOptions: spec.valueOptions, flagOptions: spec.flagOptions)
+            // An AI chat app works only inside the shared folders (#6) unless the person allowed
+            // other paths. Checked here, so the terminal command is unaffected.
+            try access.check(paths(in: parsed, command: tool.command))
             let result = try spec.run(parsed)
             var content: [[String: Any]] = [["type": "text", "text": result.text + "\n\n" + jsonText(result.json)]]
             for url in result.images.prefix(12) {
@@ -454,6 +470,10 @@ Ground rules
     several match, ask which. If nothing's found, or nothing's shared, ask them to select the
     file or folder in Finder, press ⌥⌘C (Copy as Pathname) and paste it. A file dragged into
     a chat is a copy in the conversation, not on the Mac — ScoreSort can't use it.
+  • Through the MCP server (AI chat apps), ScoreSort only reads and writes inside the shared
+    folders, unless the person has also allowed paths they give in its settings. A path
+    outside comes back as an error saying so: ask them to share that folder. The terminal
+    command isn't limited.
   • ScoreSort can't read text on pages. You read part names yourself, from `preview` images.
   • Every command that writes has --dry-run. Nothing is overwritten without --overwrite.
     `rename` only plans until --apply. Dry-run first, read the warnings, then run it.

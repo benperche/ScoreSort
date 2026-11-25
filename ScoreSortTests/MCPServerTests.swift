@@ -161,18 +161,20 @@ struct MCPServerTests {
         let folder = temporaryFolder("mcp")
         let file = folder.appendingPathComponent("Band.pdf")
         writeDrawnPDF(pages: 4, to: file)
+        let shared = AIFileAccess(sharedFolders: [folder], allowsGivenPaths: false)
         let ok = try #require(ScoreSortMCPServer.handle(
             ["jsonrpc": "2.0", "id": 2, "method": "tools/call",
              "params": ["name": "scoresort_split",
                         "arguments": ["file": file.path, "out": folder.appendingPathComponent("parts").path,
-                                      "parts": [["pages": "1-2", "name": "Flute"], ["pages": "3-4", "name": "Oboe"]]]]]))
+                                      "parts": [["pages": "1-2", "name": "Flute"], ["pages": "3-4", "name": "Oboe"]]]]],
+            access: shared))
         let result = try #require(ok["result"] as? [String: Any])
         #expect(result["isError"] as? Bool == false)
         #expect(FileManager.default.fileExists(atPath: folder.appendingPathComponent("parts/Oboe.pdf").path))
 
         let bad = try #require(ScoreSortMCPServer.handle(
             ["jsonrpc": "2.0", "id": 3, "method": "tools/call",
-             "params": ["name": "scoresort_info", "arguments": ["file": "/no/such.pdf"]]]))
+             "params": ["name": "scoresort_info", "arguments": ["file": "/no/such.pdf"]]], access: shared))
         #expect((bad["result"] as? [String: Any])?["isError"] as? Bool == true)
     }
 
@@ -183,7 +185,8 @@ struct MCPServerTests {
         writeDrawnPDF(pages: 3, to: file)
         let response = try #require(ScoreSortMCPServer.handle(
             ["jsonrpc": "2.0", "id": 4, "method": "tools/call",
-             "params": ["name": "scoresort_preview", "arguments": ["file": file.path]]]))
+             "params": ["name": "scoresort_preview", "arguments": ["file": file.path]]],
+            access: AIFileAccess(sharedFolders: [folder], allowsGivenPaths: false)))
         let content = try #require((response["result"] as? [String: Any])?["content"] as? [[String: Any]])
         let images = content.filter { $0["type"] as? String == "image" }
         #expect(images.count == 1)   // one contact sheet
@@ -222,5 +225,93 @@ struct MCPServerTests {
             #expect(object?["jsonrpc"] as? String == "2.0")
         }
         #expect(process.terminationStatus == 0)
+    }
+}
+
+@Suite("MCP: only the shared folders")
+struct MCPFileAccessTests {
+
+    private func call(_ name: String, _ arguments: [String: Any], _ access: AIFileAccess) throws -> (isError: Bool, text: String) {
+        let response = try #require(ScoreSortMCPServer.handle(
+            ["jsonrpc": "2.0", "id": 1, "method": "tools/call", "params": ["name": name, "arguments": arguments]],
+            access: access))
+        let result = try #require(response["result"] as? [String: Any])
+        let text = (result["content"] as? [[String: Any]])?.first?["text"] as? String ?? ""
+        return (result["isError"] as? Bool ?? false, text)
+    }
+
+    @Test("a file outside the shared folders is refused, saying how to allow it; inside works")
+    func insideAndOutside() throws {
+        let shared = temporaryFolder("shared"), elsewhere = temporaryFolder("elsewhere")
+        let inside = shared.appendingPathComponent("In.pdf"), outside = elsewhere.appendingPathComponent("Out.pdf")
+        writeDrawnPDF(pages: 1, to: inside)
+        writeDrawnPDF(pages: 1, to: outside)
+        let access = AIFileAccess(sharedFolders: [shared], allowsGivenPaths: false)
+        #expect(try call("scoresort_info", ["file": inside.path], access).isError == false)
+        let refused = try call("scoresort_info", ["file": outside.path], access)
+        #expect(refused.isError)
+        #expect(refused.text.contains("Settings ▸ AI Assistants"))
+    }
+
+    @Test("an output outside the shared folders is refused, and nothing is written")
+    func outputOutside() throws {
+        let shared = temporaryFolder("shared"), elsewhere = temporaryFolder("elsewhere")
+        let file = shared.appendingPathComponent("Band.pdf")
+        writeDrawnPDF(pages: 2, to: file)
+        let access = AIFileAccess(sharedFolders: [shared], allowsGivenPaths: false)
+        let out = elsewhere.appendingPathComponent("parts")
+        let result = try call("scoresort_split", ["file": file.path, "out": out.path,
+                                                  "parts": [["pages": "1-2", "name": "Flute"]]], access)
+        #expect(result.isError)
+        #expect(!FileManager.default.fileExists(atPath: out.path))
+    }
+
+    @Test("..  and symlinks can't reach outside a shared folder")
+    func noEscapes() throws {
+        let shared = temporaryFolder("shared"), elsewhere = temporaryFolder("elsewhere")
+        let secret = elsewhere.appendingPathComponent("Secret.pdf")
+        writeDrawnPDF(pages: 1, to: secret)
+        let link = shared.appendingPathComponent("link")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: elsewhere)
+        let access = AIFileAccess(sharedFolders: [shared], allowsGivenPaths: false)
+        #expect(!access.allows(link.appendingPathComponent("Secret.pdf").path))
+        #expect(!access.allows(shared.path + "/../" + elsewhere.lastPathComponent + "/Secret.pdf"))
+        // A sibling folder whose name merely starts the same isn't inside.
+        #expect(!access.allows(shared.path + "-other/x.pdf"))
+        #expect(access.allows(shared.appendingPathComponent("New folder/new.pdf").path))   // not made yet: fine
+    }
+
+    @Test("letter case doesn't matter, as on the Mac's disks")
+    func caseInsensitive() throws {
+        let shared = temporaryFolder("shared")
+        let file = shared.appendingPathComponent("Band.pdf")
+        writeDrawnPDF(pages: 1, to: file)
+        let access = AIFileAccess(sharedFolders: [shared], allowsGivenPaths: false)
+        let caseInsensitive = (try? shared.resourceValues(forKeys: [.volumeSupportsCaseSensitiveNamesKey])
+            .volumeSupportsCaseSensitiveNames) == false
+        if caseInsensitive { #expect(access.allows(shared.path.uppercased() + "/BAND.PDF")) }
+    }
+
+    @Test("with “allow files I give by path” on, any path is used, as before")
+    func allowGiven() throws {
+        let elsewhere = temporaryFolder("elsewhere")
+        let file = elsewhere.appendingPathComponent("Out.pdf")
+        writeDrawnPDF(pages: 1, to: file)
+        let access = AIFileAccess(sharedFolders: [], allowsGivenPaths: true)
+        #expect(try call("scoresort_info", ["file": file.path], access).isError == false)
+    }
+
+    @Test("find's search words aren't paths; its folders are checked")
+    func findWords() throws {
+        let shared = temporaryFolder("shared"), elsewhere = temporaryFolder("elsewhere")
+        let access = AIFileAccess(sharedFolders: [shared], allowsGivenPaths: false)
+        #expect(try call("scoresort_find", ["words": ["holst"], "folders": [shared.path]], access).isError == false)
+        #expect(try call("scoresort_find", ["words": ["holst"], "folders": [elsewhere.path]], access).isError)
+    }
+
+    @Test("preview's own image folder is always allowed")
+    func previewScratch() {
+        let access = AIFileAccess(sharedFolders: [], allowsGivenPaths: false)
+        #expect(access.allows(AIFileAccess.previewScratchFolder.appendingPathComponent("abc/x.jpg").path))
     }
 }

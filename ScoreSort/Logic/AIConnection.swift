@@ -30,6 +30,12 @@ enum AIConnection {
             .map { URL(fileURLWithPath: $0, isDirectory: true) }
     }
 
+    /// Settings ▸ AI Assistants ▸ "Also allow files and folders I give by path". Off: an AI
+    /// chat app (the MCP server) may only read and write inside the shared folders. On: it may
+    /// use any path it's given, as before. The terminal command is never limited.
+    static let allowGivenPathsKey = "aiAllowGivenPaths"
+    static var allowsGivenPaths: Bool { UserDefaults.standard.bool(forKey: allowGivenPathsKey) }
+
     static func setSharedFolders(_ folders: [URL]) {
         var seen = Set<String>()
         let paths = folders.map(\.standardizedFileURL.path).filter { seen.insert($0).inserted }
@@ -124,5 +130,59 @@ enum AIConnection {
         guard let data = try? JSONSerialization.data(withJSONObject: dict, options: [.prettyPrinted, .withoutEscapingSlashes]),
               let text = String(data: data, encoding: .utf8) else { return "" }
         return text
+    }
+}
+
+// MARK: - What an AI chat app may touch (#6)
+
+/// Where the MCP server may read and write: inside the shared folders, unless the person
+/// allowed any path they give. Checked on every path a tool call carries, after resolving
+/// `..`, symlinks and letter case, so none of those can reach outside a shared folder.
+struct AIFileAccess {
+    var sharedFolders: [URL]
+    var allowsGivenPaths: Bool
+
+    /// The person's settings.
+    static var current: AIFileAccess {
+        AIFileAccess(sharedFolders: AIConnection.sharedFolders, allowsGivenPaths: AIConnection.allowsGivenPaths)
+    }
+
+    /// Where `scoresort_preview` keeps its images when no folder is given: always allowed.
+    static var previewScratchFolder: URL {
+        FileManager.default.temporaryDirectory.appendingPathComponent("ScoreSort previews", isDirectory: true)
+    }
+
+    /// `url` as the file system knows it: symlinks resolved and letters in their real case. A
+    /// path that doesn't exist yet (an output) is its nearest existing folder's real path plus
+    /// the rest.
+    static func canonical(_ url: URL) -> String {
+        var existing = url.standardizedFileURL
+        var rest: [String] = []
+        while !FileManager.default.fileExists(atPath: existing.path) {
+            let parent = existing.deletingLastPathComponent()
+            if parent.path == existing.path { break }
+            rest.insert(existing.lastPathComponent, at: 0)
+            existing = parent
+        }
+        let resolved = existing.resolvingSymlinksInPath()
+        let real = (try? resolved.resourceValues(forKeys: [.canonicalPathKey]).canonicalPath) ?? resolved.path
+        return rest.reduce(real) { ($0 as NSString).appendingPathComponent($1) }
+    }
+
+    /// True when ScoreSort may read or write `path` for an AI chat app.
+    func allows(_ path: String) -> Bool {
+        if allowsGivenPaths { return true }
+        let target = Self.canonical(URL(fileURLWithPath: (path as NSString).expandingTildeInPath))
+        let roots = sharedFolders.map { Self.canonical($0) } + [Self.canonical(Self.previewScratchFolder)]
+        return roots.contains { root in target == root || target.hasPrefix(root.hasSuffix("/") ? root : root + "/") }
+    }
+
+    /// Throws for the first path ScoreSort may not use, saying how to allow it.
+    func check(_ paths: [String]) throws {
+        guard let refused = paths.first(where: { !allows($0) }) else { return }
+        let name = (refused as NSString).lastPathComponent
+        throw CommandError("“\(name)” (\(refused)) isn't in a folder shared with AI assistants, so ScoreSort won't use it. "
+            + "Ask the person to share its folder in ScoreSort ▸ Settings ▸ AI Assistants, or to turn on "
+            + "“Also allow files and folders I give by path” there.")
     }
 }

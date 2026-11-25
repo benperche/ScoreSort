@@ -218,6 +218,8 @@ final class AIAssistantsModel: ObservableObject {
 
 struct AIAssistantsPreferencesView: View {
     @StateObject private var model = AIAssistantsModel()
+    /// Whether an AI chat app may use files outside the shared folders when given their path.
+    @AppStorage(AIConnection.allowGivenPathsKey) private var allowGivenPaths = false
     @State private var confirmingClaudeRestart: Bool? = nil   // the connect/disconnect waiting on a yes
 
     var body: some View {
@@ -327,7 +329,7 @@ struct AIAssistantsPreferencesView: View {
     private var foldersSection: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
-                Text("Your assistant can find files by name — “the Holst scan” — only in folders you share here, such as the folder you keep band parts or scans in. It can't see anything else on your Mac.")
+                Text("Your assistant can find, open and save files only in the folders you share here, such as the folder you keep band parts or scans in, and you can name them the way you would to a person: “the Holst scan”. It can't see or change anything else on your Mac.")
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 if model.sharedFolders.isEmpty {
@@ -366,17 +368,27 @@ struct AIAssistantsPreferencesView: View {
                     .background(RoundedRectangle(cornerRadius: 6).fill(Color(NSColor.controlBackgroundColor)))
                 }
                 HStack(alignment: .top) {
-                    Text("Anything else: select it in Finder, press ⌥⌘C (Copy as Pathname) and paste it into the chat. Dragging a file into the chat doesn't work — that sends Claude a copy, not the file on your Mac.")
+                    Text("Dragging a file into the chat doesn't work: that sends Claude a copy, not the file on your Mac.")
                         .font(.caption)
                         .foregroundColor(.secondary)
                         .fixedSize(horizontal: false, vertical: true)
                     Spacer()
                     Button("Add Folder\u{2026}") { model.addSharedFolders() }
                 }
+                Toggle(isOn: $allowGivenPaths) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text("Also allow files and folders I give by path")
+                        Text("Lets your assistant use a file outside these folders when you paste its path into the chat (select it in Finder and press ⌥⌘C). Leave it off to keep your assistant to the folders above.")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .toggleStyle(.checkbox)
             }
             .padding(6)
         } label: {
-            Label("Folders your assistant can look in", systemImage: "folder.badge.person.crop")
+            Label("Folders your assistant can use", systemImage: "folder.badge.person.crop")
                 .font(.headline)
         }
     }
@@ -384,7 +396,7 @@ struct AIAssistantsPreferencesView: View {
     private var commandSection: some View {
         GroupBox {
             VStack(alignment: .leading, spacing: 10) {
-                Text("For AI tools that work in a terminal — Claude Code, Codex and the like — and for scripts: a “scoresort” command.")
+                Text("For AI tools that work in a terminal — Claude Code, Codex and the like — and for scripts: a “scoresort” command. It isn't limited to your shared folders, because a terminal can already reach your files.")
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                 switch model.command {
@@ -438,7 +450,7 @@ struct AIAssistantsPreferencesView: View {
                     Text(example)
                         .fixedSize(horizontal: false, vertical: true)
                 }
-                Text("Files in your shared folders can be named the way you would to a person; anything else, paste its path (⌥⌘C in Finder). If a shared folder is inside Documents, Desktop or Downloads, macOS asks once whether to allow it.")
+                Text("Files in your shared folders can be named the way you would to a person. If a shared folder is inside Documents, Desktop or Downloads, macOS asks once whether to allow it.")
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .padding(.top, 4)
