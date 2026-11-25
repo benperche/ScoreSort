@@ -1,6 +1,6 @@
 # Split PDF (tab 2, ⌘3)
 
-Files: `ScoreSort/Split/SplitView.swift` (Step 1, `BookletOrderSheet`, `SplitControlsSection`), `Split/ScanSplitSheet.swift` (Split Double Pages), `Split/SplitBookmarks.swift` (the bookmark prompt), `Split/SplitNaming.swift` (Step 2: `SplitNamingStageView`, `SplitFileNamingRow`, plus Step 1's `FilePreviewCard`), `Split/SplitPrefixStep.swift` (Step 3 `PrefixOrderStepView`, shared with Bulk Rename; `RenameSummaryView`; `PageInstrumentPreview`, `PageCropOverview`), `Logic/SplitLogic.swift` (split maths, A3, bookmarks, booklet *de*imposition, the file writer), `Logic/ScanSplitLogic.swift` (double-page scans), `Logic/InstrumentNames.swift` (Step 2 suggestions), `Logic/RenameLogic.swift` (`PrefixItem` and score-order numbering). The view model is the shared `PDFManager` type (its own `@StateObject` here; see [shared.md](shared.md#shared-infrastructure)).
+Files: `ScoreSort/Split/SplitModel.swift` (`SplitModel`: the document and Step 1's state, with the operations that change them), `Split/SplitView.swift` (Step 1's screen, the stages, sheets and saving; `BookletOrderSheet`, `SplitControlsSection`), `Split/ScanSplitSheet.swift` (Split Double Pages), `Split/SplitBookmarks.swift` (the bookmark prompt), `Split/SplitNaming.swift` (Step 2: `SplitNamingStageView`, `SplitFileNamingRow`, plus Step 1's `FilePreviewCard`), `Split/SplitPrefixStep.swift` (Step 3 `PrefixOrderStepView`, shared with Bulk Rename; `RenameSummaryView`; `PageInstrumentPreview`, `PageCropOverview`), `Logic/SplitLogic.swift` (split maths, A3, bookmarks, booklet *de*imposition, the file writer), `Logic/ScanSplitLogic.swift` (double-page scans), `Logic/InstrumentNames.swift` (Step 2 suggestions), `Logic/RenameLogic.swift` (`PrefixItem` and score-order numbering). `SplitView` holds a `SplitModel` as its `@StateObject`; the model holds the tab's own `PDFManager` ([shared.md](shared.md#shared-infrastructure)), which loads the file and remembers `sourceURL`.
 
 Booklet *imposition* (Combine's direction) and printing: [printing-booklets.md](printing-booklets.md). Stamping split output: [stamp.md](stamp.md). The CLI's `split` and `split-scans`: [cli-mcp.md](cli-mcp.md). "Sort into folders": [rename.md](rename.md#sort-into-folders). Menu slice: [shared.md](shared.md#the-tabcommands--tabslice--menuaction-bridge).
 
@@ -10,12 +10,30 @@ Gotchas that concern this tab: [gotchas.md § Split](gotchas.md#split), [§ PDFK
 
 `SplitView` switches on a private `SplitStage`: `.split` (Step 1, `splitStageBody`) → `.naming` (Step 2, `SplitNamingStageView`) → `.prefix` (Step 3, `PrefixOrderStepView`, only with "Prefix score order" on) → `.summary` (`RenameSummaryView`).
 
-**The document `onChange` sits on the `Group` around all four stages**, not inside Step 1, so a PDF arriving during any stage resets everything. (Inside Step 1 it was silent during later stages, and an earlier file's names bled through.) A new document resets page, names, pan, skips, selection, `skipMode`, `documentRebuilt` and the undo stacks, then:
-1. If `suppressDocumentReset` is set (an in-place rebuild), it clears that flag, `suppressNextA3Detection` and the undo stacks and returns, keeping all split state.
-2. If it looks like a double-page scan (`isA3Landscape || looksLikeDoublePageScan`) and `suppressNextA3Detection` isn't set, it runs `setupSplitState(offerBookmarks: false)` and opens Split Double Pages.
-3. Otherwise a near-miss (`looksLikeA3Landscape`) shows a hint banner, `setupSplitState()` runs, and a just-split scan's `pendingScanSplitSkips` are applied (see below).
+## The model — `Split/SplitModel.swift`
 
-Clearing the document (nil) resets the whole flow back to `.split`, including both single-use load flags (`suppressNextA3Detection`, `pendingScanSplitSkips`).
+`SplitModel` owns the document and Step 1's state, and **every change of document is one of its operations**, so nothing has to work out afterwards what kind of change it was. The view used to reset in an `onChange` of the document. It told in-place rebuilds apart by `suppressDocumentReset`, `suppressNextA3Detection` and `pendingScanSplitSkips`, flags set just before each assignment; they're gone now. Only the model writes `pdfManager.pdfDocument`. It forwards the manager's `objectWillChange`, so the view redraws through the model. `fileSizes`, `skippedPages`, `selectedFileIndices`, `documentRebuilt`, `documentBookmarks` and `lastBookletOrder` are `private(set)`. `currentPage`, `stride`, `skipMode`, `baseFileName` and `customFileNames` are bound by controls and Step 2.
+
+| Operation | What it does |
+|-----------|--------------|
+| `load(from:) -> SplitLoadSuggestion?` | Opens the PDF and starts afresh (`startAfresh`): one file named after the PDF, page 1, no names, skips or selection, `skipMode = .file`, `documentRebuilt` off, bookmarks read, undo cleared. `stride` and `lastBookletOrder` carry over. Answers `.splitDoublePages` (`isA3Landscape` or `looksLikeDoublePageScan`), `.doublePageHint` (`looksLikeA3Landscape`) or `.ordinaryPages`. Nil if the file wouldn't open, and then nothing changes. **This is the only place the double-page check runs.** So nothing ScoreSort builds is offered Split Double Pages, and no rebuild can stop the next PDF being offered it (#29). |
+| `clear()` | Closes the document and resets everything, `lastBookletOrder` included. |
+| `applyScanSplit(_:to:) -> PDFDocument?` | Split Double Pages (below): the new document, `startAfresh`, then the sheet's skips, `skipMode = .page`, `documentRebuilt`. |
+| `swapCurrentPageWithNext()`, `applyBookletOrder(pages:order:)`, `applyBookletOrderToAllMatchingFiles(order:n:)` | In-place rebuilds (below), through the private `replaceInPlace`. |
+| `toggleSplitAt(page:)`, `applyStride()`, `restrideFromCurrentPage()`, `clearAllSplits()`, `toggleSkipPage(_:)`, `toggleSkipFiles(_:)`, `toggleSkipForDeleteKey()` | Undoable edits. |
+| `applyBookmarks(_:nameStyle:)` | Bookmarks (below); a new undo history. |
+| `undo()`, `redo()` | Step 1 undo (below). |
+| `goToPreviousPage(toFirst:)`, `goToNextPage(toLast:)`, `goToPreviousFile(extendingSelection:)`, `goToNextFile(extendingSelection:)`, `selectFile(_:command:shift:)` | Navigation and the card selection, for the keys and clicks the view handles. |
+
+**The view** (`SplitView`) keeps:
+- the stages, sheets, panels and banners;
+- focus and the Step 2 preview pan;
+- the `NSEvent` monitor and `onKeyPress` handlers, with their tab guards;
+- the background save and `syncTabCommands`.
+
+Every way a PDF arrives goes through `openFile`: the drop zone (`DropZoneView`'s `onOpen`), Choose PDF…, Finder or the Dock (`takePendingOpen`), and a drop on the summary. `openFile` calls `load(from:)` and brings the flow back to Step 1 whichever stage was showing (`showNewDocument`: focus, pan reset, `.split`). Then it opens Split Double Pages, or shows the hint and offers bookmarks.
+
+Clear File, Start Over and the menu's Clear go through `clearFile`. It also resets the view's own state: the stage, the Step 3 items, the summary and the banners.
 
 ## Step 1 — split points
 
@@ -23,7 +41,7 @@ Clearing the document (nil) resets the whole flow back to `.split`, including bo
 
 The split is an **ordered array of page counts**, one per output file: `[2, 2, 1, 3]` is four files. Everything else is derived: `splitMarkers` (pages that start a file, page 0 excluded — for drawing only), `pageToFileMapping` (page → file; build it once per redraw — the file-card list does — not once per card), `pagesForFile` (`splitFilePages`, a range straight from `fileSizes`), `activeFileCount`, `skippedFileIndices`. Never store split points anywhere else ([gotcha](gotchas.md#split)).
 
-Other state: `stride` (1–20), `currentPage`, `baseFileName`, `customFileNames: [Int: String]` (file index → suffix), `skippedPages: Set<Int>`, `selectedFileIndices`, `skipMode` (`.file`/`.page`), `documentBookmarks`, `bookmarkOffer`, `scanSplitRequest`, `pendingScanSplitSkips`, `bookletFixRequest`, `lastBookletOrder`, the two suppress flags, `documentRebuilt`, and banner flags (`a3HintVisible`, `a3SplitNoticeVisible`, `bookletRedoNoticeVisible`).
+Other model state: `stride` (1–20), `currentPage`, `baseFileName`, `customFileNames: [Int: String]` (file index → suffix), `skippedPages: Set<Int>`, `selectedFileIndices`, `skipMode` (`.file`/`.page`), `documentBookmarks`, `lastBookletOrder` (`SplitBookletOrder`), `documentRebuilt`. The view's: `bookmarkOffer`, `scanSplitRequest`, `bookletFixRequest`, and banner flags (`a3HintVisible`, `a3SplitNoticeVisible`, `bookletRedoNoticeVisible`).
 
 Pure functions (`Logic/SplitLogic.swift`):
 
@@ -38,7 +56,7 @@ Pure functions (`Logic/SplitLogic.swift`):
 | `splitOutputIsWorthSaving(activeFiles:skippedPages:pagesRebuilt:)` | ≥ 1 active file and (≥ 2 files, or some pages skipped, or pages rebuilt). |
 | `splitOutputReplacesSource(names:folder:source:)` | Whether a name lands exactly on the source file: `isSameFile`, so any case on a case-insensitive disk, a symlinked folder or a hard link counts. False when the output doesn't exist yet. |
 
-**Continuing.** `canContinueToNaming` (the Next button, Return, the menu's primary action and `saveSplitPDF`'s guard) and Step 2's `canSave` both use `splitOutputIsWorthSaving`. `documentRebuilt` is set by Split Double Pages, Swap with Next and Fix Booklet Order and cleared on a new or cleared document: without it a part scanned on A3 and cut to A4 — still one file, nothing skipped — couldn't be saved.
+**Continuing.** `canContinueToNaming` (the Next button, Return, the menu's primary action and `saveSplitPDF`'s guard) and Step 2's `canSave` both use `splitOutputIsWorthSaving`. `documentRebuilt` is set by Split Double Pages, Swap with Next and Fix Booklet Order and cleared on a new or cleared document (all in the model): without it a part scanned on A3 and cut to A4 — still one file, nothing skipped — couldn't be saved.
 
 ### Layout
 
@@ -56,15 +74,15 @@ Left half: `SplitControlsSection` over a `PDFPageView` of the current page (with
 
 ### Keys
 
-`.onKeyPress` on Step 1 (gated on `selectedTab == 2`): ← → page (⌘ to first/last), ↑ ↓ jump between file starts (⇧ extends the file selection), Space toggles a split (not on page 0), Return continues when allowed, **S** swap with next, **R** re-stride from here.
+`.onKeyPress` on Step 1 (gated on `selectedTab == 2`): ← → page (⌘ to first/last), ↑ ↓ jump between file starts (⇧ extends the file selection), Space toggles a split (not on page 0), Return continues when allowed, **S** swap with next, **R** re-stride from here. The keys stay in the view; what they do is a model operation (`goToNextPage`, `goToNextFile`, …).
 
 An `NSEvent` local monitor (installed in `onAppear`, removed in `onDisappear`, gated on the tab and skipped when an `NSTextView` is first responder) handles:
-- **⌫ / ⌦** → `handleDeleteKey()`: `.page` skips or un-skips the current page; `.file` the selected files, or the current one.
+- **⌫ / ⌦** → `model.toggleSkipForDeleteKey()`: `.page` skips or un-skips the current page; `.file` the selected files, or the current one.
 - **⌘Z / ⇧⌘Z** (keyCode 6) → undo/redo, without an Edit-menu `UndoManager`, so it never bonks.
 
 ### Undo
 
-A view-local `[SplitSnapshot]` `undoStack`/`redoStack` (capped at 50). `SplitSnapshot` holds `fileSizes`, `skippedPages` and `customFileNames` — not the document. `pushUndo()` runs before `clearAllMarkers`, `applyStride`, `restrideFromCurrentPage`, `toggleSplitAt`, `toggleSkipFiles` and `toggleSkipPage`. The stacks are cleared on a new or cleared document, by `applyBookmarks`, **and on every in-place rebuild**, because a page reorder makes snapshot skip indices point at the wrong pages. Rebuilds (swap, booklet order, double-page split) are deliberately not undoable.
+The model's private `[SplitSnapshot]` `undoStack`/`redoStack` (capped at 50; `canUndo`/`canRedo`). `SplitSnapshot` holds `fileSizes`, `skippedPages` and `customFileNames` — not the document. `pushUndo()` runs before `clearAllSplits`, `applyStride`, `restrideFromCurrentPage`, `toggleSplitAt`, `toggleSkipFiles` and `toggleSkipPage`; undo and redo also clear the selection. The stacks are cleared on a new or cleared document, by `applyBookmarks`, **and on every in-place rebuild**, because a page reorder makes snapshot skip indices point at the wrong pages. Rebuilds (swap, booklet order, double-page split) are deliberately not undoable.
 
 `restrideFromCurrentPage()` keeps every file ending at or before the current page (trimming the one it falls inside) and applies the stride from there; names of the re-strided files are dropped. It's for a short part in an otherwise regular set (a 3-page piccolo among 4-page parts).
 
@@ -74,7 +92,12 @@ A view-local `[SplitSnapshot]` `undoStack`/`redoStack` (capped at 50). `SplitSna
 
 ### In-place rebuilds
 
-`swapCurrentPageWithNext()`, `applyBookletOrder(pages:order:)` and `applyBookletOrderToAllMatchingFiles(order:n:)` build a new `PDFDocument` with pages moved, then set `documentRebuilt` and `suppressDocumentReset` immediately before assigning `pdfManager.pdfDocument`, so split points, names and skips survive. The booklet functions also remap `skippedPages` through the permutation. "Apply to all" exists because one rebuild per file can't work: each `onChange` clears `suppressDocumentReset` before the next call could use it.
+`swapCurrentPageWithNext()`, `applyBookletOrder(pages:order:)` and `applyBookletOrderToAllMatchingFiles(order:n:)` are model operations. Each builds a new `PDFDocument` with pages moved and hands it to the private `replaceInPlace`, which sets `documentRebuilt`, clears the undo history and assigns it.
+- Split points, names and skips survive. Names are keyed by file index and the file sizes don't change, so they stay with their parts.
+- The booklet functions remap `skippedPages` through the permutation and set `lastBookletOrder`.
+- **A swap leaves skips where they were**: on the positions, not on the pages that moved.
+
+The view's `applyBookletOrder` wrapper shows the repeat-icon banner the first time. "Apply to All" reorders every file of that length in one rebuild.
 
 ## Bookmarks — `Split/SplitBookmarks.swift`
 
@@ -111,7 +134,7 @@ Built for overhead/book scanners: a mix of spreads and single pages, each croppe
 4. **Blanks.** `blankPieces` → `blankKind` per piece, ignoring its outer 6%: `.black` (mean < 0.35 and ≥ 90% dark) or `.white` (< 0.15% ink, so empty staff paper counts as empty; a sliver is `.white`). Suggested as skips.
 5. **Review.** A lazy grid of `ScanSplitCard`s. Drag near the cut (±10 pt, resize cursor) to move it; click a piece to toggle its skip; a One/Two Pages switch; page-number badges in output order (`scanPieceOutputIndices`); First page Left/Right (`leftFirst`). Dragging and clicking share one `DragGesture(minimumDistance: 0)` — two gestures fought over the same clicks. A finished drag re-suggests skips unless the user has clicked one on that scan (`skipEdited`). The One/Two switch is **two plain buttons drawn as a segmented control**, not a segmented `Picker` ([why](gotchas.md#swiftui-and-appkit)).
 6. **Same cut on every page** (`sameCutForAll`, header checkbox). On by default when `isUniformSheetScan(doc)` — every page the same landscape size (±2 pt, aspect ≥ 1.2), i.e. a flatbed A3 or Tabloid scan — so those split consistently down the middle with no per-scan checking: open, wait for the blank check, press Return. Every scan is `.split(at: sharedCut)`; dragging any cut moves all of them; One/Two is disabled; analysis only supplies blanks. Turning it off restores each scan's `suggested` layout and re-suggests skips.
-7. **Apply.** `applyScanSplit` → `splitScans(_:layouts:leftFirst:)`, which only sets crop and media boxes (about 7 ms for 43 scans; images are never re-encoded). If nothing was cut and nothing skipped it does nothing. Otherwise it stores `pendingScanSplitSkips`, sets `suppressNextA3Detection` and assigns the document; `onChange` does the full reset, **then** applies the skips, sets `skipMode = .page` and `documentRebuilt`. (Set before the assignment, as the old A3 path did, the reset silently undid them.) A banner says how many pages were skipped and points at Delete and Swap with Next.
+7. **Apply.** `applyScanSplit` → `splitScans(_:layouts:leftFirst:)`, which only sets crop and media boxes (about 7 ms for 43 scans; images are never re-encoded). If nothing was cut and nothing skipped it does nothing. Otherwise `SplitModel.applyScanSplit` assigns the document and starts afresh, because every page index changed; the source file and its name are kept. **Then** it applies the skips (dropping any past the end), sets `skipMode = .page` and sets `documentRebuilt`. It never runs the double-page check, so the result isn't offered the split again. The view then returns to Step 1 and offers any bookmarks. A banner says how many pages were skipped and points at Delete and Swap with Next.
 
 `splitPage(_:at:leftFirst:)` cuts along whichever native axis is horizontal on screen ([rotation gotcha](gotchas.md#pdfkit-and-pdf-geometry)): 0° native X, visual left = native left; 90° native Y, visual left = native bottom; 180° native X, visual left = native right; 270° native Y, visual left = native top. `splitA3Pages` is now just `splitScans` with every cut at 0.5 (used by tests).
 
@@ -178,21 +201,21 @@ Shows the file's first kept page in `PageInstrumentPreview` (a 150 pt strip) and
 
 ## Saving
 
-Both paths ask for an output folder (`NSOpenPanel`, `canCreateDirectories`, opening in `outputDirectory(forSourceFile: pdfManager.sourceURL)`):
+Both paths ask for an output folder (`NSOpenPanel`, `canCreateDirectories`, opening in `outputDirectory(forSourceFile: model.sourceURL)`):
 - **No prefix step:** `saveSplitPDF()` → folder → names from `splitOutputFileName` with `splitPartFolders()`.
-- **Prefix step:** `applyPrefixToFolder` → `pdfManager.splitPlans` with an empty base and separator, the full numbered names as suffixes, and the Step 3 folders.
+- **Prefix step:** `applyPrefixToFolder` → `model.pdfManager.splitPlans` with an empty base and separator, the full numbered names as suffixes, and the Step 3 folders.
 
 `PDFManager.splitPlans(...)` turns the names, page mapping, skips and folders into `[SplitFilePlan]`; **`writeSplitFiles`** (`Logic/SplitLogic.swift`, shared with the CLI) writes them: each file's pages are copied into a new document, stamped (`applyingStamp`, with page 0 as the part's first page), its folder created, and saved through `savePDFDocument`. Existing files are replaced. Failures come back as a `SplitWriteReport`; `PDFManager.splitSaveMessage` words them ("Partial Success" / "Save Failed" with each reason). `PDFManager.saveSplitPDF(...)` still does all of this synchronously for tests.
 
 **Saving runs in the background** (`Split/SplitSaveProgress.swift`, #34). It used to run on the main thread and beachballed on large scans. `writeSplitFiles` and everything it calls (`applyingStamp` → `stampedDocument` → `drawStamp` and the stamp model, `savePDFDocument`) are `nonisolated`. It takes an optional `progress` callback (before each file, then once with `nil`) and an `isCancelled` check between files; files not attempted are listed in `SplitWriteReport.notWritten`. The CLI passes neither.
 - `SplitView.writeInBackground` shows the `SplitSaveProgressView` sheet (`saveProgress`, a `SplitSaveProgress` object), then runs `SplitSaveProgress.run` in a detached task.
-- **The task never touches the document on screen** (PDFKit mustn't be used from two threads at once). It opens its own copy from a `SplitSaveSource`: `.file(sourceURL)` when `pdfDocument.documentURL` is still the loaded file, otherwise `.data(dataRepresentation())`, a snapshot taken on the main actor after the sheet appears. Swap with Next, Fix Booklet Order and Split Double Pages all build new in-memory documents, so they take the snapshot route. Don't rely on `documentRebuilt` for this: Swap and Fix Booklet Order don't set it. `open(expectingPageCount:)` refuses a copy whose page count differs, such as a file changed on disk since loading.
+- **The task never touches the document on screen** (PDFKit mustn't be used from two threads at once). It opens its own copy from a `SplitSaveSource`: `.file(sourceURL)` when `pdfDocument.documentURL` is still the loaded file, otherwise `.data(dataRepresentation())`, a snapshot taken on the main actor after the sheet appears. Swap with Next, Fix Booklet Order and Split Double Pages all build new in-memory documents, so they take the snapshot route. The choice goes by `documentURL`, which every rebuilt document lacks, not by `documentRebuilt`. `open(expectingPageCount:)` refuses a copy whose page count differs, such as a file changed on disk since loading.
 - **Cancel** (the sheet's button, or Escape) stops after the current file. In the normal path the files already written stay, and an alert says how many and lists the rest; the original isn't trashed.
 
 `saveSplitFiles(names:plans:into:finish:)` wraps both routes:
 - **Normally** it saves straight into the folder, then (on success) `trashSourceFileIfRequested()`.
 - **When a name lands on the original** (`splitOutputReplacesSource` — a part only cut from A3 and saved beside itself), it asks "Replace the Original?" unless Move original to Trash is on, writes everything to an `.itemReplacementDirectory` temp folder first (so the original is read in full before anything touches it), trashes the original if asked, then moves the files into place (`replaceItemAt` over existing ones). Cancelling here discards the temp folder: nothing is saved and the original is untouched.
 
-**Move original to Trash** — a checkbox in Step 2 bound to `@AppStorage("deleteSourceAfterSplit")` (shared with `SplitView`; persisted, off by default). After a *successful* save `FileManager.trashItem` moves `pdfManager.sourceURL` to the Trash (recoverable). A failure is an alert but not fatal (the files are written). The result is `sourceWasTrashed`, shown on the summary as "Original moved to the Trash."
+**Move original to Trash** — a checkbox in Step 2 bound to `@AppStorage("deleteSourceAfterSplit")` (shared with `SplitView`; persisted, off by default). After a *successful* save `FileManager.trashItem` moves `model.sourceURL` to the Trash (recoverable). A failure is an alert but not fatal (the files are written). The result is `sourceWasTrashed`, shown on the summary as "Original moved to the Trash."
 
-**Summary.** `RenameSummaryView` lists the names (with folders) and offers Start Over (⌘⌫) and Show in Finder. **Dropping a PDF on it restarts the flow** (`handleSummaryPDFDrop` → `pdfManager.loadPDF`; the `Group`'s `onChange` resets everything); the Rename tab's done screens do the same.
+**Summary.** `RenameSummaryView` lists the names (with folders) and offers Start Over (⌘⌫) and Show in Finder. **Dropping a PDF on it restarts the flow** (`handleSummaryPDFDrop` → `openFile`, which resets everything); the Rename tab's done screens do the same.

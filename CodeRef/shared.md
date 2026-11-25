@@ -39,7 +39,7 @@ Held as `@StateObject` on `ScoreSortApp` and injected with `.environmentObject()
 | `StampStore` | `StampView`, `StampMenuButton`, `CombineView`, `SplitView`, Settings |
 | `UpdaterViewModel` (Sparkle; not injected) | the "Check for Updates…" menu item — see [releasing.md](releasing.md) |
 
-`PDFManager` is *not* app-level: Split and Rotate each own a separate `@StateObject`. `CombineManager` belongs to `CombineView`.
+`PDFManager` is *not* app-level: Split and Rotate each own a separate one (Rotate as a `@StateObject`, Split inside its `SplitModel`). `CombineManager` belongs to `CombineView`.
 
 ## Files opened from outside: Open With and the Dock icon (#21)
 
@@ -48,7 +48,7 @@ Held as `@StateObject` on `ScoreSortApp` and injected with `.environmentObject()
 - **Arrival.** `AppDelegate.application(_:open:)` puts the URLs in `ExternalOpenQueue.shared`, because the window may not exist yet: opening a file is often what launches the app. `ContentView` takes them in `.onReceive(ExternalOpenQueue.shared.$pending)` and calls `AppState.handleOpenedFiles`.
 - **One window.** `ContentView` has `.handlesExternalEvents(preferring: ["*"], allowing: ["*"])`, so SwiftUI hands the event to the existing window instead of opening a new one each time. **Don't use `.handlesExternalEvents(matching: [])` on the `WindowGroup`**: it stops the extra windows, but then a cold launch from a file opens *no* window. Tested in the built app: cold (with `-ApplePersistenceIgnoreState YES`, so window restoration can't hide the result) and warm, single files, several files and a folder, one window each time.
 - **Which tab: `routeOpenedFiles`** (`Logic/OpenRouting.swift`, pure; `OpenRoutingTests`). The tab on screen takes the files if it can without losing work: Combine and Stamp add to their lists; Split and Rotate only when empty; Rename only when idle (`currentTabHasContent` is `tabCommands.slice.clear != nil`, since the active tab's Clear is enabled exactly when it has something loaded). Otherwise several files or a folder go to Combine, and a single PDF or image gets an **Open in…** chooser (`OpenChoiceView`, `AppState.openChoice`). Anything else is left out; nothing usable gives an alert.
-- **Hand-over.** `AppState.deliver(_:to:)` switches tab and sets `pendingOpen`; each tab's `takePendingOpen()` (on appear, and on `pendingOpen` changing) takes the files once (`AppState.takePendingOpen(for:)`) and loads them through its own loader: Combine `addFiles`, Rename `startInput`, Split and Rotate `pdfManager.loadPDF`, Stamp `addInput`.
+- **Hand-over.** `AppState.deliver(_:to:)` switches tab and sets `pendingOpen`; each tab's `takePendingOpen()` (on appear, and on `pendingOpen` changing) takes the files once (`AppState.takePendingOpen(for:)`) and loads them through its own loader: Combine `addFiles`, Rename `startInput`, Split `openFile` (→ `SplitModel.load(from:)`), Rotate `pdfManager.loadPDF`, Stamp `addInput`.
 
 ## Menu bar
 
@@ -103,9 +103,9 @@ No longer the menu bridge. It survives for Combine's in-view keyboard handling: 
 
 **`PDFAlertHandler`** — `typealias PDFAlertHandler = (_ title: String, _ message: String, _ isError: Bool) -> Void`. PDF save/export methods take this callback and never show UI themselves. `showNSAlert(title:message:isError:)` and `confirmNSAlert(title:message:confirmTitle:)` (destructive confirm button, Escape cancels) are the view-side helpers.
 
-**`PDFManager: ObservableObject`** — one instance each for Split and Rotate. Holds `pdfDocument`, `currentFileName` and **`sourceURL`** (the file the user loaded, set in `loadPDF(from:)`; it survives in-place `pdfDocument` rebuilds such as an A3 split or booklet reorder, so it outlives `PDFDocument.documentURL`). `saveRotatedPDF(...)` writes the Rotate tab's output; `saveSplitPDF(...)` builds `splitFilePlans` and calls `writeSplitFiles` (`Logic/SplitLogic.swift`), the same writer the CLI uses.
+**`PDFManager: ObservableObject`** — one instance each for Split and Rotate. Holds `pdfDocument`, `currentFileName` and **`sourceURL`** (the file the user loaded, set in `loadPDF(from:)`; it survives Split's in-place `pdfDocument` rebuilds such as a double-page split or booklet reorder, so it outlives `PDFDocument.documentURL`). `saveRotatedPDF(...)` writes the Rotate tab's output; `saveSplitPDF(...)` builds `splitFilePlans` and calls `writeSplitFiles` (`Logic/SplitLogic.swift`), the same writer the CLI uses.
 
-**`DropZoneView`** — the "Drop a PDF here / Choose PDF" empty state for Split and Rotate; takes the tab's `PDFManager` and an optional `subtitle`. Rejects non-PDF drops with an alert.
+**`DropZoneView`** — the "Drop a PDF here / Choose PDF" empty state for Split and Rotate; takes the tab's `PDFManager`, an optional `subtitle` and an optional `onOpen`. With `onOpen` a chosen or dropped PDF goes there instead of `pdfManager.loadPDF`; Split uses it so opening goes through `SplitModel.load(from:)`. Rejects non-PDF drops with an alert.
 
 **`PDFPageView`** — a page as a fitted image on white (Split Step 1, Rotate before/after, booklet thumbnails), with an optional extra clockwise `rotation` and an optional `stamp` drawn in. Re-renders only when its page, rotation or stamp changes (`.task(id:)`), keeping the previous image up meanwhile. **It draws off the main thread** (#34): `renderPagePreview` (Core Graphics via `renderScan`, so the crop box is shown; stamp via `drawStamp`; extra turn via `rotatedImage`) runs in a detached task, and a result that arrives after the page has changed again is dropped, so arrow-key paging through a big scan never waits on a page. A page built in memory (no `pageRef`) still draws through PDFKit's `thumbnail` on the main actor. Deliberately not a `PDFView`: see [gotchas.md § PDFKit](gotchas.md#pdfkit-and-pdf-geometry).
 
@@ -117,7 +117,7 @@ No longer the menu bridge. It survives for Combine's in-view keyboard handling: 
 
 ### File helpers — `Logic/FileUtilities.swift`
 
-- **`outputDirectory(forSourceFile:) -> URL?`** — a source file's parent folder (nil-safe). Every output dialog sets `panel.directoryURL` from it so saves default to the **source file's folder** rather than the last-used location: Combine's save (first non-blank input), Rotate's save and both Split output-folder pickers (`pdfManager.sourceURL`). The preset CSV export is intentionally excluded (no per-document source).
+- **`outputDirectory(forSourceFile:) -> URL?`** — a source file's parent folder (nil-safe). Every output dialog sets `panel.directoryURL` from it so saves default to the **source file's folder** rather than the last-used location: Combine's save (first non-blank input), Rotate's save and both Split output-folder pickers (`model.sourceURL`). The preset CSV export is intentionally excluded (no per-document source).
 - **`expandToFiles(_ urls:extensions:) -> [URL]`** — flattens a mixed file/folder drop into name-sorted files with the given (lowercase, dotless) extensions; folders are enumerated **recursively**. Shared by `CombineView.expandToSupportedFiles` and the Stamp tab (both PDFs + images, via `pageableFileExtensions`), so folder drops behave identically. Pair it with `collectDroppedFileURLs(from:completion:)` and `urlIsDirectory(_:)` in `Logic/RenameLogic.swift` for a full drop handler.
 - **`pdfFilenameError(for:) -> String?`** — an error string if the input contains `/`, `:`, `\` or a null.
 - **Read-only-location guards**, for cloud-sync (Dropbox/Google Drive/iCloud), locked and read-only-volume folders that are *readable but not writable*:

@@ -4,7 +4,8 @@
 //
 //  Split PDF tab — Step 1 (SplitView) plus its Step-1 machinery: booklet-reorder
 //  UI, the booklet-order sheet and the split controls section. The "Split Double
-//  Pages" sheet is in ScanSplitSheet.swift.
+//  Pages" sheet is in ScanSplitSheet.swift. The document and Step 1's state (splits,
+//  skips, names, undo) are `SplitModel`, in SplitModel.swift.
 //  Pure split maths live in Logic/SplitLogic.swift.
 //
 
