@@ -19,6 +19,7 @@ _Draft for the next release after 1.11.0. Keep adding to this as more changes la
 
 ## 🔗 Combine PDFs
 
+- **Presets understand combined parts.** A part like **Flute Oboe** now gets copies for both the flutes and the oboes in your preset when the music has no separate oboe part. If there is a separate Flute part, Flute Oboe covers just the oboes. The row is tinted blue so you can see ScoreSort made the call. **Tuned Percussion** also counts as your preset's Mallet Percussion.
 - **US Letter and Tabloid paper.** In North America, pictures, blank pages, booklets shrunk onto one sheet and the two-sided test sheet now come out on Letter instead of A4, and the booklet menu talks about Letter → Tabloid and half-letter booklets. ScoreSort follows your printer's paper (or your region) automatically; to choose, go to **Settings ▸ Combiner ▸ Paper size**. PDFs always keep their own page size, and nothing changes if you print on A4.
 
 ## ✂️ Split PDF

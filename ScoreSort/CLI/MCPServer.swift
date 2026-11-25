@@ -514,6 +514,8 @@ Ground rules
          C treble:  flute, oboe, mallets, violin; C bass clef: trombone, euphonium BC,
                     bassoon, tuba, string bass, bass guitar (reads the bass line)
        Never hand a player a part in another transposition without saying so.
+     • A combined part ("Flute Oboe", "Flute/Piccolo") is given to every group it names that
+       has no part of its own, with the copies added up. Say so to the person.
      • Groups shared across numbered parts (Clarinet × 19 over Clarinet 1, 2, 3): shared
        evenly by default. Change with "Clarinet=Clarinet 1:8" etc. if the person says so;
        otherwise even is fine.

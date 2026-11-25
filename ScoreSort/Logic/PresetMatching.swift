@@ -45,39 +45,58 @@ func matchPreset(parts: [PresetPart], files: [(id: UUID, name: String)]) -> Pres
     // Phase 1. Matches are gathered per *part* before any copies are set, because one entry
     // can match several files — applying its full count to each would print two players'
     // worth of paper for every one the preset asked for.
+    //
+    // A file can name several preset entries: a combined part such as "Flute Oboe" or
+    // "Flute/Piccolo". Files naming one entry are placed first. A combined file then
+    // takes every entry it names that has no file of its own — its copies are their total —
+    // and falls back to its longest-named entry, shared as before, only if all of them do.
+    func normalised(_ name: String) -> String { normalizeRomanNumerals(name.lowercased()) }
     var filesForPart: [String: [UUID]] = [:]
     var partOrder: [String] = []
     var partsByName: [String: PresetPart] = [:]
-    for file in files {
-        let filename = normalizeRomanNumerals(file.name.lowercased())
-        if let match = sortedParts.first(where: {
-            presetPartMatches(part: normalizeRomanNumerals($0.name.lowercased()), in: filename)
-        }) {
-            if filesForPart[match.name] == nil { partOrder.append(match.name) }
-            filesForPart[match.name, default: []].append(file.id)
-            partsByName[match.name] = match
-            matchedPartNames.insert(match.name)
+    func add(_ file: UUID, to part: PresetPart) {
+        if filesForPart[part.name] == nil { partOrder.append(part.name) }
+        filesForPart[part.name, default: []].append(file)
+        partsByName[part.name] = part
+        matchedPartNames.insert(part.name)
+    }
+    let named: [(id: UUID, parts: [PresetPart])] = files.map { file in
+        let filename = normalised(file.name)
+        return (file.id, sortedParts.filter { presetPartMatches(part: normalised($0.name), in: filename) })
+    }
+    for file in named where file.parts.count == 1 { add(file.id, to: file.parts[0]) }
+    let coveredBySingles = matchedPartNames
+    var combinedFiles: Set<UUID> = []
+    for file in named where file.parts.count > 1 {
+        let own = file.parts.filter { !coveredBySingles.contains($0.name) }
+        if own.isEmpty {
+            add(file.id, to: file.parts[0])
         } else {
-            result.unmatchedFileIds.insert(file.id)
+            for part in own { add(file.id, to: part) }
+            if own.count > 1 { combinedFiles.insert(file.id) }
         }
     }
+    let matchedFiles = Set(named.filter { !$0.parts.isEmpty }.map(\.id))
+    result.unmatchedFileIds = Set(files.map(\.id)).subtracting(matchedFiles)
+    result.matchedCount = matchedFiles.count
 
+    // Copies: each entry's players shared across its files, then summed per file (a combined
+    // part gets every entry it covers), in the order files first appear.
+    var copiesByFile: [UUID: Int] = [:]
+    var fileOrder: [UUID] = []
     for name in partOrder {
         guard let ids = filesForPart[name], let part = partsByName[name] else { continue }
-        result.matchedCount += ids.count
-        guard ids.count > 1 else {
-            result.copies.append((ids[0], part.copies))
-            result.assignments.append((part.name, ids[0], part.copies))
-            continue
-        }
-        // Files were gathered in list order, so the remainder goes to the lower-numbered parts.
-        let shares = splitPresetCopies(part.copies, across: ids.count)
+        let shares = ids.count > 1 ? splitPresetCopies(part.copies, across: ids.count) : [part.copies]
         for (offset, id) in ids.enumerated() {
-            result.copies.append((id, shares[offset]))
+            if copiesByFile[id] == nil { fileOrder.append(id) }
+            copiesByFile[id, default: 0] += shares[offset]
             result.assignments.append((part.name, id, shares[offset]))
-            result.splitFileIds.insert(id)
+            if ids.count > 1 { result.splitFileIds.insert(id) }
         }
     }
+    // A combined part's total is the app's call too: mark it like a split.
+    result.splitFileIds.formUnion(combinedFiles)
+    result.copies = fileOrder.map { ($0, copiesByFile[$0] ?? 0) }
 
     // Phase 2.
     let unmatchedParts = parts.filter { !matchedPartNames.contains($0.name) }

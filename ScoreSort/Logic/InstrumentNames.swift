@@ -87,6 +87,8 @@ func instrumentAliasPhrases(forBase base: String) -> [String] {
         ["trombone", "tenor trombone"],
         ["trumpet", "bb trumpet", "trumpet in bb", "b-flat trumpet"],
         ["english horn", "cor anglais"],
+        // A "Tuned Percussion" part is what the mallet players read.
+        ["mallet percussion", "mallets", "tuned percussion", "keyboard percussion"],
         ["horn", "french horn", "horn in f", "f horn"],
         // Bass guitar sits in this group deliberately: in a school band the bass-guitar
         // player reads whichever bass part is in the folder, so a "Bass Guitar" preset
