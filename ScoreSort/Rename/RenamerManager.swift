@@ -398,9 +398,53 @@ struct InstrumentOrders {
         return dir.appendingPathComponent("instrument-orders.json")
     }
 
-    // Bump this whenever the built-in defaults change so existing JSON files
-    // are automatically regenerated on next launch.
-    private static let defaultsVersion = 8
+    // Bump this whenever the built-in defaults change. Existing files are then *merged*, not
+    // replaced (`prepareFile`): an order the user never changed takes the new one as it is,
+    // and an edited one keeps the edits and gains the new instruments in their places.
+    static let defaultsVersion = 9
+
+    /// The built-in order for each ensemble, by its key in the file.
+    static var defaultOrders: [String: [String]] {
+        ["band": bandDefault, "jazz": jazzDefault, "orchestra": orchestraDefault]
+    }
+
+    /// `saved` with every instrument of `defaults` it lacks put back in: each one after the
+    /// nearest instrument before it in `defaults` that `saved` has (or first, if none), so it
+    /// lands in score order wherever the user moved things. Nothing in `saved` moves, and
+    /// nothing is removed. Compared without case.
+    static func merged(_ saved: [String], with defaults: [String]) -> [String] {
+        var result = saved
+        var present = Set(saved.map { $0.lowercased() })
+        for (i, name) in defaults.enumerated() where !present.contains(name.lowercased()) {
+            var insertAt = 0
+            for j in stride(from: i - 1, through: 0, by: -1) {
+                if let k = result.firstIndex(where: { $0.lowercased() == defaults[j].lowercased() }) {
+                    insertAt = k + 1
+                    break
+                }
+            }
+            result.insert(name, at: insertAt)
+            present.insert(name.lowercased())
+        }
+        return result
+    }
+
+    /// The file's contents after a defaults update: per ensemble, the new built-in order if the
+    /// saved one is the built-in order it was last written from (`_base_<ensemble>`, so it was
+    /// never edited), else the saved order with the new instruments merged in.
+    static func updated(_ file: [String: [String]]) -> [String: [String]] {
+        var out: [String: [String]] = ["_version": [String(defaultsVersion)]]
+        for (key, newDefault) in defaultOrders {
+            let saved = file[key]
+            if let saved, file["_base_\(key)"].map({ $0 != saved }) ?? true {
+                out[key] = merged(saved, with: newDefault)     // edited (or written before bases): keep it
+            } else {
+                out[key] = newDefault                          // missing, or never edited: take the new one
+            }
+            out["_base_\(key)"] = newDefault
+        }
+        return out
+    }
 
     // MARK: - Loaded state (populated by setup())
     private static var loaded: [String: [String]] = [:]
@@ -437,8 +481,9 @@ struct InstrumentOrders {
     /// orders (so tests can call it on a temporary file).
     ///
     /// - Missing: the defaults are written.
-    /// - Readable but written by an older version (or with no `_version`): **regenerated on
-    ///   purpose**, so new built-in orders reach existing users.
+    /// - Readable but written by an older version (or with no `_version`): **updated**
+    ///   (`updated(_:)`): new built-in instruments reach existing users without wiping an order
+    ///   they edited. (Before version 9 the file was overwritten with the defaults.)
     /// - There but unreadable, typically a hand edit that broke the JSON: moved aside under
     ///   a dated name *before* the defaults are written, so the user's edits survive. This case
     ///   used to be overwritten silently. Returns a notice saying where the file went.
@@ -460,7 +505,7 @@ struct InstrumentOrders {
                version >= defaultsVersion {
                 return nil
             }
-            writeDefaults(to: url)
+            write(updated(dict), to: url)
             return nil
         }
 
@@ -486,30 +531,39 @@ struct InstrumentOrders {
         guard let data = try? Data(contentsOf: url),
               let dict = try? JSONDecoder().decode([String: [String]].self, from: data)
         else { return }
-        // Strip the version sentinel so it doesn't appear as an instrument order
-        loaded = dict.filter { $0.key != "_version" }
+        // Strip the bookkeeping (`_version`, `_base_…`) so it doesn't appear as an instrument order
+        loaded = dict.filter { !$0.key.hasPrefix("_") }
     }
 
     private static func writeDefaults(to url: URL) {
-        // _version is written as a string list with a single sentinel entry so the
-        // file stays as [String: [String]] and remains hand-editable.
-        let defaults: [String: [String]] = [
-            "_version":  [String(defaultsVersion)],
-            "band":      bandDefault,
-            "jazz":      jazzDefault,
-            "orchestra": orchestraDefault,
-        ]
+        write(updated([:]), to: url)
+    }
+
+    /// _version (and each `_base_…`, the built-in order the file was written from) are string
+    /// lists, so the file stays [String: [String]] and remains hand-editable.
+    private static func write(_ file: [String: [String]], to url: URL) {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(defaults) else { return }
+        guard let data = try? encoder.encode(file) else { return }
         try? data.write(to: url, options: .atomic)
     }
 
     // MARK: - Built-in defaults (used as fallback if the file is missing or unreadable)
     private static let bandDefault = [
         "score",
+        "conductor",
         "instrumentation",
         "program notes",
+        "vocal",
+        "vocals",
+        "voice",
+        "choir",
+        "lead sheet",
+        "part 1",
+        "part 2",
+        "part 3",
+        "part 4",
+        "part 5",
         "piccolo",
         "flute",
         "alto flute",
@@ -525,7 +579,11 @@ struct InstrumentOrders {
         "clarinet",
         "alto clarinet",
         "bass clarinet",
+        "contra alto clarinet",
+        "contra-alto clarinet",
+        "contralto clarinet",
         "contrabass clarinet",
+        "contra bass clarinet",
         "soprano sax",
         "sop sax",
         "sop saxophone",
@@ -554,6 +612,7 @@ struct InstrumentOrders {
         "bass saxophone",
         "cornet",
         "trumpet",
+        "flugelhorn",
         "horn",
         "trombone",
         "bass trombone",
@@ -575,9 +634,12 @@ struct InstrumentOrders {
         "eupho",
         "trombone baritone bassoon",
         "tuba",
+        "sousaphone",
         "guitar",
         "electric guitar",
         "keyboard",
+        "synthesizer",
+        "synth",
         "piano",
         "harp",
         "violin",
@@ -587,6 +649,8 @@ struct InstrumentOrders {
         "bass",
         "basses",
         "double bass",
+        "bass guitar",
+        "electric bass",
         "timpani",
         "mallet percussion",
         "mallet",
@@ -618,10 +682,12 @@ struct InstrumentOrders {
 
     private static let jazzDefault = [
         "score",
+        "conductor",
         "instrumentation",
         "voice",
         "vocal",
         "vocals",
+        "lead sheet",
         "solo alto sax",
         "solo alto saxophone",
         "solo saxophone alto",
@@ -670,9 +736,12 @@ struct InstrumentOrders {
         "chords",
         "piano",
         "keyboard",
+        "synthesizer",
+        "synth",
         "bass",
         "string bass",
         "electric bass",
+        "bass guitar",
         "double bass",
         "drums",
         "drum set",
@@ -698,7 +767,13 @@ struct InstrumentOrders {
 
     private static let orchestraDefault = [
         "score",
+        "conductor",
         "instrumentation",
+        "part 1",
+        "part 2",
+        "part 3",
+        "part 4",
+        "part 5",
         "piccolo",
         "flute",
         "oboe",
@@ -711,6 +786,8 @@ struct InstrumentOrders {
         "clarinet in Bb",
         "clarinet in A",
         "bass clarinet",
+        "contra alto clarinet",
+        "contralto clarinet",
         "bassoon",
         "contrabassoon",
         "soprano sax",
@@ -747,6 +824,7 @@ struct InstrumentOrders {
         "eupho",
         "baritone",
         "tuba",
+        "sousaphone",
         "timpani",
         "mallet percussion",
         "mallet",
@@ -756,10 +834,16 @@ struct InstrumentOrders {
         "guitar",
         "organ",
         "keyboard",
+        "synthesizer",
+        "synth",
         "piano",
         "celeste",
         "celesta",
         "harp",
+        "vocal",
+        "vocals",
+        "voice",
+        "choir",
         "violin",
         "viola",
         "cello",

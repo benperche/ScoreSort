@@ -87,6 +87,8 @@ func instrumentAliasPhrases(forBase base: String) -> [String] {
         ["trombone", "tenor trombone"],
         ["trumpet", "bb trumpet", "trumpet in bb", "b-flat trumpet"],
         ["english horn", "cor anglais"],
+        ["tuba", "sousaphone"],
+        ["contra alto clarinet", "contra-alto clarinet", "contralto clarinet"],
         // A "Tuned Percussion" part is what the mallet players read.
         ["mallet percussion", "mallets", "tuned percussion", "keyboard percussion"],
         ["horn", "french horn", "horn in f", "f horn"],
@@ -367,7 +369,9 @@ func splitSuggestionOrder(for ensemble: EnsembleType) -> [String] {
                 "Trumpet", "Trombone", "Guitar", "Piano", "Bass", "Drums",
                 "Vibraphone", "Mallet Percussion", "Auxiliary Percussion"]
     case .band, .orchestra:
-        return InstrumentOrders.getOrder(for: ensemble).map { $0.capitalized }
+        return InstrumentOrders.getOrder(for: ensemble)
+            .filter { !splitSuggestionWalkExcluded.contains($0.lowercased()) }
+            .map { $0.capitalized }
     }
 }
 
@@ -387,7 +391,33 @@ func splitSuggestionExtraOptions(for ensemble: EnsembleType) -> [String] {
 /// that are right to offer but wrong to suggest as "the next part". "F Horn" is the same
 /// instrument as Horn, so score order numbers it as a horn; "Vocal" is only recognised for
 /// numbering in jazz order.
-let splitSuggestionTypedOnlyNames = ["Flute Oboe", "F Horn", "Eb Horn", "Tuned Percussion", "Vocal"]
+let splitSuggestionTypedOnlyNames = [
+    // Combined and doubling parts (Combine gives a combined part every instrument it names
+    // that has no part of its own).
+    "Flute Oboe", "Flute/Piccolo", "Oboe/Cor Anglais", "Bassoon/Contrabassoon",
+    "Trumpet/Flugelhorn", "Alto Saxophone/Flute", "Tenor Saxophone/Clarinet",
+    // Named by key.
+    "Bb Clarinet", "Bb Bass Clarinet", "Eb Alto Saxophone", "Bb Tenor Saxophone",
+    "Eb Baritone Saxophone", "Bb Trumpet", "C Trumpet", "F Horn", "Eb Horn",
+    // Less common instruments.
+    "Contra-alto Clarinet", "Flugelhorn", "Sousaphone", "Bass Guitar", "Synthesizer",
+    "Tuned Percussion",
+    // Flexible-instrumentation (flex band) parts.
+    "Part 1", "Part 2", "Part 3", "Part 4", "Part 5",
+    // Scores and singers.
+    "Conductor", "Condensed Score", "Lead Sheet", "Vocal", "Choir",
+]
+
+/// Score-order entries kept out of the naming suggestions' walk (`splitSuggestionOrder`):
+/// rare instruments, spellings of one, and parts that would otherwise come up first for every
+/// piece (Conductor, Vocal, the flex parts). Score order still numbers them; while typing,
+/// `splitSuggestionTypedOnlyNames` offers them.
+let splitSuggestionWalkExcluded: Set<String> = [
+    "conductor", "vocal", "vocals", "voice", "choir", "lead sheet",
+    "part 1", "part 2", "part 3", "part 4", "part 5",
+    "contra alto clarinet", "contra-alto clarinet", "contralto clarinet", "contra bass clarinet",
+    "flugelhorn", "sousaphone", "synthesizer", "synth", "bass guitar", "electric bass",
+]
 
 /// Everything offered while typing that isn't in the walk (`splitSuggestionOrder`): the jazz
 /// solo options, then `splitSuggestionTypedOnlyNames` — leaving out any the list already has.

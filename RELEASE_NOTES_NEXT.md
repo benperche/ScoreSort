@@ -15,6 +15,8 @@ _Draft for the next release after 1.11.0. Keep adding to this as more changes la
 
 ## 🏷️ Rename Files
 
+- **More instruments recognised in score order**: Contra-alto Clarinet, Flugelhorn, Sousaphone, Bass Guitar, Synthesizer, Vocal and Choir (now in band and orchestra order, not just jazz), flex-band parts (Part 1 to Part 5), and Conductor, which is numbered 00 like the score.
+- **Your own instrument order survives updates.** If you've edited ScoreSort's instrument order file, new instruments are now added into your order instead of replacing it with the built-in one.
 - **Undo Rename.** Renamed a folder of parts and wish you hadn't? **Undo Rename** on the finished screen (or **Actions ▸ Undo Last Rename…**) puts every file back under its old name and removes any section folders the rename made. It works for a whole batch of folders, for Bulk Rename, and after quitting ScoreSort. Files you've moved or renamed since are left alone and listed.
 
 ## 🔗 Combine PDFs
@@ -24,6 +26,7 @@ _Draft for the next release after 1.11.0. Keep adding to this as more changes la
 
 ## ✂️ Split PDF
 
+- **Many more part names to pick from when naming split parts** (offered as you type): combined parts like **Flute/Piccolo**, **Oboe/Cor Anglais**, **Trumpet/Flugelhorn** and **Alto Saxophone/Flute**; key-named parts like **Bb Clarinet**, **Eb Alto Saxophone** and **C Trumpet**; flex-band parts **Part 1** to **Part 5**; and **Conductor**, **Condensed Score**, **Lead Sheet**, **Choir**, **Sousaphone**, **Bass Guitar** and **Synthesizer**.
 - **More part names to pick from when naming split parts.** Start typing and the list now offers **Flute Oboe**, **F Horn**, **Eb Horn**, **Tuned Percussion** and **Vocal**, as used in charts like Ed Wilson's.
 - **Saving a split no longer freezes ScoreSort on big scans.** A progress bar shows each part as it's saved, and you can cancel part-way: the parts already saved are kept, and you're told which weren't.
 

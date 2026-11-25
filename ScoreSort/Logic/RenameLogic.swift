@@ -114,13 +114,17 @@ struct PrefixItem: Identifiable {
 /// them: the score (instrument rank 0) pinned first so it gets 00, then matched parts in
 /// instrument order, then anything unrecognised last — left for the user to place, never
 /// displacing the score.
+/// Order entries that mean the score itself, numbered 00: "Score", and "Conductor" (a
+/// conductor's part or score). The order's first entry always counts too.
+let scoreOrderScoreNames: Set<String> = ["score", "conductor"]
+
 func scoreOrderSorted(_ items: [PrefixItem], by order: [String]) -> [PrefixItem] {
     var score:     [PrefixItem] = []
     var matched:   [(rank: Int, item: PrefixItem)] = []
     var unmatched: [PrefixItem] = []
     for var item in items {
         if let rank = matchInstrumentOrder(in: item.proposedName, order: order) {
-            if rank == 0 { item.isScore = true; score.append(item) }
+            if rank == 0 || scoreOrderScoreNames.contains(order[rank].lowercased()) { item.isScore = true; score.append(item) }
             else { item.isScore = false; matched.append((rank, item)) }
         } else {
             item.isScore = false
@@ -348,7 +352,7 @@ func planScoreOrderRename(files: [URL], order: [String], separator: String, resc
         }
 
         if let (rank, instrument) = detectScoreOrderInstrument(in: filenameWithoutPrefix, order: order) {
-            if instrument == "score" {
+            if scoreOrderScoreNames.contains(instrument.lowercased()) {
                 scoreFiles.append((fileURL, filename))
             } else {
                 detectedFiles.append((rank, fileURL, filename))

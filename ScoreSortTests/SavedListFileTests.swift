@@ -485,7 +485,7 @@ struct InstrumentOrdersFileTests {
         #expect(try scratch.setAside().count == 1)
     }
 
-    @Test("a readable file from an older version is still regenerated, on purpose")
+    @Test("a readable file from an older version is updated: its own entries kept, new ones merged in")
     func olderVersionRegenerates() throws {
         let scratch = try Scratch()
         defer { scratch.cleanUp() }
@@ -495,7 +495,9 @@ struct InstrumentOrdersFileTests {
         #expect(InstrumentOrders.prepareFile(at: url) == nil)
         #expect(try Data(contentsOf: url) != original)
         let dict = try JSONDecoder().decode([String: [String]].self, from: Data(contentsOf: url))
-        #expect(dict["band"]?.contains("kazoo") == false)
+        #expect(dict["band"]?.contains("kazoo") == true)              // the user's entry kept (it used to be wiped)
+        #expect(dict["band"]?.contains("flute") == true)              // the built-in instruments merged in
+        #expect(dict["_version"] == [String(InstrumentOrders.defaultsVersion)])
         #expect(try scratch.setAside().isEmpty)                      // not an "unreadable" case
     }
 
