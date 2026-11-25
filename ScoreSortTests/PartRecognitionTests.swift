@@ -239,3 +239,66 @@ struct PartRecognitionPageTests {
         #expect(name.box.minY < 0.15)                // near the top
     }
 }
+
+/// `read-parts` (#17), with the lines a page "reads" handed in, so it runs without Vision.
+@MainActor
+@Suite("Command line: read-parts")
+struct CLIReadPartsTests {
+    private let band = InstrumentOrders.defaultOrders["band"]!
+
+    private func pdf(pages: Int) -> URL {
+        let url = temporaryFolder("readparts").appendingPathComponent("Ebony.pdf")
+        writeDrawnPDF(pages: pages, size: CGSize(width: 595, height: 842), to: url)
+        return url
+    }
+
+    private func firstPage(_ part: String) -> [RecognizedLine] {
+        [line(part, y: 0.09, h: 0.025), line("EBONY CONCERTO", x: 0.4, y: 0.17, h: 0.04)]
+    }
+
+    @Test("reports each page's name and the parts, ready for split")
+    func parts() throws {
+        let read: [[RecognizedLine]?] = [firstPage("Horx"), [], [], firstPage("Jrumbet IV in Bb"), [], firstPage("Hert")]
+        let result = try ScoreSortCLI.runReadParts(file: pdf(pages: 6), pages: nil, order: band, recognise: { _ in read })
+        #expect(!result.isError)
+        #expect(result.json["pagesRead"] as? Int == 6)
+        let parts = try #require(result.json["parts"] as? [[String: Any]])
+        #expect(parts.map { $0["pages"] as? String } == ["1-3", "4-5", "6"])
+        #expect(parts.map { $0["name"] as? String } == ["Horn", "Trumpet 4", ""])
+        #expect(result.json["foundBy"] as? String == "titles")
+        let pages = try #require(result.json["pages"] as? [[String: Any]])
+        #expect(pages[0]["partName"] as? String == "Horn")
+        #expect((pages[0]["topText"] as? [String])?.first == "Horx")
+        #expect((result.json["hints"] as? [String])?.contains { $0.contains("preview") } == true)
+    }
+
+    @Test("pages that can't be read are reported, and too few suggest nothing")
+    func unreadable() throws {
+        let result = try ScoreSortCLI.runReadParts(file: pdf(pages: 3), pages: nil, order: band, recognise: { $0.map { _ in nil } })
+        #expect(!result.isError)
+        #expect(result.json["parts"] == nil)
+        #expect((result.json["problem"] as? String)?.contains("couldn't read") == true)
+        let pages = try #require(result.json["pages"] as? [[String: Any]])
+        #expect(pages.allSatisfy { $0["read"] as? Bool == false })
+    }
+
+    @Test("--pages reads only those pages and suggests no parts")
+    func somePages() throws {
+        var asked = 0
+        let result = try ScoreSortCLI.runReadParts(file: pdf(pages: 5), pages: "2-3", order: band,
+                                                   recognise: { sources in asked = sources.count; return sources.map { _ in [] } })
+        #expect(asked == 2)
+        #expect((result.json["pages"] as? [[String: Any]])?.map { $0["page"] as? Int } == [2, 3])
+        #expect(result.json["parts"] == nil)
+    }
+
+    @Test("the command is read-only and registered; the MCP tool says so")
+    func registered() throws {
+        let spec = try #require(ScoreSortCLI.command(named: "read-parts"))
+        #expect(spec.valueOptions == ["pages", "ensemble"])
+        let tool = try #require(ScoreSortMCPServer.tools.first { $0.name == "scoresort_read_parts" })
+        #expect(tool.command == "read-parts")
+        #expect(tool.effect == .readsOnly)
+        #expect(throws: (any Error).self) { try ScoreSortCLI.parseEnsemble("brass band") }
+    }
+}

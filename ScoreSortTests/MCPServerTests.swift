@@ -102,7 +102,7 @@ struct MCPServerTests {
     @Test("The read-only tools can't write: their commands have no --out, --apply or --overwrite")
     func readOnlyToolsCannotWrite() throws {
         let readOnly = ScoreSortMCPServer.tools.filter { hint("readOnlyHint", of: $0) == true }
-        #expect(Set(readOnly.map(\.name)) == ["scoresort_guide", "scoresort_find", "scoresort_info",
+        #expect(Set(readOnly.map(\.name)) == ["scoresort_guide", "scoresort_find", "scoresort_info", "scoresort_read_parts",
                                               "scoresort_presets", "scoresort_stamps", "scoresort_allocate"])
         for tool in ScoreSortMCPServer.tools {
             // The guide isn't a command: it returns fixed text and takes no arguments.

@@ -4,9 +4,9 @@
 //
 //  `info` and `preview` — looking at a PDF before deciding what to do with it.
 //
-//  ScoreSort doesn't read text off pages, so an AI assistant reads the part names
-//  itself from `preview` images (the top of each page is enough: that's where the
-//  instrument name is).
+//  An AI assistant checks the part names `read-parts` reads (ReadPartsCommand.swift) — and
+//  reads any it missed — from `preview` images: the top of each page is enough, as that's
+//  where the instrument name is.
 //
 
 import Foundation
@@ -109,7 +109,7 @@ extension ScoreSortCLI {
             }
             hints.append("It has bookmarks: `split --bookmarks` splits and names the parts from them.")
         } else {
-            hints.append("To find the parts, look at the tops of the pages: `preview --top`.")
+            hints.append("To find the parts: `read-parts` reads the names at the tops of the pages; check them with `preview --top --sheet`.")
         }
         json["hints"] = hints
         text += "\n\n" + hints.map { "→ " + $0 }.joined(separator: "\n")
@@ -126,8 +126,8 @@ extension ScoreSortCLI {
             Usage: ScoreSort preview <file.pdf> --out <folder> [--pages 1-8] [--top] [--sheet]
                                      [--width 900] [--format jpg|png] [--json]
 
-            Saves an image of each page so you can see what's on it — ScoreSort doesn't
-            read text, so this is how to find out which part each page belongs to.
+            Saves an image of each page so you can see what's on it: how to find out which
+            part each page belongs to, and to check the names `read-parts` read.
 
               --out      Folder for the images (created if needed). Images already there
                          are not replaced: add --overwrite, or use another folder.

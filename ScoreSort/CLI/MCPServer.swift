@@ -90,7 +90,7 @@ enum ScoreSortMCPServer {
             // Not read-only: it saves images, and with overwrite it replaces earlier previews
             // of the same PDF in a folder the caller names.
             Tool(name: "scoresort_preview", command: "preview", title: "Look at a PDF's pages", effect: .changesFiles,
-                 description: "Look at a PDF's pages, returned as images. ScoreSort can't read text, so this is how to find which part each page belongs to: the top of each page (default) shows the instrument name and title. By default pages come back side by side in labelled contact sheets (p1, p2, …), so a whole PDF is one or two images.",
+                 description: "Look at a PDF's pages, returned as images: the way to see which part each page belongs to, and to check what scoresort_read_parts read. The top of each page (default) shows the instrument name and title. By default pages come back side by side in labelled contact sheets (p1, p2, …), so a whole PDF is one or two images.",
                  params: [Param(key: "file", option: nil, kind: .string, description: "Absolute path to the PDF.", required: true),
                           Param(key: "pages", option: "pages", kind: .string, description: "Pages to show, 1-based, e.g. \"1-3,7\" or \"5-\". Default: all."),
                           Param(key: "top", option: "top", kind: .boolean, description: "Only the top third of each page (default true). Set false to see whole pages.", defaultValue: true),
@@ -105,6 +105,11 @@ enum ScoreSortMCPServer {
                      }
                      if args["width"] == nil, (args["sheet"] as? Bool ?? true) { args["width"] = 450 }
                  }),
+            Tool(name: "scoresort_read_parts", command: "read-parts", title: "Read part names off the pages", effect: .readsOnly,
+                 description: "Read the part name at the top of each page of a PDF with the Mac's own text recognition, and suggest where the parts start (with names) — ready for scoresort_split's parts. When the piece's title starts each part, parts start on those pages even where the name couldn't be read (name \"\"). Also returns the text read at each page's top. Recognition can be wrong, especially on handwritten scans: check the names with scoresort_preview before splitting, and fill in any blank ones from it.",
+                 params: [Param(key: "file", option: nil, kind: .string, description: "Absolute path to the PDF.", required: true),
+                          Param(key: "pages", option: "pages", kind: .string, description: "Only read these pages, 1-based, e.g. \"1-3,7\" (then no parts are suggested). Default: all."),
+                          Param(key: "ensemble", option: "ensemble", kind: .string, description: "Whose instrument names to read the parts as (default band; in jazz a \"Baritone\" is the saxophone).", choices: ["band", "jazz", "orchestra"])]),
             Tool(name: "scoresort_split_scans", command: "split-scans", title: "Split double-page scans", effect: .changesFiles,
                  description: "Cut scans of double pages (A3 or tabloid sheets, or a book scanner's two-page spreads) into single pages, saved as a new PDF. Each scan is cut at the gap between its pages (or where black scanner background starts); identical sheets are all cut down the middle. Reports which new pages are black or empty (suggestedSkip, for scoresort_split's skip) and lists every scan's pages.",
                  params: [Param(key: "file", option: nil, kind: .string, description: "Absolute path to the scanned PDF.", required: true),
@@ -117,7 +122,7 @@ enum ScoreSortMCPServer {
                           Param(key: "dryRun", option: "dry-run", kind: .boolean, description: "Report only; write nothing."),
                           Param(key: "overwrite", option: "overwrite", kind: .boolean, description: "Replace out if it exists.")]),
             Tool(name: "scoresort_split", command: "split", title: "Split a PDF into parts", effect: .changesFiles,
-                 description: "Split a PDF into one file per part, named \"<base><separator><part name>.pdf\", optionally numbered in score order (00 - Score, 01 - Flute …) and stamped — the Split tab's Steps 1–3. Give the parts (pages + name) after looking at them with scoresort_preview, or use the PDF's bookmarks. " + outputHint,
+                 description: "Split a PDF into one file per part, named \"<base><separator><part name>.pdf\", optionally numbered in score order (00 - Score, 01 - Flute …) and stamped — the Split tab's Steps 1–3. Give the parts (pages + name) from scoresort_read_parts, checked with scoresort_preview, or use the PDF's bookmarks. " + outputHint,
                  params: [Param(key: "file", option: nil, kind: .string, description: "Absolute path to the PDF.", required: true),
                           Param(key: "out", option: "out", kind: .string, description: "Absolute path of the folder for the part files (created if needed).", required: true),
                           Param(key: "parts", option: "part", kind: .pairs(key: "pages", value: "name", valueIsNumber: false),
@@ -322,9 +327,9 @@ enum ScoreSortMCPServer {
         find it with scoresort_find. A file outside those folders is refused with an error: ask them to share \
         its folder in ScoreSort ▸ Settings ▸ AI Assistants. A file dragged into the chat is a copy \
         ScoreSort can't reach. \
-        To split a PDF into named parts: scoresort_info, then \
-        scoresort_preview to read the part names off the tops of the pages, then scoresort_split with \
-        dryRun, then without. Scans with two pages side by side go through scoresort_split_scans first. \
+        To split a PDF into named parts: scoresort_info, then scoresort_read_parts to read the part names \
+        and where the parts start, checked with scoresort_preview (recognition can be wrong), then \
+        scoresort_split with dryRun, then without. Scans with two pages side by side go through scoresort_split_scans first. \
         scoresort_guide has the full recipes. Use absolute paths.
         """
     }
@@ -474,7 +479,9 @@ Ground rules
     folders, unless the person has also allowed paths they give in its settings. A path
     outside comes back as an error saying so: ask them to share that folder. The terminal
     command isn't limited.
-  • ScoreSort can't read text on pages. You read part names yourself, from `preview` images.
+  • `read-parts` reads the part names at the tops of the pages with the Mac's own text
+    recognition and suggests where the parts start. It can misread, especially handwriting:
+    always check its names against `preview` images, and read any it missed yourself.
   • Every command that writes has --dry-run. Nothing is overwritten without --overwrite.
     `rename` only plans until --apply. Dry-run first, read the warnings, then run it.
   • Add --json for structured output.
@@ -484,21 +491,26 @@ Ground rules
         Page count, bookmarks, and whether it's a scan of double pages.
         • Bookmarks with sensible titles? `split --bookmarks` may be all you need.
         • A double-page scan? Do recipe 2 first, then carry on with its output.
-   b. ScoreSort preview <pdf> --top --sheet --out <temp folder>     (then look at the images)
-        The tops of all the pages side by side, labelled p1, p2, …. A new part starts where
-        the instrument name at the top-left changes — usually a page with the piece's title
-        on it. Black or empty pages are scanner background or blank pages: skip them.
+   b. ScoreSort read-parts <pdf> --ensemble band|jazz|orchestra --json
+        Each page's part name, read off the page, and the suggested parts (pages + name).
+        Names it couldn't read are "" — the split is usually still right, because parts are
+        found from the piece's title at the start of each one when there is one.
+   c. ScoreSort preview <pdf> --top --sheet --out <temp folder>     (then look at the images)
+        The tops of all the pages side by side, labelled p1, p2, …. Check read-parts' names
+        and fill in blank ones: a new part starts where the instrument name at the top-left
+        changes — usually a page with the piece's title on it. Black or empty pages are
+        scanner background or blank pages: skip them.
         Unsure about a page? Preview it whole: --pages 7 (without --top or --sheet).
-   c. Decide each part's pages and name. Name parts by instrument, the way players do:
+   d. Decide each part's pages and name. Name parts by instrument, the way players do:
         "Flute 1", "Clarinet 2", "Alto Saxophone 1", "Trumpet 3", "Horn in F 2", "Trombone 1",
         "Percussion", "Piano", "Score". Number parts that share an instrument (1, 2, 3).
         A score is "Score" or "Full Score". The base is usually "Composer - Piece".
-   d. ScoreSort split <pdf> --out <folder> --base "Composer - Piece" \
+   e. ScoreSort split <pdf> --out <folder> --base "Composer - Piece" \
           --part "1-4=Score" --part "5-6=Flute 1" … [--skip 9,14] [--score-order band] --dry-run
         Check the warnings: pages in no part, pages in two parts, names the score order
         doesn't recognise (they'd be numbered last — rename the part, e.g. "Bari Sax" →
         "Baritone Saxophone"). --score-order is band, jazz or orchestra.
-   e. Run the same command without --dry-run.
+   f. Run the same command without --dry-run.
    To give each section only its own parts, add --folders section (Woodwind, Brass —
    a band's piano and basses too — Percussion, Strings, plus Rhythm for an orchestra;
    jazz: Saxophones, Trumpets, Trombones, Rhythm) or
