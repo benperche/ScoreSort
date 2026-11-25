@@ -775,9 +775,10 @@ struct SplitFileNamingRow: View {
             }
         } else {
             let q = queryText.lowercased()
-            // While typing, also offer the "solo" options (jazz) — they're excluded from
+            // While typing, also offer the "solo" options (jazz) and the typed-only names
+            // (Flute Oboe, F Horn, Eb Horn, Tuned Percussion, Vocal) — they're excluded from
             // the empty-field default and the auto-next walk, but surface when searched.
-            let pool = deduplicated + splitSuggestionExtraOptions(for: ensemble)
+            let pool = deduplicated + splitSuggestionTypedOptions(for: ensemble, alreadyOffered: deduplicated)
             let prefixMatches   = pool.filter { $0.lowercased().hasPrefix(q) }
             let containsMatches = pool.filter {
                 $0.lowercased().contains(q) && !$0.lowercased().hasPrefix(q)

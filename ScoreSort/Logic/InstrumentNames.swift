@@ -380,6 +380,21 @@ func splitSuggestionExtraOptions(for ensemble: EnsembleType) -> [String] {
             "Solo Eb", "Solo Bb", "Soli"]
 }
 
+/// Part names every ensemble's naming dropdown offers **only while the user is typing**
+/// toward them: doubling and less common parts (seen in Ed Wilson's charts, among others)
+/// that are right to offer but wrong to suggest as "the next part". "F Horn" is the same
+/// instrument as Horn, so score order numbers it as a horn; "Vocal" is only recognised for
+/// numbering in jazz order.
+let splitSuggestionTypedOnlyNames = ["Flute Oboe", "F Horn", "Eb Horn", "Tuned Percussion", "Vocal"]
+
+/// Everything offered while typing that isn't in the walk (`splitSuggestionOrder`): the jazz
+/// solo options, then `splitSuggestionTypedOnlyNames` — leaving out any the list already has.
+func splitSuggestionTypedOptions(for ensemble: EnsembleType, alreadyOffered: [String]) -> [String] {
+    var seen = Set(alreadyOffered.map { $0.lowercased() })
+    return (splitSuggestionExtraOptions(for: ensemble) + splitSuggestionTypedOnlyNames)
+        .filter { seen.insert($0.lowercased()).inserted }
+}
+
 /// After a lead/solo part ("Solo Alto Sax"), the plain instrument at part 1
 /// ("Alto Saxophone 1"), or bare for single-part families. Returns nil when `prev` isn't a
 /// "Solo <recognised instrument>" — so "Solo Eb" (no clear instrument) falls through.

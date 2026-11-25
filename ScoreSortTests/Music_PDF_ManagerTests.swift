@@ -2123,3 +2123,38 @@ struct NextSuggestionIndexTests {
         #expect(name(order, after: "Baritone TC") == "Tuba")
     }
 }
+
+@MainActor
+@Suite("Split typed-only suggestions")
+struct SplitTypedOnlySuggestionTests {
+
+    private let added = ["Flute Oboe", "F Horn", "Eb Horn", "Tuned Percussion", "Vocal"]
+
+    @Test("every ensemble offers the typed-only names while typing")
+    func offeredEverywhere() {
+        for ensemble in [EnsembleType.band, .jazz, .orchestra] {
+            let typed = splitSuggestionTypedOptions(for: ensemble, alreadyOffered: [])
+            for name in added { #expect(typed.contains(name), "\(ensemble): \(name)") }
+        }
+        // Jazz keeps its solo options first.
+        #expect(splitSuggestionTypedOptions(for: .jazz, alreadyOffered: []).first == "Solo Alto Saxophone")
+    }
+
+    @Test("they're never suggested as the next part")
+    func notInTheWalk() {
+        for ensemble in [EnsembleType.band, .jazz, .orchestra] {
+            let walk = Set(splitSuggestionOrder(for: ensemble).map { $0.lowercased() })
+            for name in ["Flute Oboe", "Tuned Percussion", "Eb Horn"] {
+                #expect(!walk.contains(name.lowercased()), "\(ensemble): \(name)")
+            }
+        }
+    }
+
+    @Test("a name the list already has isn't offered twice")
+    func noDuplicates() {
+        let typed = splitSuggestionTypedOptions(for: .band, alreadyOffered: ["Vocal", "Horn"])
+        #expect(!typed.contains("Vocal"))
+        #expect(typed.contains("F Horn"))
+        #expect(Set(typed).count == typed.count)
+    }
+}
