@@ -98,6 +98,10 @@ jobs:
       # are still uploaded) instead of running into the job's limit, which cancels everything.
       - name: Test
         timeout-minutes: 15
+        env:
+          # Passed to the tests (xcodebuild strips the TEST_RUNNER_ prefix): the runner can't
+          # run Vision's text recognition, so PartRecognitionPageTests skips its one Vision test.
+          TEST_RUNNER_SCORESORT_CI_NO_VISION: "1"
         run: |
           xcodebuild test-without-building \
             -project ScoreSort.xcodeproj \

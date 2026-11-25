@@ -73,7 +73,11 @@ struct PartRecognitionTests {
 @Suite("Part recognition: on a drawn page")
 struct PartRecognitionPageTests {
 
-    @Test("Vision reads a part name drawn at the top of a page, and where it is")
+    // GitHub's macOS runners can't run Vision's text recognition (it fails to compile its
+    // model: "E5RT … compile failed"), so CI skips this one; it runs on a real Mac.
+    @Test("Vision reads a part name drawn at the top of a page, and where it is",
+          .disabled(if: ProcessInfo.processInfo.environment["SCORESORT_CI_NO_VISION"] != nil,
+                    "Vision text recognition isn't available on GitHub's runner"))
     func readsDrawnName() throws {
         let url = temporaryFolder("ocr").appendingPathComponent("Part.pdf")
         var box = CGRect(x: 0, y: 0, width: 595, height: 842)
