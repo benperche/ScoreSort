@@ -27,7 +27,7 @@ Whichever panel has files takes the whole tab: the sorter is hidden while `bulkH
 | `folderURL` / `directFiles` | a loaded folder, or files loaded one by one; `hasContent` is either |
 | `operations: [RenameOperation]` | the current plan |
 | `ensembleType` (`.band`/`.jazz`/`.orchestra`) | `didSet` loads that ensemble's order unless the user has customised it, then rescans |
-| `customInstrumentOrder` | starts from the ensemble's order; a user edit sets the private `hasCustomOrder`, which stops ensemble changes overwriting it. `isLoadingPresetOrder` marks a preset load so it doesn't count as customising (without it the first ensemble switch locked the list) |
+| `customInstrumentOrder` | the order detection uses: always the current ensemble's (`InstrumentOrders.getOrder`), reloaded on every ensemble change. Settings ▸ Renamer saves an edit per ensemble (`InstrumentOrders.saveOrder`), so it comes back whenever that ensemble does, after quitting too. (The old `hasCustomOrder` flag, which kept an unsaved edit across ensemble changes, is gone.) `isLoadingPresetOrder` keeps an ensemble change from rescanning twice |
 | `prefixSeparator` | persisted in `UserDefaults` (`prefixSeparator`) in `didSet` — **tests must never set it** |
 | `partFolderMode`, `numberedFolders`, `folderOverrides` | "Sort into folders" — see below |
 | `manualOverrides: [String: Int]` | file name → number given by hand |
@@ -129,7 +129,7 @@ Takes a folder or individual PDFs (`loadedFiles`), a shared `baseFileName` and a
 
 ## Settings ▸ Renamer — `PreferencesView`
 
-Ensemble type; the instrument order editor (drag to reorder, add, Reset to Default; committed by Save); the suffix separator (`filenameSeparator`, Split and Bulk Rename); the prefix separator (Score Order Sorter); "Search subfolders recursively" (`renamerSearchRecursively`); "Sort parts into folders" and "Number section folders".
+Ensemble type; the instrument order editor (drag to reorder, add; **Save** writes it to `instrument-orders.json` for that ensemble through `InstrumentOrders.saveOrder` → `writeOrder(_:for:to:)`, which keeps the rest of the file and refuses to write over one it can't read; **Reset to Default** loads the built-in order, `defaultOrder(for:)`, which Save then keeps). Until this change the order lived only in memory and was lost on quit; the suffix separator (`filenameSeparator`, Split and Bulk Rename); the prefix separator (Score Order Sorter); "Search subfolders recursively" (`renamerSearchRecursively`); "Sort parts into folders" and "Number section folders".
 
 ## Sort into folders
 

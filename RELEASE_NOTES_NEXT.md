@@ -15,8 +15,9 @@ _Draft for the next release after 1.11.0. Keep adding to this as more changes la
 
 ## 🏷️ Rename Files
 
+- **The instrument order you set in Settings ▸ Renamer is now saved.** It used to be forgotten when you quit ScoreSort. Each ensemble keeps its own order, and **Reset to Default** brings back the built-in one (press Save to keep it).
 - **More instruments recognised in score order**: Contra-alto Clarinet, Flugelhorn, Sousaphone, Bass Guitar, Synthesizer, Vocal and Choir (now in band and orchestra order, not just jazz), flex-band parts (Part 1 to Part 5), and Conductor, which is numbered 00 like the score.
-- **Your own instrument order survives updates.** If you've edited ScoreSort's instrument order file, new instruments are now added into your order instead of replacing it with the built-in one.
+- **Your own instrument order survives updates.** New instruments are now added into your order instead of replacing it with the built-in one.
 - **Undo Rename.** Renamed a folder of parts and wish you hadn't? **Undo Rename** on the finished screen (or **Actions ▸ Undo Last Rename…**) puts every file back under its old name and removes any section folders the rename made. It works for a whole batch of folders, for Bulk Rename, and after quitting ScoreSort. Files you've moved or renamed since are left alone and listed.
 
 ## 🔗 Combine PDFs

@@ -45,15 +45,16 @@ struct RenamerEnsembleTests {
         }
     }
 
-    /// The flag still has its original job: an order the user edited themselves survives an
-    /// ensemble change rather than being silently replaced.
-    @Test func aUserEditedOrderIsNotOverwritten() {
+    /// Orders are saved per ensemble now (`InstrumentOrders.saveOrder`), so switching ensemble
+    /// always brings in that ensemble's own order; an unsaved edit doesn't follow you to another
+    /// ensemble any more (it used to, and was lost on quit anyway).
+    @Test func switchingEnsembleBringsItsOwnOrder() {
         let manager = RenamerManager()
         manager.partFolderMode = .off   // not the user's Settings default
         manager.ensembleType = .orchestra
-        manager.customInstrumentOrder = ["tuba", "piccolo"]      // as if edited in Preferences
+        manager.customInstrumentOrder = ["tuba", "piccolo"]      // an edit that wasn't saved
         manager.ensembleType = .band
-        #expect(manager.customInstrumentOrder == ["tuba", "piccolo"])
+        #expect(manager.customInstrumentOrder == InstrumentOrders.getOrder(for: .band))
     }
 }
 

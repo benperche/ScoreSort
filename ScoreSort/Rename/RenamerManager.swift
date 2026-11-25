@@ -24,15 +24,14 @@ class RenamerManager: ObservableObject {
     @Published private(set) var excludedNames: Set<String> = []
     @Published var ensembleType: EnsembleType = .band {
         didSet {
-            if !hasCustomOrder {
-                // Flagged, because the assignment below lands in customInstrumentOrder's own
-                // didSet. Without this it set hasCustomOrder itself, so the *first* ensemble
-                // switch locked the list: every switch after it updated the picker while
-                // detection carried on using whichever order had loaded first.
-                isLoadingPresetOrder = true
-                customInstrumentOrder = InstrumentOrders.getOrder(for: ensembleType)
-                isLoadingPresetOrder = false
-            }
+            // Each ensemble's order — including one edited and saved in Settings ▸ Renamer
+            // (`InstrumentOrders.saveOrder`) — comes from InstrumentOrders, so switching
+            // ensemble always brings in that ensemble's own order. (An edit used to live only
+            // here, so it was kept across switches and lost on quit.) Flagged, because the
+            // assignment lands in customInstrumentOrder's didSet, which would rescan twice.
+            isLoadingPresetOrder = true
+            customInstrumentOrder = InstrumentOrders.getOrder(for: ensembleType)
+            isLoadingPresetOrder = false
             if hasContent {
                 scanFolder()
             }
@@ -44,7 +43,6 @@ class RenamerManager: ObservableObject {
             // newly chosen ensemble is not, and the rescan is left to ensembleType's didSet so
             // one ensemble change doesn't scan the folder twice.
             guard !isLoadingPresetOrder else { return }
-            hasCustomOrder = true
             if hasContent {
                 scanFolder()
             }
@@ -81,7 +79,6 @@ class RenamerManager: ObservableObject {
     /// True when there is either a folder loaded or direct files loaded.
     var hasContent: Bool { folderURL != nil || !directFiles.isEmpty }
 
-    private var hasCustomOrder = false
     /// True only while an ensemble's preset order is being loaded into `customInstrumentOrder`.
     private var isLoadingPresetOrder = false
     var manualOverrides: [String: Int] = [:]
@@ -453,6 +450,54 @@ struct InstrumentOrders {
     static var band:      [String] { loaded["band"]      ?? bandDefault      }
     static var jazz:      [String] { loaded["jazz"]      ?? jazzDefault      }
     static var orchestra: [String] { loaded["orchestra"] ?? orchestraDefault }
+
+    /// The ensemble's key in the file.
+    static func key(for type: EnsembleType) -> String {
+        switch type {
+        case .band:      return "band"
+        case .jazz:      return "jazz"
+        case .orchestra: return "orchestra"
+        }
+    }
+
+    /// The built-in order for `type` (Settings ▸ Renamer's Reset to Default).
+    static func defaultOrder(for type: EnsembleType) -> [String] { defaultOrders[key(for: type)] ?? [] }
+
+    /// Saves `order` as `type`'s order — Settings ▸ Renamer's Save — and uses it from now on.
+    /// Returns why, if it couldn't be saved (it's still used until ScoreSort quits).
+    @discardableResult
+    static func saveOrder(_ order: [String], for type: EnsembleType) -> String? {
+        loaded[key(for: type)] = order
+        guard let url = fileURL else { return "ScoreSort couldn't find its Application Support folder." }
+        return writeOrder(order, for: type, to: url)
+    }
+
+    /// Writes `order` as `type`'s order into the file at `url`, keeping everything else in it
+    /// (the other ensembles, `_version`, the `_base_…` entries the update merge uses). A missing
+    /// file is created as current; one that exists but can't be read is left alone. Returns why,
+    /// if it couldn't be written.
+    static func writeOrder(_ order: [String], for type: EnsembleType, to url: URL) -> String? {
+        var file: [String: [String]]
+        if FileManager.default.fileExists(atPath: url.path) {
+            guard let data = try? Data(contentsOf: url),
+                  let dict = try? JSONDecoder().decode([String: [String]].self, from: data) else {
+                return "The instrument order file at \(url.path) can't be read, so it was left alone. Fix or remove it, then save again."
+            }
+            file = dict
+        } else {
+            file = updated([:])
+        }
+        file[key(for: type)] = order
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        do {
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try encoder.encode(file).write(to: url, options: .atomic)
+            return nil
+        } catch {
+            return saveFailureMessage(for: error, at: url)
+        }
+    }
 
     static func getOrder(for type: EnsembleType) -> [String] {
         switch type {

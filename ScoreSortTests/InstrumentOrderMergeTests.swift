@@ -109,3 +109,53 @@ struct NewInstrumentNamesTests {
         }
     }
 }
+
+@MainActor
+@Suite("Instrument orders: saving from Settings")
+struct InstrumentOrderSavingTests {
+
+    @Test("saving into a missing file creates a current one with this ensemble's order")
+    func savesNewFile() throws {
+        let url = temporaryFolder("orders").appendingPathComponent("instrument-orders.json")
+        #expect(InstrumentOrders.writeOrder(["score", "tuba", "flute"], for: .band, to: url) == nil)
+        let file = try JSONDecoder().decode([String: [String]].self, from: Data(contentsOf: url))
+        #expect(file["band"] == ["score", "tuba", "flute"])
+        #expect(file["jazz"] == InstrumentOrders.defaultOrders["jazz"])
+        #expect(file["_version"] == [String(InstrumentOrders.defaultsVersion)])
+        #expect(file["_base_band"] == InstrumentOrders.defaultOrders["band"])
+        // Current, so launching leaves it as it is; and an edited order is kept by a later update.
+        #expect(InstrumentOrders.prepareFile(at: url) == nil)
+        #expect(try JSONDecoder().decode([String: [String]].self, from: Data(contentsOf: url))["band"] == ["score", "tuba", "flute"])
+        let later = try #require(InstrumentOrders.updated(file)["band"])
+        #expect(later.contains("conductor"))
+        #expect(later.firstIndex(of: "tuba")! < later.firstIndex(of: "flute")!)   // the saved order kept
+    }
+
+    @Test("saving one ensemble keeps everything else in the file")
+    func keepsTheRest() throws {
+        let url = temporaryFolder("orders").appendingPathComponent("instrument-orders.json")
+        let existing: [String: [String]] = ["_version": ["9"], "band": ["a"], "jazz": ["b"], "orchestra": ["c"], "_base_jazz": ["x"]]
+        try JSONEncoder().encode(existing).write(to: url)
+        #expect(InstrumentOrders.writeOrder(["d", "e"], for: .jazz, to: url) == nil)
+        let file = try JSONDecoder().decode([String: [String]].self, from: Data(contentsOf: url))
+        #expect(file["jazz"] == ["d", "e"])
+        #expect(file["band"] == ["a"] && file["orchestra"] == ["c"])
+        #expect(file["_version"] == ["9"] && file["_base_jazz"] == ["x"])
+    }
+
+    @Test("a file that can't be read is left alone, and the reason given")
+    func unreadableLeftAlone() throws {
+        let url = temporaryFolder("orders").appendingPathComponent("instrument-orders.json")
+        let broken = Data("{ not json".utf8)
+        try broken.write(to: url)
+        let problem = InstrumentOrders.writeOrder(["a"], for: .band, to: url)
+        #expect(problem?.contains("can't be read") == true)
+        #expect(try Data(contentsOf: url) == broken)
+    }
+
+    @Test("Reset to Default is the built-in order")
+    func resetIsBuiltIn() {
+        #expect(InstrumentOrders.defaultOrder(for: .orchestra) == InstrumentOrders.defaultOrders["orchestra"])
+        #expect(InstrumentOrders.defaultOrder(for: .band).first == "score")
+    }
+}

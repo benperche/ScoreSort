@@ -1215,7 +1215,8 @@ struct PreferencesView: View {
                                 .font(.headline)
                             Spacer()
                             Button("Reset to Default") {
-                                editableOrder = InstrumentOrders.getOrder(for: ensembleType)
+                                // The built-in order (not the saved one); Save to keep it.
+                                editableOrder = InstrumentOrders.defaultOrder(for: ensembleType)
                             }
                             .font(.caption)
                         }
@@ -1370,6 +1371,11 @@ struct PreferencesView: View {
                     .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button("Save") {
+                    // Saved to instrument-orders.json for this ensemble, so it lasts beyond
+                    // quitting; it used to live only in memory.
+                    if let problem = InstrumentOrders.saveOrder(editableOrder, for: ensembleType) {
+                        showNSAlert(title: "Couldn\u{2019}t Save the Instrument Order", message: problem, isError: true)
+                    }
                     instrumentOrder = editableOrder
                     dismiss()
                 }
